@@ -1,0 +1,257 @@
+"use client";
+
+/**
+ * AI Asset Generator: semantic inputs (character/pose/expression/scene) →
+ * real generation via the server API → result lands in the library only when
+ * the creator accepts it. Generation never touches the canvas directly.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  callGenerateApi,
+  recordFailedGeneration,
+  storeGeneratedAsset,
+  type GenerateApiResult,
+} from "@/ai/clientGeneration";
+import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
+import type { AssetCategory } from "@/domain/types";
+import { useEditorStore } from "@/editor/store";
+import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
+
+interface ProviderInfo {
+  configured: boolean;
+  capabilities?: { referenceImage?: boolean };
+}
+
+const TYPE_LABEL: Record<GeneratorRequest["assetType"], string> = {
+  character: "Character reference",
+  "character-pose": "Character pose",
+  "character-expression": "Character expression",
+  background: "Background",
+  prop: "Prop",
+};
+
+export function GeneratorDialog() {
+  const request = useUiStore((s) => s.generator);
+  const close = useUiStore((s) => s.closeGenerator);
+  if (!request) return null;
+  return <GeneratorDialogInner key={`${request.assetType}-${request.characterId ?? ""}`} request={request} onClose={close} />;
+}
+
+function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest; onClose: () => void }) {
+  const doc = useEditorStore((s) => s.doc);
+  const [provider, setProvider] = useState<ProviderInfo | null>(null);
+  const [description, setDescription] = useState("");
+  const [pose, setPose] = useState(request.prefill?.pose ?? "");
+  const [expression, setExpression] = useState(request.prefill?.expression ?? "");
+  const [phase, setPhase] = useState<"idle" | "generating" | "done">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<GenerateApiResult | null>(null);
+
+  useEffect(() => {
+    fetch("/api/provider/status")
+      .then((r) => r.json())
+      .then(setProvider)
+      .catch(() => setProvider({ configured: false }));
+  }, []);
+
+  const character = request.characterId && doc ? doc.characters[request.characterId] : undefined;
+  const referenceAsset = character?.referenceAssetId && doc ? doc.assets[character.referenceAssetId] : undefined;
+  const isCharacterType = request.assetType.startsWith("character");
+  const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
+
+  const prompt = useMemo(
+    () =>
+      buildAssetPrompt({
+        assetType: request.assetType,
+        description: description || undefined,
+        characterName: character?.name,
+        characterDescription: character?.description,
+        pose: pose || undefined,
+        expression: expression || undefined,
+        hasReference: canUseReference,
+      }),
+    [request.assetType, description, character, pose, expression, canUseReference],
+  );
+
+  const generate = async () => {
+    setPhase("generating");
+    setError(null);
+    try {
+      const output = await callGenerateApi({
+        assetType: request.assetType,
+        prompt,
+        size: defaultAspect(request.assetType),
+        referenceUrls: canUseReference && referenceAsset ? [referenceAsset.storageUrl] : undefined,
+      });
+      setResult(output);
+      setPhase("done");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Generation failed";
+      setError(message);
+      setPhase("idle");
+      recordFailedGeneration(request.assetType, prompt, message);
+    }
+  };
+
+  const addToLibrary = async () => {
+    if (!result || !doc) return;
+    const category: AssetCategory = isCharacterType ? "character" : (request.assetType as AssetCategory);
+    await storeGeneratedAsset({
+      result,
+      assetType: request.assetType,
+      category,
+      name: isCharacterType
+        ? `${character?.name ?? "Character"} ${pose || expression || "reference"}`.trim()
+        : description.slice(0, 40) || TYPE_LABEL[request.assetType],
+      prompt,
+      metadata: {
+        characterId: request.characterId,
+        pose: pose || undefined,
+        expression: expression || undefined,
+        referenceAssetIds: result.referenceUsed && referenceAsset ? [referenceAsset.id] : undefined,
+      },
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
+      <div
+        className="max-h-[90vh] w-[460px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-1 font-semibold text-zinc-100">AI Asset Generator</h2>
+        <p className="mb-3 text-xs text-zinc-500">
+          {TYPE_LABEL[request.assetType]}
+          {character ? ` · ${character.name}` : ""}
+        </p>
+
+        {provider && !provider.configured && (
+          <p className="mb-3 rounded border border-amber-900 bg-amber-950/50 p-2 text-xs text-amber-300">
+            No image provider is configured. Set the server environment variables (see AI Settings) to enable real
+            generation.
+          </p>
+        )}
+
+        {phase !== "done" && (
+          <>
+            {request.assetType === "character-pose" && (
+              <Field label="Pose" value={pose} onChange={setPose} placeholder="running" />
+            )}
+            {request.assetType === "character-expression" && (
+              <Field label="Expression" value={expression} onChange={setExpression} placeholder="crying" />
+            )}
+            {request.assetType === "character-pose" && (
+              <Field label="Expression (optional)" value={expression} onChange={setExpression} placeholder="happy" />
+            )}
+            <label className="mb-1 block text-xs text-zinc-400">
+              {isCharacterType ? "Extra instruction (optional)" : "Description"}
+            </label>
+            <textarea
+              className="mb-3 h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2 text-sm"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={
+                request.assetType === "background"
+                  ? "Empty Japanese high school classroom, afternoon sunlight"
+                  : request.assetType === "prop"
+                    ? "Japanese school bag, isolated object"
+                    : "Running toward camera while carrying a school bag"
+              }
+            />
+
+            {isCharacterType && (
+              <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-500">
+                {canUseReference
+                  ? "The character reference image will be sent to the provider to help preserve identity. Consistency is provider-dependent and not guaranteed."
+                  : referenceAsset
+                    ? "The configured provider does not support reference images — identity will rely on the text description only."
+                    : "No reference image yet — the first generated image becomes this character's reference."}
+              </p>
+            )}
+
+            <details className="mb-3 text-[11px] text-zinc-500">
+              <summary className="cursor-pointer">Prompt preview</summary>
+              <p className="mt-1 rounded bg-zinc-950 p-2 leading-4">{prompt}</p>
+            </details>
+
+            {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <button className="rounded px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+                disabled={phase === "generating" || provider?.configured === false}
+                onClick={generate}
+              >
+                {phase === "generating" ? "Generating asset…" : "Generate"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "done" && result && (
+          <div>
+            <p className="mb-2 text-xs text-zinc-400">Generated result</p>
+            <div className="mb-3 grid place-items-center rounded border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px] p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={result.url} alt="Generated asset" className="max-h-[360px] rounded" />
+            </div>
+            {result.referenceUsed && (
+              <p className="mb-2 text-[11px] text-zinc-500">Generated with the character reference image.</p>
+            )}
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200"
+                onClick={() => {
+                  setResult(null);
+                  setPhase("idle");
+                }}
+              >
+                Discard
+              </button>
+              <button
+                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 hover:bg-zinc-700"
+                onClick={() => {
+                  setResult(null);
+                  generate();
+                }}
+              >
+                Regenerate
+              </button>
+              <button className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500" onClick={addToLibrary}>
+                Add to Library
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="mb-3">
+      <label className="mb-1 block text-xs text-zinc-400">{label}</label>
+      <input
+        className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
