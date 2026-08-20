@@ -33,6 +33,15 @@ Loose `.md` files require output-file-tracing configuration to survive serverles
 ## D11 — Face Focus is metadata-gated, Upper Body is heuristic
 Upper-body framing uses an annotated region when present, else a documented heuristic (top ~55%) — approximate framing is explicitly acceptable. Face framing without real region metadata would be fake face detection, so the button is disabled until an asset carries a `face` focus region.
 
+## D19 — Custom API is the universal provider type; presets are prefills
+Provider dropdowns no longer define the capability boundary. Users describe an arbitrary AI API declaratively — endpoint, HTTP method, auth mode (none/bearer/named header), extra headers, a JSON request template with safe `{{variable}}` substitution (structured injection for exact-match placeholders, string interpolation otherwise, no evaluation of any kind), a limited property-path response mapping (`data.images[0].url`), reference-image mode (url/base64 into the template), and sync or submit-and-poll execution. Presets ("OpenAI-style images", "Anthropic-style messages") only prefill these editable fields. No user code is ever accepted — declarative data only, validated with zod at save and again at execution. Verified by an E2E that connects two API shapes that exist nowhere in the source.
+
+## D20 — Custom API test performs one real minimal generation
+Arbitrary APIs have no universal cheap status endpoint, so Test Connection for a custom image provider executes one small real request and reports whether the mapping found an image at the configured path (the UI states the cost). Agent custom tests use a one-line completion. Known-preset providers keep their cheap model/status probes.
+
+## Deferred from the universal-provider spec (recorded, not silent)
+Multipart-file reference mode (URL/base64 cover current targets); per-header "secret" flags (the entire config, headers included, already lives in the encrypted cookie; the API key remains the only value with dedicated secret handling); multiple saved provider profiles per capability (cookie-per-capability keeps exactly one active config; a profile library needs vault storage that shouldn't be faked with cookies); GET-with-query-template requests.
+
 ## D17 — BYOK harness: users bring their own providers (supersedes D09's env-only stance)
 Manga Studio is a harness whose execution models are user-configurable, OpenCode-style. Users connect their own agent LLM and image provider in AI Settings — no Vercel edits, no redeploys. D09's concern (no safe serverless session state) is resolved with encrypted HttpOnly cookies: AES-256-GCM under a deployment-owned `APP_ENCRYPTION_KEY`, so the "session store" is the cookie itself and every serverless instance can decrypt it statelessly. Env vars remain an optional operator fallback that user sessions override.
 

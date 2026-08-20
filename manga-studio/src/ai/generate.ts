@@ -49,9 +49,9 @@ export async function generateAssetImage(
 
   // References are only sent when the provider actually supports them —
   // the UI must never pretend identity preservation happens when it can't.
-  const referenceImages = provider.capabilities.referenceImage
-    ? await loadReferences(input.referenceUrls ?? [])
-    : [];
+  const wantsReferences = provider.capabilities.referenceImage;
+  const validatedUrls = wantsReferences ? (input.referenceUrls ?? []).filter(isAllowedReferenceUrl) : [];
+  const referenceImages = wantsReferences ? await loadReferences(input.referenceUrls ?? []) : [];
 
   const size = SIZE_MAP[input.size ?? "portrait"];
   const result = await provider.generateImage({
@@ -61,6 +61,7 @@ export async function generateAssetImage(
     width: size.width,
     height: size.height,
     referenceImages,
+    referenceUrls: validatedUrls,
   });
 
   if (result.data.length === 0) throw new ProviderError("Invalid image response");

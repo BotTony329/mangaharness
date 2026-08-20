@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createImageProvider } from "@/ai/providerRegistry";
 import { createAgentProvider } from "@/agent/providers/registry";
+import { buildRequestPreview } from "@/server/customApi/preview";
 import { resolveProvider } from "@/server/providerSession";
 
 export const runtime = "nodejs";
@@ -24,14 +25,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "Not configured" }, { status: 503 });
   }
 
+  // Custom providers get a redacted request preview either way — most useful
+  // exactly when the test fails and the user is debugging a new API.
+  const preview = buildRequestPreview(resolved.config);
+
   try {
     const status =
       kind === "agent"
         ? await createAgentProvider(resolved.config).testConnection()
         : await createImageProvider(resolved.config).testConnection();
-    return NextResponse.json(status.ok ? { ok: true, status: "Connected" } : { ok: false, error: status.message ?? "Connection failed" });
+    return NextResponse.json(
+      status.ok
+        ? { ok: true, status: "Connected", detail: status.message, preview }
+        : { ok: false, error: status.message ?? "Connection failed", preview },
+    );
   } catch (error) {
     const message = error instanceof Error && "safeMessage" in error ? (error as { safeMessage: string }).safeMessage : "Endpoint unreachable";
-    return NextResponse.json({ ok: false, error: message });
+    return NextResponse.json({ ok: false, error: message, preview });
   }
 }

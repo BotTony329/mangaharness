@@ -5,12 +5,16 @@
  */
 
 import type { ProviderConfig } from "@/server/providerSession";
+import { createCustomImageProvider } from "./providers/customImage";
 import { createGeminiProvider } from "./providers/gemini";
 import { createGenericRestProvider } from "./providers/genericRest";
 import type { ImageGenerationProvider } from "./types";
 
 export function createImageProvider(config: ProviderConfig): ImageGenerationProvider {
   switch (config.providerType) {
+    case "custom":
+      // The universal type: a declarative API description, not a vendor.
+      return createCustomImageProvider(config);
     case "gemini":
       return createGeminiProvider(config);
     case "openai-compatible":
