@@ -69,9 +69,12 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Local agent UI verification: passed. Selecting Panel 1 changed the visible scope control to `Auto · Selected Panel · Panel 1`; Current Page and Whole Project overrides were available; no Next.js overlay or browser page errors were present.
 - GitHub transparent-compositing code commit: `604b512` on `agent/transparent-asset-compositing` (pushed to `origin`; not merged to `main`).
 - GitHub agent-scope code commit: `48bdfa7` on `agent/agent-scope-character-resolution` (pushed to `origin`; not merged to `main`).
+- GitHub controlled-core refactor commit: `6b38072` on `refactor/controlled-core-architecture` (pushed to `origin`; not merged to `main`).
 - GitHub art-style-system code commit: `ec0b221` on `agent/project-art-style-system` (pushed to `origin`; not merged to `main`).
 - GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.
 - Production deployment: READY, `dpl_FV5u8P1nf7Y6MRgAogy2wbzfoRom` (`https://mangaharness.vercel.app`), deployed from the tested `604b512` feature commit.
+- Production controlled-core deployment: READY, `dpl_Bc8fvck6T5DchKh74u9KoHTtAEkZ` (`https://mangaharness.vercel.app`), deployed from tested commit `6b38072` in `iad1`.
+- Production controlled-core browser verification: passed. Home and `/api/provider/status` returned HTTP 200; the editor rendered meaningful controls with no framework overlay or page errors; storage remained configured as `vercel-blob`; the clean verification browser correctly reported no user BYOK provider. The deployment error-level log scan was clean.
 - Production agent-scope deployment: READY, `dpl_6njJayt3mrE4HseuMXa81RPebzMQ` (`https://mangaharness.vercel.app`), deployed from tested commit `48bdfa7` in `iad1`.
 - Production agent UI verification: passed. The live Manga Agent rendered `Auto · Current Page · Page 1`; selecting Panel 1 changed it to `Auto · Selected Panel · Panel 1`. The live page returned HTTP 200 with no framework overlay or browser errors.
 - Production agent post-deploy error scan: clean; no error-level logs found. `/api/provider/status` confirmed Vercel Blob remains configured and correctly reported no BYOK model in the clean verification browser.
