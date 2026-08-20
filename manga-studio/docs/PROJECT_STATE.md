@@ -6,7 +6,7 @@ Last updated: 2026-08-20 (MVP integration and UX stabilization pass)
 
 | Area | Status | Verified reality |
 |---|---|---|
-| Image generation | PARTIAL | The previously failing production request reached provider result handling, then failed while persisting the returned image because Vercel Blob was not connected. Code now emits request-scoped stage traces; post-fix production generation still requires a fresh browser acceptance run. |
+| Image generation | PARTIAL | The previously failing production request reached provider result handling, then failed while persisting the returned image because Vercel Blob was not connected. The fixed production handler emits request-scoped stage traces and Blob is connected; a fresh real BYOK generation still requires the user's configured browser session. |
 | Gemini adapter | WORKING AT ADAPTER/UNIT LEVEL | `gemini-3.1-flash-lite-image` is a current stable Google image-generation/editing model. Adapter tests cover success, reference input, malformed/missing images, HTTP 400/401/403/404/429/5xx, and timeout. The prior production exception occurred after provider invocation, not in Gemini payload construction. |
 | BYOK credential storage | CONFIGURED | User credentials remain encrypted in HttpOnly cookies. `APP_ENCRYPTION_KEY` is an operator infrastructure secret configured once in Vercel for Preview and Production; users do not configure it. Trace tests verify successful retrieval/decryption and the missing-key failure path without logging secrets. |
 | Character reference persistence | PARTIAL | Accepted uploads and accepted generated results become Character assets; the first character asset becomes the reference. Project JSON persists in IndexedDB. Production refresh verification remains to be rerun after deployment. |
@@ -39,4 +39,8 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Tests: 17 files, 129 tests passed.
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (page render, no error overlay/console errors, provider gate, reference preview/replace/remove).
-- Production deployment: pending.
+- GitHub code commit: `2293d1a` on `agent/stabilize-generation-and-character-ux`.
+- Production deployment: READY, `dpl_6xzUenPNC6f8VkNY3un3eLPZLzwH` (`https://mangaharness.vercel.app`).
+- Production status: HTTP 200; `storage.configured: true`; backend `vercel-blob`; no new serverless errors in the post-deploy scan.
+- Production trace smoke test: request `77e6fab5-da18-4fe0-b4a4-526b4a8d9bd1` logged request parsing/validation and credential lookup safely, then returned the expected 503 because the CLI request intentionally had no BYOK cookie.
+- Real production generation/persistence/derived-asset test: pending a run from the user's browser session with an Image Provider connected in AI Settings.
