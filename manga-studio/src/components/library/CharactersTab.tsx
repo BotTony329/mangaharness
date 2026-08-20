@@ -5,13 +5,18 @@
  * assets browsable by pose / expression / view — not a folder of files.
  */
 
-import { useRef, useState } from "react";
-import { addCharacter, setCharacterReference } from "@/domain/libraryOps";
+import { useEffect, useRef, useState } from "react";
+import { addCharacter, removeCharacter, setCharacterReference } from "@/domain/libraryOps";
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { uploadImageFile } from "./uploadAsset";
+import {
+  inspectReferenceImage,
+  REFERENCE_ACCEPT,
+  type ReferenceImageSelection,
+} from "./referenceImage";
 
 export function CharactersTab() {
   const doc = useEditorStore((s) => s.doc);
@@ -128,21 +133,72 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [reference, setReference] = useState<ReferenceImageSelection | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<{
+    configured: boolean;
+    storage?: { configured?: boolean };
+  } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const openGenerator = useUiStore((s) => s.openGenerator);
+
+  useEffect(() => {
+    fetch("/api/provider/status")
+      .then((response) => response.json())
+      .then(setProviderStatus)
+      .catch(() => setProviderStatus({ configured: false }));
+  }, []);
+
+  useEffect(() => () => {
+    if (reference) URL.revokeObjectURL(reference.previewUrl);
+  }, [reference]);
+
+  const chooseReference = async (file?: File) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const inspected = await inspectReferenceImage(file);
+      const previewUrl = URL.createObjectURL(file);
+      setReference((previous) => {
+        if (previous) URL.revokeObjectURL(previous.previewUrl);
+        return { ...inspected, previewUrl };
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Reference image could not be read.");
+    }
+  };
+
+  const removeReference = () => {
+    setReference((previous) => {
+      if (previous) URL.revokeObjectURL(previous.previewUrl);
+      return null;
+    });
+    if (fileInput.current) fileInput.current.value = "";
+  };
 
   const create = async (generateAfter: boolean) => {
     if (!name.trim()) {
       setError("Give the character a name");
       return;
     }
+    if (generateAfter && providerStatus?.configured !== true) {
+      onClose();
+      useUiStore.getState().openSettings();
+      return;
+    }
+    if (generateAfter && providerStatus?.storage?.configured === false) {
+      setError("Generation is unavailable until persistent asset storage is connected by the Manga Studio operator.");
+      return;
+    }
+    setIsBusy(true);
+    setError(null);
     let characterId = "";
     useEditorStore.getState().commit((d) => {
       const result = addCharacter(d, name.trim(), description.trim() || undefined);
       characterId = result.characterId;
       return result.doc;
     });
-    const referenceFile = fileInput.current?.files?.[0];
+    const referenceFile = reference?.file;
     if (referenceFile) {
       try {
         const assetId = await uploadImageFile(referenceFile, "character", {
@@ -151,13 +207,17 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         });
         useEditorStore.getState().commit((d) => setCharacterReference(d, characterId, assetId));
       } catch (e) {
+        useEditorStore.getState().commit((d) => removeCharacter(d, characterId));
         setError(e instanceof Error ? e.message : "Reference upload failed");
+        setIsBusy(false);
         return;
       }
     }
     onClose();
     if (generateAfter) openGenerator({ assetType: "character", characterId });
   };
+
+  const generationUnavailable = providerStatus?.configured === false || providerStatus?.storage?.configured === false;
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
@@ -182,24 +242,83 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
           placeholder="Japanese high school girl, short black hair, winter school uniform, manga style."
         />
         <label className="mb-1 block text-xs text-zinc-400">Reference image (optional)</label>
-        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="mb-3 w-full text-xs" />
+        <input
+          ref={fileInput}
+          type="file"
+          accept={REFERENCE_ACCEPT.join(",")}
+          className="hidden"
+          onChange={(event) => chooseReference(event.target.files?.[0])}
+        />
+        {reference ? (
+          <div className="mb-3 rounded-md border border-zinc-700 bg-zinc-950 p-2">
+            <div className="flex gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={reference.previewUrl} alt="Character reference preview" className="h-24 w-24 rounded object-cover" />
+              <div className="min-w-0 flex-1 text-xs">
+                <p className="truncate font-medium text-zinc-200">{reference.file.name}</p>
+                <p className="mt-1 text-zinc-500">{reference.width} × {reference.height}px</p>
+                <p className="text-zinc-500">{(reference.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="mt-3 flex gap-2">
+                  <button className="rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800" onClick={() => fileInput.current?.click()}>
+                    Replace
+                  </button>
+                  <button className="rounded px-2 py-1 text-red-400 hover:bg-red-950/40" onClick={removeReference}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mb-3 flex w-full flex-col items-center rounded-md border border-dashed border-zinc-600 bg-zinc-950/60 px-4 py-5 text-center hover:border-indigo-500 hover:bg-indigo-950/20"
+            onClick={() => fileInput.current?.click()}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              chooseReference(event.dataTransfer.files[0]);
+            }}
+          >
+            <span className="text-sm text-zinc-300">Drop an image here</span>
+            <span className="mt-1 text-xs text-zinc-500">or click to browse · PNG, JPG, WEBP · max 10 MB</span>
+          </button>
+        )}
         {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2 text-xs">
-          <button className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200" onClick={onClose}>
+          <button disabled={isBusy} className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-40" onClick={onClose}>
             Cancel
           </button>
           <button
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 hover:bg-zinc-700"
+            disabled={isBusy}
             onClick={() => create(false)}
           >
-            Create
+            {isBusy ? "Creating…" : "Create"}
           </button>
-          <button
-            className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
-            onClick={() => create(true)}
-          >
-            Create &amp; Generate
-          </button>
+          {generationUnavailable ? (
+            <button
+              className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
+              onClick={() => {
+                if (providerStatus?.configured === false) {
+                  onClose();
+                  useUiStore.getState().openSettings();
+                } else {
+                  setError("Generation is unavailable until persistent asset storage is connected by the Manga Studio operator.");
+                }
+              }}
+            >
+              {providerStatus?.configured === false ? "Connect Image Model" : "Storage Required"}
+            </button>
+          ) : (
+            <button
+              className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500 disabled:opacity-40"
+              disabled={isBusy || providerStatus === null}
+              onClick={() => create(true)}
+            >
+              Create &amp; Generate
+            </button>
+          )}
         </div>
       </div>
     </div>

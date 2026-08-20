@@ -12,6 +12,9 @@ export type GeneratedAssetType =
   | "background"
   | "prop";
 
+export type GenerationTraceDetails = Record<string, string | number | boolean | undefined>;
+export type GenerationTrace = (stage: string, details?: GenerationTraceDetails) => void;
+
 export interface ImageGenerationRequest {
   prompt: string;
   negativePrompt?: string;
@@ -22,6 +25,8 @@ export interface ImageGenerationRequest {
   referenceImages?: { mimeType: string; data: Buffer }[];
   /** The validated storage URLs of those references (custom APIs in URL mode). */
   referenceUrls?: string[];
+  /** Server-only observability hook. It is never serialized or exposed to providers. */
+  trace?: GenerationTrace;
 }
 
 export interface ImageGenerationResult {
@@ -55,10 +60,16 @@ export interface ImageGenerationProvider {
 export class ProviderError extends Error {
   readonly safeMessage: string;
   readonly status: number;
+  readonly details?: Record<string, string | number | boolean>;
 
-  constructor(safeMessage: string, status = 502) {
+  constructor(
+    safeMessage: string,
+    status = 502,
+    details?: Record<string, string | number | boolean>,
+  ) {
     super(safeMessage);
     this.safeMessage = safeMessage;
     this.status = status;
+    this.details = details;
   }
 }

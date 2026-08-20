@@ -10,7 +10,7 @@ import type { ProviderConfig } from "@/server/providerSession";
 import { readLocalObject, putObject } from "@/storage/objectStore";
 import { createImageProvider } from "./providerRegistry";
 import { isAllowedReferenceUrl } from "./security";
-import { ProviderError, type GeneratedAssetType } from "./types";
+import { ProviderError, type GeneratedAssetType, type GenerationTrace } from "./types";
 
 export const generateRequestSchema = z.object({
   assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop"]),
@@ -41,19 +41,30 @@ const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 export async function generateAssetImage(
   input: GenerateRequestInput,
   config: ProviderConfig | null,
+  trace?: GenerationTrace,
 ): Promise<GenerateResult> {
   if (!config) {
     throw new ProviderError("No image provider connected. Open AI Settings to add one.", 503);
   }
+  trace?.("adapter_construction_start", { providerType: config.providerType });
   const provider = createImageProvider(config);
+  trace?.("adapter_created", { provider: provider.id, referenceImage: provider.capabilities.referenceImage });
 
   // References are only sent when the provider actually supports them —
   // the UI must never pretend identity preservation happens when it can't.
   const wantsReferences = provider.capabilities.referenceImage;
   const validatedUrls = wantsReferences ? (input.referenceUrls ?? []).filter(isAllowedReferenceUrl) : [];
+  trace?.("reference_processing_start", { requested: input.referenceUrls?.length ?? 0, supported: wantsReferences });
   const referenceImages = wantsReferences ? await loadReferences(input.referenceUrls ?? []) : [];
+  trace?.("reference_processing_complete", { loaded: referenceImages.length });
 
   const size = SIZE_MAP[input.size ?? "portrait"];
+  trace?.("normalized_request_constructed", {
+    assetType: input.assetType,
+    references: referenceImages.length,
+    width: size.width,
+    height: size.height,
+  });
   const result = await provider.generateImage({
     prompt: input.prompt,
     negativePrompt: input.negativePrompt,
@@ -62,12 +73,28 @@ export async function generateAssetImage(
     height: size.height,
     referenceImages,
     referenceUrls: validatedUrls,
+    trace,
   });
 
   if (result.data.length === 0) throw new ProviderError("Invalid image response");
+  trace?.("provider_result_normalized", { mimeType: result.mimeType, bytes: result.data.length });
 
   const extension = result.mimeType === "image/jpeg" ? "jpg" : result.mimeType === "image/webp" ? "webp" : "png";
-  const stored = await putObject(`generated/${crypto.randomUUID()}.${extension}`, result.data, result.mimeType);
+  trace?.("asset_persistence_start", { backend: process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local" });
+  let stored;
+  try {
+    stored = await putObject(`generated/${crypto.randomUUID()}.${extension}`, result.data, result.mimeType);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Persistent storage is not configured")) {
+      throw new ProviderError(
+        "The image provider returned an image, but persistent asset storage is not configured.",
+        503,
+        { stage: "asset_persistence", provider: provider.id, model: provider.model },
+      );
+    }
+    throw error;
+  }
+  trace?.("asset_persisted", { backend: process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local" });
 
   return {
     url: stored.url,

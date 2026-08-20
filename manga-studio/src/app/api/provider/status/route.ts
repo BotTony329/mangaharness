@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     configured: image !== null,
     capabilities,
     storage: {
-      configured: true,
+      configured: isBlobConfigured() || !process.env.VERCEL,
       backend: isBlobConfigured() ? "vercel-blob" : "local-dev-files",
     },
   });

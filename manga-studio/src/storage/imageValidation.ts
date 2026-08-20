@@ -3,7 +3,7 @@
  * the file's magic bytes decide what it is.
  */
 
-export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export interface DetectedImage {
   mimeType: "image/png" | "image/jpeg" | "image/webp";

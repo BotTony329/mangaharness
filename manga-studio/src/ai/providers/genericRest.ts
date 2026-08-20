@@ -45,11 +45,16 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
         headers: { Authorization: `Bearer ${config.apiKey}` },
       });
       if (response.ok) return { ok: true };
-      return { ok: false, message: await safeErrorMessage(response) };
+      return { ok: false, message: await safeErrorMessage(response, config.apiKey) };
     },
 
     async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
       const size = request.width && request.height ? `${request.width}x${request.height}` : "1024x1024";
+      request.trace?.("outbound_request_start", {
+        provider: "generic-rest",
+        operation: "generate_image",
+        endpointPath: "/images/generations",
+      });
       const response = await boundedFetch(`${base}/images/generations`, {
         method: "POST",
         headers: {
@@ -64,12 +69,23 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
           response_format: "b64_json",
         }),
       });
+      request.trace?.("outbound_response_received", { provider: "generic-rest", httpStatus: response.status });
       if (!response.ok) {
-        throw new ProviderError(await safeErrorMessage(response), response.status === 401 ? 401 : 502);
+        throw new ProviderError(
+          await safeErrorMessage(response, config.apiKey),
+          response.status === 401 || response.status === 403 ? 401 : response.status === 429 ? 429 : 502,
+          {
+            provider: "OpenAI-compatible",
+            model: config.model || "default",
+            endpoint: "/images/generations",
+            httpStatus: response.status,
+          },
+        );
       }
       const body = (await response.json().catch(() => null)) as { data?: { b64_json?: string }[] } | null;
       const b64 = body?.data?.[0]?.b64_json;
       if (!b64) throw new ProviderError("Invalid image response from provider");
+      request.trace?.("provider_response_parsed", { provider: "generic-rest", imageFound: true });
       return { mimeType: "image/png", data: Buffer.from(b64, "base64") };
     },
   };
@@ -90,8 +106,10 @@ async function boundedFetch(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-async function safeErrorMessage(response: Response): Promise<string> {
+async function safeErrorMessage(response: Response, apiKey?: string): Promise<string> {
   if (response.status === 401 || response.status === 403) return "Authentication failed — check the API key";
   const text = await response.text().catch(() => "");
-  return `Provider error (HTTP ${response.status})${text ? `: ${redactSecrets(text).slice(0, 300)}` : ""}`;
+  const redacted = redactSecrets(text);
+  const scrubbed = apiKey && apiKey.length >= 4 ? redacted.split(apiKey).join("[redacted]") : redacted;
+  return `Provider error (HTTP ${response.status})${scrubbed ? `: ${scrubbed.slice(0, 300)}` : ""}`;
 }

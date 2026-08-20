@@ -86,6 +86,16 @@ export function addCharacter(
   return { doc: next, characterId: character.id };
 }
 
+export function removeCharacter(doc: ProjectDocument, characterId: ID): ProjectDocument {
+  const next = cloneDoc(doc);
+  const character = next.characters[characterId];
+  if (!character) return next;
+  for (const assetId of character.assetIds) delete next.assets[assetId];
+  delete next.characters[characterId];
+  touch(next);
+  return next;
+}
+
 export function setCharacterReference(doc: ProjectDocument, characterId: ID, assetId: ID): ProjectDocument {
   const next = cloneDoc(doc);
   const character = next.characters[characterId];

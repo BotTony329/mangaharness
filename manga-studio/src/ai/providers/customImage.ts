@@ -78,18 +78,28 @@ async function runGeneration(config: ProviderConfig, request: ImageGenerationReq
   const body = renderTemplate(parseTemplate(custom.requestTemplate, IMAGE_TEMPLATE_VARS), templateVars(config, request));
   const headers = buildHeaders(config, custom);
 
+  request.trace?.("outbound_request_start", {
+    provider: "custom",
+    operation: "generate_image",
+    endpointPath: "configured_endpoint",
+  });
   const response = await customFetch(config.baseUrl, {
     method: custom.method,
     headers,
     body: custom.method === "POST" ? JSON.stringify(body) : undefined,
   });
+  request.trace?.("outbound_response_received", { provider: "custom", httpStatus: response.status });
   if (!response.ok) throw await customErrorFrom(response, config.apiKey);
   const responseBody = await readJsonBounded(response);
 
   const resultValue =
-    custom.execution === "async" ? await pollForResult(config, responseBody) : getAtPath(responseBody, custom.response!.path);
+    custom.execution === "async"
+      ? await pollForResult(config, responseBody, request)
+      : getAtPath(responseBody, custom.response!.path);
 
-  return materializeImage(resultValue, custom.response!.type, custom.response!.path);
+  const result = await materializeImage(resultValue, custom.response!.type, custom.response!.path, request);
+  request.trace?.("provider_response_parsed", { provider: "custom", imageFound: true });
+  return result;
 }
 
 function templateVars(config: ProviderConfig, request: ImageGenerationRequest): Record<string, unknown> {
@@ -111,7 +121,11 @@ function templateVars(config: ProviderConfig, request: ImageGenerationRequest): 
   };
 }
 
-async function pollForResult(config: ProviderConfig, submitBody: unknown): Promise<unknown> {
+async function pollForResult(
+  config: ProviderConfig,
+  submitBody: unknown,
+  request: ImageGenerationRequest,
+): Promise<unknown> {
   const polling = config.custom!.polling!;
   const taskId = getAtPath(submitBody, polling.taskIdPath);
   if (taskId === undefined || taskId === null) {
@@ -123,7 +137,13 @@ async function pollForResult(config: ProviderConfig, submitBody: unknown): Promi
 
   while (Date.now() < deadline) {
     await sleep(polling.intervalMs);
+    request.trace?.("outbound_request_start", { provider: "custom", operation: "poll_generation" });
     const response = await customFetch(statusUrl, { method: "GET", headers });
+    request.trace?.("outbound_response_received", {
+      provider: "custom",
+      operation: "poll_generation",
+      httpStatus: response.status,
+    });
     if (!response.ok) throw await customErrorFrom(response, config.apiKey);
     const body = await readJsonBounded(response);
     const status = String(getAtPath(body, polling.statusPath) ?? "");
@@ -140,6 +160,7 @@ async function materializeImage(
   value: unknown,
   type: "url" | "base64",
   path: string,
+  request: ImageGenerationRequest,
 ): Promise<ImageGenerationResult> {
   if (typeof value !== "string" || value.length === 0) {
     throw new CustomApiError(`No image found at response path "${path}"`);
@@ -147,7 +168,13 @@ async function materializeImage(
 
   let data: Buffer;
   if (type === "url") {
+    request.trace?.("outbound_request_start", { provider: "custom", operation: "download_image" });
     const response = await customFetch(value, { method: "GET" });
+    request.trace?.("outbound_response_received", {
+      provider: "custom",
+      operation: "download_image",
+      httpStatus: response.status,
+    });
     if (!response.ok) throw new CustomApiError(`Could not download the generated image (HTTP ${response.status})`);
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > MAX_RESPONSE_BYTES) throw new CustomApiError("Generated image too large");

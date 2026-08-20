@@ -17,6 +17,26 @@ export interface GenerateApiResult {
   provider: string;
   model: string;
   referenceUsed: boolean;
+  requestId?: string;
+}
+
+export interface GenerationErrorDetails {
+  provider?: string;
+  model?: string;
+  endpoint?: string;
+  httpStatus?: number;
+  stage?: string;
+}
+
+export class GenerationApiError extends Error {
+  readonly requestId?: string;
+  readonly details?: GenerationErrorDetails;
+
+  constructor(message: string, requestId?: string, details?: GenerationErrorDetails) {
+    super(message);
+    this.requestId = requestId;
+    this.details = details;
+  }
 }
 
 export async function callGenerateApi(request: {
@@ -30,8 +50,12 @@ export async function callGenerateApi(request: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? "Generation failed");
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    requestId?: string;
+    details?: GenerationErrorDetails;
+  };
+  if (!response.ok) throw new GenerationApiError(body.error ?? "Generation failed", body.requestId, body.details);
   return body as GenerateApiResult;
 }
 

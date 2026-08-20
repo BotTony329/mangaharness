@@ -22,13 +22,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
   }
   if (file.size > MAX_UPLOAD_BYTES) {
-    return NextResponse.json({ error: "Image exceeds the 8 MB upload limit" }, { status: 413 });
+    return NextResponse.json({ error: "Image is too large. Maximum size: 10 MB." }, { status: 413 });
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const detected = detectImageType(bytes);
   if (!detected) {
-    return NextResponse.json({ error: "Only PNG, JPEG, and WebP images are supported" }, { status: 415 });
+    return NextResponse.json({ error: "Unsupported image format. Use PNG, JPG, or WEBP." }, { status: 415 });
   }
 
   try {

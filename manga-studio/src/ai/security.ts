@@ -3,7 +3,13 @@
  * (SSRF protection for configurable provider endpoints and reference fetches).
  */
 
-const SECRET_ENV_KEYS = ["GEMINI_API_KEY", "IMAGE_API_KEY", "AGENT_API_KEY", "BLOB_READ_WRITE_TOKEN"] as const;
+const SECRET_ENV_KEYS = [
+  "GEMINI_API_KEY",
+  "IMAGE_API_KEY",
+  "AGENT_API_KEY",
+  "BLOB_READ_WRITE_TOKEN",
+  "APP_ENCRYPTION_KEY",
+] as const;
 
 /**
  * Strip any configured secret value from text that could reach logs or the
@@ -19,6 +25,8 @@ export function redactSecrets(text: string): string {
   }
   // Belt and braces: redact bearer tokens and long key-looking strings.
   result = result.replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]");
+  result = result.replace(/(Authorization["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi, "$1[redacted]");
+  result = result.replace(/((?:x-api-key|x-goog-api-key)["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi, "$1[redacted]");
   result = result.replace(/(key=)[A-Za-z0-9_-]{16,}/g, "$1[redacted]");
   return result;
 }

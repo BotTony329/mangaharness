@@ -44,7 +44,7 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
     async testConnection(): Promise<ProviderStatus> {
       const response = await geminiFetch(config, `/v1beta/models/${config.model}`, { method: "GET" });
       if (response.ok) return { ok: true };
-      return { ok: false, message: await safeErrorMessage(response) };
+      return { ok: false, message: await safeErrorMessage(response, config.model, config.apiKey) };
     },
 
     async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
@@ -54,6 +54,11 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
       }
       parts.push({ text: request.prompt });
 
+      request.trace?.("outbound_request_start", {
+        provider: "gemini",
+        operation: "generate_image",
+        endpointPath: "/v1beta/models/:model:generateContent",
+      });
       const response = await geminiFetch(config, `/v1beta/models/${config.model}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,9 +67,15 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
           generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
         }),
       });
+      request.trace?.("outbound_response_received", { provider: "gemini", httpStatus: response.status });
 
       if (!response.ok) {
-        throw new ProviderError(await safeErrorMessage(response), mapStatus(response.status));
+        throw new ProviderError(await safeErrorMessage(response, config.model, config.apiKey), mapStatus(response.status), {
+          provider: "Google Gemini",
+          model: config.model,
+          endpoint: "/v1beta/models/:model:generateContent",
+          httpStatus: response.status,
+        });
       }
 
       const body = (await readBounded(response)) as {
@@ -76,6 +87,7 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
       if (!imagePart?.inlineData?.data) {
         throw new ProviderError("Provider returned no image (the prompt may have been refused)");
       }
+      request.trace?.("provider_response_parsed", { provider: "gemini", imageFound: true });
       return {
         mimeType: imagePart.inlineData.mimeType ?? "image/png",
         data: Buffer.from(imagePart.inlineData.data, "base64"),
@@ -115,15 +127,21 @@ async function readBounded(response: Response): Promise<unknown> {
 
 function mapStatus(status: number): number {
   if (status === 401 || status === 403) return 401;
+  if (status === 400 || status === 404) return status;
   if (status === 429) return 429;
   return 502;
 }
 
 /** Provider error bodies can echo request details — redact before surfacing. */
-async function safeErrorMessage(response: Response): Promise<string> {
+async function safeErrorMessage(response: Response, model?: string, apiKey?: string): Promise<string> {
   if (response.status === 401 || response.status === 403) return "Authentication failed — check the API key";
+  if (response.status === 404) return `Model unavailable: ${model ?? "configured model"}`;
   if (response.status === 429) return "Provider rate limit reached — try again shortly";
   const text = await response.text().catch(() => "");
-  const redacted = redactSecrets(text).slice(0, 300);
+  const redacted = scrubByok(redactSecrets(text), apiKey).slice(0, 300);
   return `Provider error (HTTP ${response.status})${redacted ? `: ${redacted}` : ""}`;
+}
+
+function scrubByok(text: string, apiKey?: string): string {
+  return apiKey && apiKey.length >= 4 ? text.split(apiKey).join("[redacted]") : text;
 }

@@ -5,15 +5,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 import { openSecret, sealSecret } from "./secretBox";
 import {
   buildProviderConfig,
+  IMAGE_COOKIE,
   envAgentConfig,
+  resolveProvider,
   summarize,
   type ProviderConfig,
 } from "./providerSession";
 
-const ENV_KEYS = ["AGENT_API_KEY", "AGENT_API_BASE_URL", "AGENT_MODEL", "APP_ENCRYPTION_KEY"];
+const ENV_KEYS = ["AGENT_API_KEY", "AGENT_API_BASE_URL", "AGENT_MODEL", "APP_ENCRYPTION_KEY", "NODE_ENV"];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -125,5 +128,56 @@ describe("resolution priority", () => {
     const env = envAgentConfig();
     expect(env?.providerType).toBe("openai-compatible");
     expect(env?.baseUrl).toBe("https://api.deepseek.com");
+  });
+
+  it("traces successful BYOK retrieval and decryption without exposing the key", () => {
+    process.env.APP_ENCRYPTION_KEY = "operator-secret-for-test";
+    const config: ProviderConfig = {
+      kind: "image",
+      providerType: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: "user-provider-secret-for-test",
+      model: "gemini-image-model",
+    };
+    const sealed = sealSecret(JSON.stringify(config));
+    const request = new NextRequest("https://manga.example/api/generate", {
+      headers: { cookie: `${IMAGE_COOKIE}=${sealed}` },
+    });
+    const events: { stage: string; details?: object }[] = [];
+    const resolved = resolveProvider(request, "image", (stage, details) => events.push({ stage, details }));
+    const serialized = JSON.stringify(events);
+
+    expect(resolved?.source).toBe("session");
+    expect(events.map((event) => event.stage)).toEqual([
+      "provider_resolution_start",
+      "credential_lookup",
+      "encryption_key_checked",
+      "credential_decrypted",
+      "credential_deserialized",
+      "provider_config_loaded",
+    ]);
+    expect(serialized).not.toContain(config.apiKey);
+    expect(serialized).not.toContain(process.env.APP_ENCRYPTION_KEY);
+  });
+
+  it("reports a missing production encryption key as a decryption failure, not a leaked exception", () => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
+    const sealed = sealSecret(JSON.stringify({
+      kind: "image",
+      providerType: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: "user-provider-secret-for-test",
+      model: "gemini-image-model",
+    }));
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    delete process.env.APP_ENCRYPTION_KEY;
+    const request = new NextRequest("https://manga.example/api/generate", {
+      headers: { cookie: `${IMAGE_COOKIE}=${sealed}` },
+    });
+    const stages: { stage: string; details?: object }[] = [];
+
+    expect(resolveProvider(request, "image", (stage, details) => stages.push({ stage, details }))).toBeNull();
+    expect(stages).toContainEqual({ stage: "encryption_key_checked", details: { configured: false } });
+    expect(stages.map((event) => event.stage)).toContain("credential_decryption_failed");
   });
 });

@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   callGenerateApi,
+  GenerationApiError,
   recordFailedGeneration,
   storeGeneratedAsset,
   type GenerateApiResult,
@@ -22,6 +23,7 @@ import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
 interface ProviderInfo {
   configured: boolean;
   capabilities?: { referenceImage?: boolean };
+  storage?: { configured?: boolean; backend?: string };
 }
 
 const TYPE_LABEL: Record<GeneratorRequest["assetType"], string> = {
@@ -47,6 +49,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const [expression, setExpression] = useState(request.prefill?.expression ?? "");
   const [phase, setPhase] = useState<"idle" | "generating" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<GenerationApiError | null>(null);
   const [result, setResult] = useState<GenerateApiResult | null>(null);
 
   useEffect(() => {
@@ -78,6 +81,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const generate = async () => {
     setPhase("generating");
     setError(null);
+    setErrorDetails(null);
     try {
       const output = await callGenerateApi({
         assetType: request.assetType,
@@ -90,6 +94,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     } catch (e) {
       const message = e instanceof Error ? e.message : "Generation failed";
       setError(message);
+      setErrorDetails(e instanceof GenerationApiError ? e : null);
       setPhase("idle");
       recordFailedGeneration(request.assetType, prompt, message);
     }
@@ -151,6 +156,12 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
           </div>
         )}
 
+        {provider?.storage?.configured === false && (
+          <div className="mb-3 rounded border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-300">
+            Persistent asset storage is not connected. The Manga Studio operator must connect storage before generated images can be saved.
+          </div>
+        )}
+
         {phase !== "done" && (
           <>
             {request.assetType === "character-pose" && (
@@ -193,17 +204,39 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               <p className="mt-1 rounded bg-zinc-950 p-2 leading-4">{prompt}</p>
             </details>
 
-            {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+            {error && (
+              <div className="mb-2 rounded border border-red-900/60 bg-red-950/30 p-2 text-xs text-red-300">
+                <p className="font-medium">Generation failed</p>
+                <p className="mt-1 text-red-400">{error}</p>
+                {(errorDetails?.requestId || errorDetails?.details) && (
+                  <details className="mt-2 text-[11px] text-zinc-400">
+                    <summary className="cursor-pointer">Show safe details</summary>
+                    <dl className="mt-1 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 rounded bg-zinc-950 p-2">
+                      {errorDetails.details?.provider && <><dt>Provider</dt><dd>{errorDetails.details.provider}</dd></>}
+                      {errorDetails.details?.model && <><dt>Model</dt><dd>{errorDetails.details.model}</dd></>}
+                      {errorDetails.details?.endpoint && <><dt>Endpoint</dt><dd>{errorDetails.details.endpoint}</dd></>}
+                      {errorDetails.details?.httpStatus && <><dt>HTTP</dt><dd>{errorDetails.details.httpStatus}</dd></>}
+                      {errorDetails.details?.stage && <><dt>Stage</dt><dd>{errorDetails.details.stage}</dd></>}
+                      {errorDetails.requestId && <><dt>Request ID</dt><dd className="break-all">{errorDetails.requestId}</dd></>}
+                    </dl>
+                  </details>
+                )}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button className="rounded px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200" onClick={onClose}>
                 Cancel
               </button>
               <button
                 className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
-                disabled={phase === "generating" || provider?.configured === false}
+                disabled={
+                  phase === "generating" ||
+                  provider?.configured === false ||
+                  provider?.storage?.configured === false
+                }
                 onClick={generate}
               >
-                {phase === "generating" ? "Generating asset…" : "Generate"}
+                {phase === "generating" ? `Generating${character ? ` ${character.name}` : " asset"}…` : "Generate"}
               </button>
             </div>
           </>

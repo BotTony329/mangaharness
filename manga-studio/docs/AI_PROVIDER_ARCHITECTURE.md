@@ -10,6 +10,7 @@ The harness is not bounded by a vendor catalog. The fundamental provider type is
 Browser (GeneratorDialog / Agent executor)
    ↓ POST /api/generate  { assetType, prompt, referenceUrls?, size }
 Server route (validates with zod)
+   ↓ secret-safe request-scoped trace (credential / adapter / fetch / persistence stages)
    ↓ src/ai/generate.ts  (loads references from OUR storage only)
    ↓ providerRegistry → ImageGenerationProvider adapter
    ↓ external provider API (key attached server-side)
@@ -59,3 +60,4 @@ The current adapters are synchronous. The abstraction leaves room for job-based 
 1. Results land in the **library** first (with provenance metadata + a Generation History record) — never directly on the canvas.
 2. Regeneration never overwrites: same-slot results stack as variations in the character browser.
 3. Failures are recorded in Generation History with safe error messages.
+4. Safe failures include a request ID and may include provider/model/HTTP/endpoint-path metadata; credentials and full provider configurations never cross the server boundary.
