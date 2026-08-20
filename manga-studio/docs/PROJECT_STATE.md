@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-20 (transparent asset compositing)
+Last updated: 2026-08-21 (authoritative agent scope and semantic character placement)
 
 ## Current status
 
@@ -16,6 +16,8 @@ Last updated: 2026-08-20 (transparent asset compositing)
 | Virtual character state | DEPLOYED | Placed characters carry independent pose, expression, outfit, and view fields. The shared resolver reuses only exact full-state matches, uses a compatible render as optional generation guidance, generates missing combinations against the canonical identity reference, and swaps the source without changing composition. |
 | Character starter pack | DEPLOYED | New characters default to Asset Pack (1 canonical reference, 8 neutral-expression poses, 7 additional expressions = 16 generations without an uploaded reference) with Reference Only, itemized progress, cache skipping, and cancel-remaining behavior. Completed assets are retained. |
 | Agent character editing | DEPLOYED | `set_character_slot` uses the same resolver as the Inspector and preserves all unspecified state fields. Pose, expression, outfit, and view are supported. |
+| Agent execution scope | WORKING LOCALLY | Every run captures an immutable typed scope with priority Selected Object → Selected Panel → Current Page → Whole Project. Explicit page/project language can widen Auto scope. The scope is included in context and planning, attached to the plan preview, validated server-side, and rechecked immediately before every tool call. Selected-panel plans cannot change layout, stage loose assets, or mutate another panel. |
+| Agent character placement | WORKING LOCALLY | The preferred `place_character` tool resolves the Character entity by ID/name and state assets through `metadata.characterId` plus requested pose/expression/outfit/view fields. Asset display names are not identity. Exact requested semantics reuse cache; unspecified dimensions prefer neutral/default state; missing states generate once and become reusable library assets. |
 | Project Art Style | DEPLOYED | Schema v4 persists one active provider-neutral StyleProfile per project plus custom profiles. All 32 requested built-in substyles contain real positive/negative prompt logic and semantic visual properties. Changing style leaves existing assets untouched. |
 | Visual style selection | DEPLOYED | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
 | Style propagation | DEPLOYED | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
@@ -45,15 +47,19 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
 - The bundled foreground extractor is optimized for plain or near-uniform edge-connected backgrounds. Complex scenery or an opaque fake checkerboard fails safely and preserves the source; the `AssetPostProcessor` boundary is ready for a future dedicated segmentation service.
+- Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
+- A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 22 files, 144 tests passed. Transparency coverage includes useful alpha, opaque white-background characters, enclosed-white preservation, fake checkerboards, uploaded characters, rectangular backgrounds, processed render preference, failure safety, and schema-v5 legacy migration.
+- Tests: 23 files, 151 tests passed. Agent coverage includes selected-object/panel/page/project scope resolution, explicit expansion language, server validation rejection, runtime rejection of injected cross-panel tools, Yuri lookup by entity relationship, display-name independence, cached walking-state reuse, recoverable missing-state generation, and the exact Panel 1 isolation workflow. Transparency coverage remains intact.
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - Local transparent-compositing acceptance: passed with a real opaque white-background Yuri upload over a colored street, panel placement, scaling, clipping, and page export. Export pixels beside Yuri remained street blue (`118,181,212,255`) while the enclosed white shirt remained opaque (`255,255,255,255`); no white rectangle or browser errors.
+- Local agent acceptance: passed. With Panel 1 selected, a background, cached Yuri Walking state, and thought bubble were added only to Panel 1; panels 2–4 remained byte-for-byte unchanged and no generation history entry was created. A separate missing-state test generated and placed a reusable Yuri state. Runtime scope rejected a panel-2 call injected after plan validation.
+- Local agent UI verification: passed. Selecting Panel 1 changed the visible scope control to `Auto · Selected Panel · Panel 1`; Current Page and Whole Project overrides were available; no Next.js overlay or browser page errors were present.
 - GitHub transparent-compositing code commit: `604b512` on `agent/transparent-asset-compositing` (pushed to `origin`; not merged to `main`).
 - GitHub art-style-system code commit: `ec0b221` on `agent/project-art-style-system` (pushed to `origin`; not merged to `main`).
 - GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.

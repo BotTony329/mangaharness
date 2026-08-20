@@ -7,15 +7,19 @@
 import { stateFromAsset, stateFromInstance } from "@/characters/state";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
+import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
 
 export interface AgentContextInput {
   doc: ProjectDocument;
   currentPageId: ID | null;
   selection: { itemId?: ID; panelId?: ID; workspaceItemId?: ID };
+  scope?: AgentRunScope;
 }
 
-export function buildAgentContext({ doc, currentPageId, selection }: AgentContextInput): string {
+export function buildAgentContext({ doc, currentPageId, selection, scope }: AgentContextInput): string {
+  const runScope = scope ?? resolveAgentScope({ doc, currentPageId, selection, prompt: "" });
   const lines: string[] = [`PROJECT: ${doc.project.name}`];
+  lines.push(scopeInstruction(runScope));
   const activeStyle = getActiveStyleProfile(doc);
   lines.push(
     `PROJECT ART STYLE: ${activeStyle.name} (${activeStyle.family})`,
@@ -87,6 +91,7 @@ export function buildAgentContext({ doc, currentPageId, selection }: AgentContex
 
   // ── Explicit selection summary — "make her angry" needs to know who ──
   lines.push("", `CURRENT SELECTION: ${describeSelection(doc, currentPageId, selection)}`);
+  lines.push(`TARGET SCOPE: ${runScope.label}`);
 
   // Hard cap so a huge project can't blow the model context.
   const text = lines.join("\n");

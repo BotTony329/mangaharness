@@ -10,6 +10,7 @@ import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { AssetInstance } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { executePlan } from "./executor";
+import { resolveAgentScope } from "./scope";
 import { validatePlan } from "./tools/schemas";
 
 const seedIds: { crying?: string } = {};
@@ -175,6 +176,146 @@ describe("executePlan", () => {
     const doc = useEditorStore.getState().doc!;
     expect(Object.keys(doc.workspaceItems)).toHaveLength(1);
     expect(Object.keys(doc.items)).toHaveLength(0);
+  });
+
+  it("changes only selected Panel 1 and reuses Yuri's cached walking state", async () => {
+    let doc = createProjectDocument("Panel scope acceptance");
+    const yuri = addCharacter(doc, "Yuri", "dark-haired student");
+    doc = yuri.doc;
+    const walking = addAsset(doc, {
+      category: "character",
+      name: "Cached locomotion render",
+      storageUrl: "https://example.com/yuri-walking.png",
+      width: 800,
+      height: 1600,
+      metadata: {
+        characterId: yuri.characterId,
+        characterAssetRole: "state",
+        pose: "walking",
+        expression: "smile",
+        outfit: "school uniform",
+        view: "side",
+      },
+    });
+    doc = walking.doc;
+    const background = addAsset(doc, {
+      category: "background",
+      name: "Neighborhood street",
+      storageUrl: "https://example.com/street.png",
+      width: 2000,
+      height: 1400,
+    });
+    doc = background.doc;
+    useEditorStore.getState().loadDocument(doc);
+    const page = Object.values(doc.pages)[0];
+    useEditorStore.getState().select({ panelId: page.panelIds[0] });
+    const untouched = page.panelIds.slice(1).map((id) => doc.panels[id].itemIds);
+    const scope = resolveAgentScope({
+      doc,
+      currentPageId: page.id,
+      selection: { panelId: page.panelIds[0] },
+      prompt: "In this panel, add a background, place Yuri walking, and add a thought bubble about the upcoming walk.",
+    });
+    const validation = validatePlan({
+      summary: "Complete selected panel",
+      steps: [
+        { tool: "place_asset", args: { panel: 1, category: "background", cropMode: "fill" } },
+        { tool: "place_character", args: { panel: 1, characterName: "Yuri", pose: "walking" } },
+        { tool: "add_speech_bubble", args: { panel: 1, bubbleType: "thought", text: "The walk is coming up…" } },
+        { tool: "add_effect", args: { panel: 2, effectKind: "focus-lines" } },
+      ],
+    }, scope);
+    expect(validation.rejected).toHaveLength(1);
+
+    const summary = await executePlan(validation.plan, () => {});
+    expect(summary).toEqual({ completed: 3, failed: 0 });
+    const after = useEditorStore.getState().doc!;
+    expect(page.panelIds.slice(1).map((id) => after.panels[id].itemIds)).toEqual(untouched);
+    const panelItems = after.panels[page.panelIds[0]].itemIds.map((id) => after.items[id]);
+    const characterInstance = panelItems.find((item) => item.kind === "asset" && after.assets[item.sourceAssetId].category === "character");
+    expect(characterInstance?.kind).toBe("asset");
+    if (characterInstance?.kind === "asset") expect(characterInstance.sourceAssetId).toBe(walking.assetId);
+    expect(panelItems.some((item) => item.kind === "bubble" && item.bubbleType === "thought")).toBe(true);
+    expect(after.generationHistory).toHaveLength(0);
+  });
+
+  it("rechecks scope at runtime and blocks a tool injected after validation", async () => {
+    const state = useEditorStore.getState();
+    const doc = state.doc!;
+    const page = Object.values(doc.pages)[0];
+    state.select({ panelId: page.panelIds[0] });
+    const scope = resolveAgentScope({
+      doc,
+      currentPageId: page.id,
+      selection: { panelId: page.panelIds[0] },
+      prompt: "make this panel dramatic",
+    });
+    const { plan } = validatePlan({
+      summary: "scoped",
+      steps: [{ tool: "add_effect", args: { panel: 1, effectKind: "focus-lines" } }],
+    }, scope);
+    plan.steps.push({ tool: "add_effect", args: { panel: 2, effectKind: "impact-burst" } });
+    const details: string[] = [];
+    const summary = await executePlan(plan, (_index, status, detail) => {
+      if (status === "failed" && detail) details.push(detail);
+    });
+    expect(summary).toEqual({ completed: 1, failed: 1 });
+    expect(details[0]).toContain("Scope violation");
+    expect(useEditorStore.getState().doc!.panels[page.panelIds[1]].itemIds).toHaveLength(0);
+  });
+
+  it("generates a recoverable missing character state and places the new reusable asset", async () => {
+    let doc = createProjectDocument("Missing state");
+    const yuri = addCharacter(doc, "Yuri");
+    doc = yuri.doc;
+    useEditorStore.getState().loadDocument(doc);
+    const page = Object.values(doc.pages)[0];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ capabilities: { referenceImage: false } })))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            url: "https://example.com/generated-yuri.png",
+            sourceUrl: "https://example.com/generated-yuri.png",
+            mimeType: "image/png",
+            hasAlpha: true,
+            backgroundRemoved: true,
+            processingStatus: "ready",
+            provider: "test-provider",
+            model: "test-model",
+            referenceUsed: false,
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    class MockImage {
+      naturalWidth = 800;
+      naturalHeight = 1600;
+      crossOrigin = "";
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("Image", MockImage);
+
+    const scope = resolveAgentScope({ doc, currentPageId: page.id, selection: { panelId: page.panelIds[0] }, prompt: "Yuri backflips here" });
+    const { plan } = validatePlan({
+      summary: "Generate missing state",
+      steps: [{ tool: "place_character", args: { panel: 1, characterName: "Yuri", pose: "backflip" } }],
+    }, scope);
+    const summary = await executePlan(plan, () => {});
+    expect(summary).toEqual({ completed: 1, failed: 0 });
+    const after = useEditorStore.getState().doc!;
+    expect(after.generationHistory).toHaveLength(1);
+    const generated = Object.values(after.assets).find((asset) => asset.metadata?.pose === "backflip");
+    expect(generated?.metadata).toMatchObject({ characterId: yuri.characterId, characterAssetRole: "state" });
+    const placedId = after.panels[page.panelIds[0]].itemIds[0];
+    const placed = after.items[placedId];
+    expect(placed.kind === "asset" ? placed.sourceAssetId : null).toBe(generated?.id);
   });
 
   it("reports failed steps but keeps executing the rest", async () => {

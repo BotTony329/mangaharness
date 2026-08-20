@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import type { AgentRunScope } from "../scope";
 
 const layoutIds = ["single", "two-vertical", "two-horizontal", "three-vertical", "four-grid", "yonkoma"] as const;
 const cropModes = ["fit", "fill", "upper-body", "face", "custom"] as const;
@@ -59,6 +60,18 @@ export const toolSchemas = {
     category: z.enum(["character", "background", "prop", "upload"]).optional(),
     cropMode: z.enum(cropModes).optional(),
     flipX: z.boolean().optional(),
+  }),
+
+  place_character: z.object({
+    panel: panelIndex,
+    characterName: z.string().min(1).max(80),
+    pose: z.string().max(80).optional(),
+    expression: z.string().max(80).optional(),
+    outfit: z.string().max(120).optional(),
+    view: z.string().max(80).optional(),
+    cropMode: z.enum(cropModes).optional(),
+    flipX: z.boolean().optional(),
+    generateIfMissing: z.boolean().optional(),
   }),
 
   set_character_slot: z.object({
@@ -117,6 +130,7 @@ export interface PlannedStep {
 export interface AgentPlan {
   summary: string;
   steps: { tool: ToolName; args: Record<string, unknown>; reason?: string }[];
+  targetScope?: AgentRunScope;
 }
 
 export const MAX_PLAN_STEPS = 30;
@@ -144,7 +158,7 @@ export interface PlanValidation {
  * malformed args are rejected individually (reported, not executed) so one
  * bad step doesn't waste an otherwise good plan.
  */
-export function validatePlan(raw: unknown): PlanValidation {
+export function validatePlan(raw: unknown, scope?: AgentRunScope): PlanValidation {
   const parsed = rawPlanSchema.safeParse(raw);
   if (!parsed.success) throw new Error("The agent returned an unreadable plan");
 
@@ -161,9 +175,46 @@ export function validatePlan(raw: unknown): PlanValidation {
       rejected.push({ tool: step.tool, error: args.error.issues[0]?.message ?? "Invalid arguments" });
       continue;
     }
+    const scopeError = scope ? validateStepScope(step.tool as ToolName, args.data as Record<string, unknown>, scope) : null;
+    if (scopeError) {
+      rejected.push({ tool: step.tool, error: scopeError });
+      continue;
+    }
     steps.push({ tool: step.tool as ToolName, args: args.data as Record<string, unknown>, reason: step.reason });
   }
-  return { plan: { summary: parsed.data.summary, steps }, rejected };
+  return { plan: { summary: parsed.data.summary, steps, targetScope: scope }, rejected };
+}
+
+const PANEL_TOOLS = new Set<ToolName>([
+  "place_asset",
+  "place_character",
+  "set_character_slot",
+  "reshape_panel",
+  "set_crop_mode",
+  "add_speech_bubble",
+  "add_effect",
+  "remove_items",
+]);
+
+/** Pure guard used both while validating model output and immediately before execution. */
+export function validateStepScope(tool: ToolName, args: Record<string, unknown>, scope: AgentRunScope): string | null {
+  if (scope.kind === "selected-object") {
+    if (tool === "set_character_slot" && (args.panel === undefined || args.panel === scope.panelNumber)) return null;
+    return `Scope violation: ${scope.label} permits only semantic changes to the selected character object`;
+  }
+  if (scope.kind === "selected-panel") {
+    if (tool === "set_page_layout") return `Scope violation: ${scope.label} cannot change the page layout`;
+    if (tool === "place_asset" && args.target === "workspace") {
+      return `Scope violation: ${scope.label} cannot place assets outside the panel`;
+    }
+    if (PANEL_TOOLS.has(tool) && args.panel !== scope.panelNumber) {
+      return `Scope violation: ${scope.label} allows only panel ${scope.panelNumber}`;
+    }
+  }
+  if (PANEL_TOOLS.has(tool) && typeof args.panel === "number" && args.panel > scope.panelCount) {
+    return `Scope violation: panel ${args.panel} is outside ${scope.pageName}`;
+  }
+  return null;
 }
 
 /** Tool documentation injected into the planner's system prompt. */
@@ -176,6 +227,7 @@ Available tools (call only these, with exactly these argument shapes):
 - generate_prop {description, name?} — AI-generate a reusable prop.
 - set_page_layout {layout: "single"|"two-vertical"|"two-horizontal"|"three-vertical"|"four-grid"|"yonkoma"} — replace the current page's panel arrangement (existing content is preserved).
 - place_asset {panel?, target?, characterName?, pose?, expression?, outfit?, view?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead.
+- place_character {panel, characterName, pose?, expression?, outfit?, view?, cropMode?, flipX?, generateIfMissing?} — preferred semantic character placement. Resolve the Character entity first, reuse a cached asset matching every requested state field, and generate the missing state only when needed.
 - set_character_slot {panel?, characterName?, pose?, expression?, outfit?, view?, generateIfMissing?} — change the selected character's semantic state. Unspecified fields MUST remain unchanged ("make her cry" changes expression only; "run angrily" changes pose and expression). The shared resolver reuses an exact full-state cache hit or generates the missing combination, then swaps it without changing composition.
 - set_crop_mode {panel, characterName?, category?, mode: "fit"|"fill"|"upper-body"|"face"|"custom"} — reframe an already-placed instance. "upper-body" = medium shot, "fill" = full-bleed. Close-ups come from crop modes, never from regenerating.
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.

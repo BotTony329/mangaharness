@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { buildAgentContext } from "@/agent/contextBuilder";
 import { countGenerations, describeStep, executePlan, type StepProgress } from "@/agent/executor";
+import { resolveAgentScope, type AgentScopePreference } from "@/agent/scope";
 import type { AgentPlan } from "@/agent/tools/schemas";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
@@ -34,7 +35,10 @@ const CONFIRM_THRESHOLD = 3;
 
 export function AgentPanel() {
   const selection = useEditorStore((s) => s.selection);
+  const doc = useEditorStore((s) => s.doc);
+  const currentPageId = useEditorStore((s) => s.currentPageId);
   const [prompt, setPrompt] = useState("");
+  const [scopePreference, setScopePreference] = useState<AgentScopePreference>("auto");
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const [plan, setPlan] = useState<AgentPlan | null>(null);
@@ -64,15 +68,23 @@ export function AgentPanel() {
     setStatusLine("Understanding request…");
 
     try {
+      const scope = resolveAgentScope({
+        doc: state.doc,
+        currentPageId: state.currentPageId,
+        selection: state.selection,
+        prompt: requestPrompt,
+        preference: scopePreference,
+      });
       const context = buildAgentContext({
         doc: state.doc,
         currentPageId: state.currentPageId,
         selection: state.selection,
+        scope,
       });
       const response = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: requestPrompt, context }),
+        body: JSON.stringify({ prompt: requestPrompt, context, scope }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Agent planning failed");
@@ -115,6 +127,9 @@ export function AgentPanel() {
   };
 
   const busy = phase === "planning" || phase === "executing";
+  const displayedScope = doc
+    ? resolveAgentScope({ doc, currentPageId, selection, prompt, preference: scopePreference })
+    : null;
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 text-xs">
@@ -127,11 +142,23 @@ export function AgentPanel() {
           onChange={(e) => setPrompt(e.target.value)}
           disabled={busy}
         />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-[10px] text-zinc-500">
-            Context: current page{selection.panelId ? " · selected panel" : ""}
-            {selection.itemId ? " · selected object" : ""} · Skills: auto
-          </span>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <label className="min-w-0 text-[10px] text-zinc-500">
+            <span className="sr-only">Agent target scope</span>
+            <select
+              aria-label="Agent target scope"
+              className="max-w-52 rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-[10px] text-zinc-300"
+              value={scopePreference}
+              disabled={busy}
+              onChange={(event) => setScopePreference(event.target.value as AgentScopePreference)}
+            >
+              <option value="auto">Auto · {displayedScope?.label ?? "Current Page"}</option>
+              <option value="selected-object" disabled={!selection.itemId}>Selected Object</option>
+              <option value="selected-panel" disabled={!selection.panelId && !selection.itemId}>Selected Panel</option>
+              <option value="current-page">Current Page</option>
+              <option value="whole-project">Whole Project</option>
+            </select>
+          </label>
           <button
             className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500 disabled:opacity-40"
             disabled={busy || prompt.trim().length < 3 || agentConfigured === false}
@@ -182,6 +209,7 @@ export function AgentPanel() {
 
       {plan && steps.length > 0 && (
         <div className="min-h-0 flex-1 overflow-y-auto rounded border border-zinc-800 bg-zinc-950/60 p-2">
+          <p className="mb-1 text-[10px] font-medium text-indigo-300">Target: {plan.targetScope?.label ?? "Current Page"}</p>
           <p className="mb-2 text-zinc-400">{plan.summary}</p>
           <ul className="space-y-1">
             {steps.map((step, i) => (
