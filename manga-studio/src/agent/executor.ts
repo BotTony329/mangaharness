@@ -36,6 +36,7 @@ import type {
   ProjectDocument,
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
 import { findCharacter, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
 import type { AgentPlan, ToolName } from "./tools/schemas";
 
@@ -163,10 +164,12 @@ function panelIdByNumber(panel: number): ID {
   return panelId;
 }
 
-function doCreateCharacter(args: { name: string; description?: string }): void {
+function doCreateCharacter(args: { name: string; appearance?: string; personalityNotes?: string; description?: string }): void {
   // Idempotent: re-creating an existing character would fork the library.
   if (findCharacter(currentDoc(), args.name)) return;
-  useEditorStore.getState().commit((d) => addCharacter(d, args.name, args.description).doc);
+  useEditorStore.getState().commit((d) =>
+    addCharacter(d, args.name, args.appearance ?? args.description, args.personalityNotes).doc,
+  );
 }
 
 async function doGenerateCharacterAsset(
@@ -193,14 +196,23 @@ async function doGenerateScenery(
   args: { description: string; name?: string },
   category: "background" | "prop",
 ): Promise<void> {
-  const prompt = buildAssetPrompt({ assetType: category, description: args.description });
-  const result = await callGenerateApi({ assetType: category, prompt, size: defaultAspect(category) });
+  const doc = currentDoc();
+  const style = getStyleGenerationContext(doc);
+  const prompt = buildAssetPrompt({ assetType: category, description: args.description, style: style.profile });
+  const result = await callGenerateApi({
+    assetType: category,
+    prompt,
+    negativePrompt: style.profile.negativePrompt,
+    size: defaultAspect(category),
+    referenceUrls: style.referenceAsset ? [style.referenceAsset.storageUrl] : undefined,
+  });
   const assetId = await storeGeneratedAsset({
     result,
     assetType: category,
     category,
     name: args.name ?? args.description.slice(0, 40),
     prompt,
+    metadata: styleMetadata(style),
   });
   stageOnWorkspace(assetId);
 }

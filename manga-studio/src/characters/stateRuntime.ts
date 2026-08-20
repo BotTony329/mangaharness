@@ -8,12 +8,14 @@ import { useEditorStore } from "@/editor/store";
 import {
   DEFAULT_CHARACTER_STATE,
   characterReferenceId,
+  characterIdentityDescription,
   findCompatibleCharacterAsset,
   findExactCharacterAsset,
   mergeCharacterState,
   stateFromInstance,
   type CharacterStatePatch,
 } from "./state";
+import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
 
 export type CharacterGenerationRole = "canonical" | "state";
 
@@ -36,41 +38,49 @@ export async function generateCharacterAssetForState(input: {
   state: CharacterState;
   role?: CharacterGenerationRole;
   instruction?: string;
+  continuityFrom?: CharacterState;
+  changedDimensions?: (keyof CharacterStatePatch)[];
 }): Promise<ID> {
   const doc = useEditorStore.getState().doc;
   const character = doc?.characters[input.characterId];
   if (!doc || !character) throw new Error("Character no longer exists");
 
   const role = input.role ?? "state";
+  const style = getStyleGenerationContext(doc);
   const canonicalId = characterReferenceId(character);
   const canonical = canonicalId ? doc.assets[canonicalId] : undefined;
   const compatible = role === "state" ? findCompatibleCharacterAsset(doc, character, input.state) : undefined;
-  const useReference = role === "state" && Boolean(canonical) && (await providerSupportsReference());
-  const referenceAssets = useReference
-    ? [canonical, compatible].filter((asset, index, list) =>
+  const supportsReference = await providerSupportsReference();
+  const useIdentityReference = role === "state" && Boolean(canonical) && supportsReference;
+  const referenceAssets = supportsReference
+    ? [role === "state" ? canonical : undefined, role === "state" ? compatible : undefined, style.referenceAsset].filter((asset, index, list) =>
         Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
       )
     : [];
+  const continuity = buildContinuityInstruction(input.continuityFrom, input.state, input.changedDimensions);
   const assetType = role === "canonical" ? "character" : "character-pose";
   const prompt =
     role === "canonical"
       ? buildAssetPrompt({
           assetType: "character",
           characterName: character.name,
-          characterDescription: character.description,
-          description: input.instruction,
+          characterDescription: characterIdentityDescription(character),
+          description: [input.instruction, continuity].filter(Boolean).join(" ") || undefined,
+          style: style.profile,
         })
       : buildCharacterStatePrompt({
           characterName: character.name,
-          characterDescription: character.description,
+          characterDescription: characterIdentityDescription(character),
           ...input.state,
-          description: input.instruction,
-          hasReference: useReference,
+          description: [continuity, input.instruction].filter(Boolean).join(" ") || undefined,
+          hasReference: useIdentityReference,
+          style: style.profile,
         });
 
   const result = await callGenerateApi({
     assetType,
     prompt,
+    negativePrompt: style.profile.negativePrompt,
     size: "portrait",
     referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.storageUrl) : undefined,
   });
@@ -92,6 +102,7 @@ export async function generateCharacterAssetForState(input: {
       characterAssetRole: role,
       canonicalReferenceAssetId: role === "canonical" ? undefined : canonicalId,
       referenceAssetIds: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.id) : undefined,
+      ...styleMetadata(style),
     },
   });
 }
@@ -138,6 +149,10 @@ export async function applyCharacterStateToInstance(input: {
       state: desired,
       role: "state",
       instruction: input.instruction,
+      continuityFrom: current,
+      changedDimensions: (Object.keys(input.patch) as (keyof CharacterStatePatch)[]).filter(
+        (key) => input.patch[key] !== undefined,
+      ),
     });
     source = "generated";
     input.onProgress?.({ stage: "saving", state: desired });
@@ -154,6 +169,25 @@ export async function applyCharacterStateToInstance(input: {
   };
 }
 
+function buildContinuityInstruction(
+  current: CharacterState | undefined,
+  desired: CharacterState,
+  changed: (keyof CharacterStatePatch)[] | undefined,
+): string | undefined {
+  if (!current || !changed || changed.length === 0) return undefined;
+  const preserved = (["pose", "expression", "outfit", "view"] as (keyof CharacterStatePatch)[]).filter(
+    (key) => !changed.includes(key),
+  );
+  return [
+    preserved.length > 0
+      ? `Preserve the current ${preserved.map((key) => `${key} (${desired[key]})`).join(", ")}.`
+      : "",
+    `Change only ${changed.map((key) => `${key} to ${desired[key]}`).join(" and ")} as much as possible.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function starterPackStates(character: Character): CharacterState[] {
   const base = { characterId: character.id, ...DEFAULT_CHARACTER_STATE };
   return [
@@ -161,9 +195,16 @@ export function starterPackStates(character: Character): CharacterState[] {
     { ...base, pose: "walking" },
     { ...base, pose: "running" },
     { ...base, pose: "sitting" },
-    { ...base, expression: "happy" },
+    { ...base, pose: "jumping" },
+    { ...base, pose: "pointing" },
+    { ...base, pose: "arms crossed" },
+    { ...base, pose: "looking back" },
+    { ...base, expression: "smile" },
+    { ...base, expression: "laugh" },
     { ...base, expression: "angry" },
     { ...base, expression: "crying" },
-    { ...base, expression: "surprised" },
+    { ...base, expression: "shocked" },
+    { ...base, expression: "embarrassed" },
+    { ...base, expression: "worried" },
   ];
 }

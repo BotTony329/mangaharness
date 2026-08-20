@@ -74,14 +74,17 @@ export function removeAsset(doc: ProjectDocument, assetId: ID): ProjectDocument 
 export function addCharacter(
   doc: ProjectDocument,
   name: string,
-  description?: string,
+  appearance?: string,
+  personalityNotes?: string,
 ): { doc: ProjectDocument; characterId: ID } {
   const next = cloneDoc(doc);
   const character: Character = {
     id: newId(),
     projectId: next.project.id,
     name,
-    description,
+    description: appearance,
+    appearance,
+    personalityNotes,
     assetIds: [],
     createdAt: now(),
   };

@@ -4,6 +4,7 @@ import { placeAsset, swapInstanceAsset } from "@/domain/itemOps";
 import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { AssetInstance, CharacterState } from "@/domain/types";
 import { findExactCharacterAsset, mergeCharacterState, stateFromInstance } from "./state";
+import { starterPackStates } from "./stateRuntime";
 
 describe("character state resolver", () => {
   it("preserves independent fields and reuses an exact cached combination", () => {
@@ -46,5 +47,16 @@ describe("character state resolver", () => {
     // Switching back is another exact cache hit: no generation path is needed.
     const backToWalking = mergeCharacterState(runningAngry, { pose: "walking" });
     expect(findExactCharacterAsset(doc, doc.characters[created.characterId], backToWalking)?.id).toBe(ids[1]);
+  });
+
+  it("builds the progressive asset pack without a pose/expression Cartesian product", () => {
+    const doc = createProjectDocument("Pack");
+    const created = addCharacter(doc, "Yuri");
+    const states = starterPackStates(created.doc.characters[created.characterId]);
+    expect(states).toHaveLength(15);
+    expect(states.filter((state) => state.expression === "neutral")).toHaveLength(8);
+    expect(states.filter((state) => state.pose === "standing")).toHaveLength(8);
+    expect(states).toContainEqual(expect.objectContaining({ pose: "looking back", expression: "neutral" }));
+    expect(states).toContainEqual(expect.objectContaining({ pose: "standing", expression: "worried" }));
   });
 });

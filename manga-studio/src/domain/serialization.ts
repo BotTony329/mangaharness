@@ -7,6 +7,7 @@
 import { defaultPageWorkspacePosition } from "./factory";
 import { rectToPoints } from "./geometry";
 import { SCHEMA_VERSION, type ProjectDocument, type Rect } from "./types";
+import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 
 export function serializeProject(doc: ProjectDocument): string {
   return JSON.stringify(doc);
@@ -91,6 +92,25 @@ const MIGRATIONS: Record<number, Migration> = {
       };
     }
     return { ...doc, schemaVersion: 3 };
+  },
+  // v3 → v4: art direction becomes persistent project state and legacy
+  // character descriptions are normalized into identity-only appearance.
+  3: (doc) => {
+    const project = doc.project as { settings?: Record<string, unknown> } | undefined;
+    if (project?.settings) {
+      project.settings.artStyle ??= {
+        activeStyleId: DEFAULT_STYLE_PROFILE_ID,
+        customProfiles: {},
+      };
+    }
+    const characters = (doc.characters ?? {}) as Record<
+      string,
+      { description?: string; appearance?: string; personalityNotes?: string }
+    >;
+    for (const character of Object.values(characters)) {
+      character.appearance ??= character.description;
+    }
+    return { ...doc, schemaVersion: 4 };
   },
 };
 

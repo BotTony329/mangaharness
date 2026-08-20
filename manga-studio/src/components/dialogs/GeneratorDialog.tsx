@@ -15,7 +15,8 @@ import {
   type GenerateApiResult,
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
-import { DEFAULT_CHARACTER_STATE, characterReferenceId } from "@/characters/state";
+import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
+import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
 import { swapInstanceAsset } from "@/domain/itemOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -63,6 +64,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const character = request.characterId && doc ? doc.characters[request.characterId] : undefined;
   const referenceId = character ? characterReferenceId(character) : undefined;
   const referenceAsset = referenceId && doc ? doc.assets[referenceId] : undefined;
+  const style = doc ? getStyleGenerationContext(doc) : undefined;
   const isCharacterType = request.assetType.startsWith("character");
   const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
 
@@ -72,12 +74,13 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         assetType: request.assetType,
         description: description || undefined,
         characterName: character?.name,
-        characterDescription: character?.description,
+        characterDescription: character ? characterIdentityDescription(character) : undefined,
         pose: pose || undefined,
         expression: expression || undefined,
         hasReference: canUseReference,
+        style: style?.profile,
       }),
-    [request.assetType, description, character, pose, expression, canUseReference],
+    [request.assetType, description, character, pose, expression, canUseReference, style?.profile],
   );
 
   const generate = async () => {
@@ -85,11 +88,17 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     setError(null);
     setErrorDetails(null);
     try {
+      const referenceAssets = provider?.capabilities?.referenceImage
+        ? [isCharacterType ? referenceAsset : undefined, style?.referenceAsset].filter(
+            (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
+          )
+        : [];
       const output = await callGenerateApi({
         assetType: request.assetType,
         prompt,
+        negativePrompt: style?.profile.negativePrompt,
         size: defaultAspect(request.assetType),
-        referenceUrls: canUseReference && referenceAsset ? [referenceAsset.storageUrl] : undefined,
+        referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.storageUrl) : undefined,
       });
       setResult(output);
       setPhase("done");
@@ -121,7 +130,12 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         view: DEFAULT_CHARACTER_STATE.view,
         characterAssetRole: request.assetType === "character" ? "canonical" : "state",
         canonicalReferenceAssetId: request.assetType === "character" ? undefined : referenceId,
-        referenceAssetIds: result.referenceUsed && referenceAsset ? [referenceAsset.id] : undefined,
+        referenceAssetIds: result.referenceUsed
+          ? [isCharacterType ? referenceAsset?.id : undefined, style?.referenceAsset?.id].filter(
+              (id): id is string => Boolean(id),
+            )
+          : undefined,
+        ...(style ? styleMetadata(style) : {}),
       },
     });
     // "Generate missing slot" flows started from a selected instance also

@@ -6,6 +6,7 @@
 
 import { stateFromAsset, stateFromInstance } from "@/characters/state";
 import type { ID, ProjectDocument } from "@/domain/types";
+import { getActiveStyleProfile } from "@/styles/profiles";
 
 export interface AgentContextInput {
   doc: ProjectDocument;
@@ -15,6 +16,12 @@ export interface AgentContextInput {
 
 export function buildAgentContext({ doc, currentPageId, selection }: AgentContextInput): string {
   const lines: string[] = [`PROJECT: ${doc.project.name}`];
+  const activeStyle = getActiveStyleProfile(doc);
+  lines.push(
+    `PROJECT ART STYLE: ${activeStyle.name} (${activeStyle.family})`,
+    `STYLE DIRECTION: ${activeStyle.description}`,
+    "All new visual generation inherits this style automatically; do not repeat style language in character identity.",
+  );
 
   // ── Characters and their reusable slots ──
   const characters = Object.values(doc.characters);
@@ -29,7 +36,7 @@ export function buildAgentContext({ doc, currentPageId, selection }: AgentContex
         : `pose:${state.pose} expression:${state.expression} outfit:${state.outfit} view:${state.view}`;
     });
     lines.push(
-      `- ${character.name}${character.description ? ` — ${character.description.slice(0, 100)}` : ""}`,
+      `- ${character.name}${character.appearance ?? character.description ? ` — ${(character.appearance ?? character.description)!.slice(0, 100)}` : ""}${character.personalityNotes ? `; ${character.personalityNotes.slice(0, 80)}` : ""}`,
       `  assets: ${slots.length > 0 ? [...new Set(slots)].join(", ") : "NONE (needs a reference before poses/expressions)"}`,
     );
   }

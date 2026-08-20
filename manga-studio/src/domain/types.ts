@@ -55,6 +55,12 @@ export interface AssetGenerationMetadata {
   canonicalReferenceAssetId?: ID;
   /** Canonical images establish identity; state images are selectable renders. */
   characterAssetRole?: "canonical" | "state";
+  /** Snapshot of the project style used for this immutable generation. */
+  styleProfileId?: ID;
+  styleName?: string;
+  stylePositivePrompt?: string;
+  styleNegativePrompt?: string;
+  styleReferenceAssetId?: ID;
   generatedAt?: ISODate;
 }
 
@@ -87,6 +93,9 @@ export interface Character {
   projectId: ID;
   name: string;
   description?: string;
+  /** Identity facts only — rendering instructions belong to Project Art Style. */
+  appearance?: string;
+  personalityNotes?: string;
   /** Canonical identity reference sent with every generation for this character. */
   referenceAssetId?: ID;
   /** Stable v3 name. referenceAssetId remains as a legacy compatibility alias. */
@@ -247,10 +256,46 @@ export interface GenerationRecord {
 
 export type ReadingDirection = "ltr" | "rtl";
 
+export type StyleFamilyId =
+  | "japanese-manga"
+  | "chinese-manhua"
+  | "western-comics"
+  | "webtoon"
+  | "sketch-experimental"
+  | "custom";
+
+export interface StyleVisualProperties {
+  colorMode?: string;
+  lineStyle?: string;
+  detailLevel?: string;
+  shading?: string;
+  rendering?: string;
+}
+
+/** Provider-neutral visual language. Adapters may interpret it differently. */
+export interface StyleProfile {
+  id: ID;
+  family: StyleFamilyId;
+  name: string;
+  description: string;
+  positivePrompt: string;
+  negativePrompt?: string;
+  visualProperties?: StyleVisualProperties;
+  previewImage?: string;
+  /** Optional uploaded guide for a custom style. */
+  referenceAssetId?: ID;
+}
+
+export interface ProjectArtStyleSettings {
+  activeStyleId: ID;
+  customProfiles: Record<ID, StyleProfile>;
+}
+
 export interface ProjectSettings {
   pageWidth: number;
   pageHeight: number;
   readingDirection: ReadingDirection;
+  artStyle: ProjectArtStyleSettings;
 }
 
 export interface Project {
@@ -280,4 +325,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;

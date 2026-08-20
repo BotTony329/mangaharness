@@ -42,6 +42,7 @@ export class GenerationApiError extends Error {
 export async function callGenerateApi(request: {
   assetType: GeneratedAssetType;
   prompt: string;
+  negativePrompt?: string;
   referenceUrls?: string[];
   size?: "portrait" | "landscape" | "square";
 }): Promise<GenerateApiResult> {

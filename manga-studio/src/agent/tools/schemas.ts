@@ -17,6 +17,9 @@ const panelIndex = z.number().int().min(1).max(12).describe("1-based panel numbe
 export const toolSchemas = {
   create_character: z.object({
     name: z.string().min(1).max(80),
+    appearance: z.string().max(600).optional(),
+    personalityNotes: z.string().max(400).optional(),
+    /** Legacy planner compatibility; appearance is preferred. */
     description: z.string().max(600).optional(),
   }),
 
@@ -167,7 +170,7 @@ export function validatePlan(raw: unknown): PlanValidation {
 export const TOOL_DOCS = `
 Available tools (call only these, with exactly these argument shapes):
 
-- create_character {name, description?} — add a new character to the library.
+- create_character {name, appearance?, personalityNotes?} — add a new character identity. Appearance describes physical identity; never put rendering style here because the project Art Style is applied automatically.
 - generate_character_asset {characterName, kind: "reference"|"pose"|"expression", pose?, expression?, outfit?, view?, instruction?} — AI-generate a reusable full-state character asset. "reference" creates the canonical identity image.
 - generate_background {description, name?} — AI-generate a reusable background.
 - generate_prop {description, name?} — AI-generate a reusable prop.

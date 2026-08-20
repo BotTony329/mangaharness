@@ -13,6 +13,7 @@ import {
   type ProjectDocument,
   type Rect,
 } from "./types";
+import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 
 export function newId(): ID {
   // crypto.randomUUID only exists in secure contexts (https / localhost);
@@ -73,7 +74,12 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
       id: projectId,
       name,
       // B5-ish proportions at screen-friendly resolution; export can scale 2x.
-      settings: { pageWidth: 1200, pageHeight: 1800, readingDirection: "rtl" },
+      settings: {
+        pageWidth: 1200,
+        pageHeight: 1800,
+        readingDirection: "rtl",
+        artStyle: { activeStyleId: DEFAULT_STYLE_PROFILE_ID, customProfiles: {} },
+      },
       createdAt: created,
       updatedAt: created,
     },

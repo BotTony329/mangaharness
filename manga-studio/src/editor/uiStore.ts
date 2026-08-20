@@ -27,20 +27,26 @@ interface UiState {
   shapeEditPanelId: ID | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
+  artStyleOpen: boolean;
   openGenerator(request: GeneratorRequest): void;
   closeGenerator(): void;
   setShapeEditPanel(panelId: ID | null): void;
   openSettings(): void;
   closeSettings(): void;
+  openArtStyle(): void;
+  closeArtStyle(): void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   generator: null,
   shapeEditPanelId: null,
   settingsOpen: false,
+  artStyleOpen: false,
   openGenerator: (request) => set({ generator: request }),
   closeGenerator: () => set({ generator: null }),
   setShapeEditPanel: (panelId) => set({ shapeEditPanelId: panelId }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  openArtStyle: () => set({ artStyleOpen: true }),
+  closeArtStyle: () => set({ artStyleOpen: false }),
 }));

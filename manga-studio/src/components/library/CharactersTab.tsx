@@ -19,6 +19,7 @@ import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { uploadImageFile } from "./uploadAsset";
+import { getActiveStyleProfile } from "@/styles/profiles";
 import {
   inspectReferenceImage,
   REFERENCE_ACCEPT,
@@ -72,7 +73,8 @@ function CharacterCard({ character }: { character: Character }) {
       </button>
       {open && (
         <div className="mt-2 space-y-3">
-          {character.description && <p className="text-[11px] leading-4 text-zinc-500">{character.description}</p>}
+          {(character.appearance ?? character.description) && <p className="text-[11px] leading-4 text-zinc-500">{character.appearance ?? character.description}</p>}
+          {character.personalityNotes && <p className="text-[10px] italic leading-4 text-zinc-600">{character.personalityNotes}</p>}
           {reference ? (
             <AssetThumb asset={reference} subtitle="Reference" />
           ) : (
@@ -124,7 +126,8 @@ type PackItem = { label: string; status: "pending" | "running" | "done" | "faile
 
 function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [appearance, setAppearance] = useState("");
+  const [personalityNotes, setPersonalityNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reference, setReference] = useState<ReferenceImageSelection | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -189,7 +192,12 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     let characterId = "";
     useEditorStore.getState().commit((d) => {
-      const result = addCharacter(d, name.trim(), description.trim() || undefined);
+      const result = addCharacter(
+        d,
+        name.trim(),
+        appearance.trim() || undefined,
+        personalityNotes.trim() || undefined,
+      );
       characterId = result.characterId;
       return result.doc;
     });
@@ -279,6 +287,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   };
 
   const generationUnavailable = providerStatus?.configured === false || providerStatus?.storage?.configured === false;
+  const activeStyle = getActiveStyleProfile(useEditorStore.getState().doc!);
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
@@ -287,23 +296,37 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">New Character</h2>
-        <label className="mb-1 block text-xs text-zinc-400">Name</label>
+        <label htmlFor="character-name" className="mb-1 block text-xs text-zinc-400">Name</label>
         <input
+          id="character-name"
           className="mb-3 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Akari"
           autoFocus
         />
-        <label className="mb-1 block text-xs text-zinc-400">Description</label>
+        <label htmlFor="character-appearance" className="mb-1 block text-xs text-zinc-400">Appearance</label>
         <textarea
+          id="character-appearance"
           className="mb-3 h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Japanese high school girl, short black hair, winter school uniform, manga style."
+          value={appearance}
+          onChange={(e) => setAppearance(e.target.value)}
+          placeholder="Young girl with long sleek hair, calm eyes and a polished appearance."
         />
-        <label className="mb-1 block text-xs text-zinc-400">Reference image (optional)</label>
+        <label htmlFor="character-personality" className="mb-1 block text-xs text-zinc-400">Personality / visual identity (optional)</label>
+        <textarea
+          id="character-personality"
+          className="mb-3 h-16 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          value={personalityNotes}
+          onChange={(e) => setPersonalityNotes(e.target.value)}
+          placeholder="Cool, composed and slightly aloof."
+        />
+        <p className="mb-3 rounded border border-violet-800/50 bg-violet-950/20 p-2 text-[11px] text-violet-200">
+          Project Art Style: <strong>{activeStyle.name}</strong>. Describe who the character is here; drawing style is applied automatically.
+        </p>
+        <label htmlFor="character-reference" className="mb-1 block text-xs text-zinc-400">Reference image (optional)</label>
         <input
+          id="character-reference"
           ref={fileInput}
           type="file"
           accept={REFERENCE_ACCEPT.join(",")}
@@ -350,7 +373,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-xs font-medium text-zinc-300">Character generation</p>
           <label className="mb-2 flex cursor-pointer gap-2 text-xs">
             <input type="radio" checked={mode === "starter"} disabled={isBusy} onChange={() => setMode("starter")} />
-            <span><strong className="text-zinc-200">Starter Pack</strong><br /><span className="text-zinc-500">1 canonical reference + 4 poses + 4 expressions (9 images without an upload)</span></span>
+            <span><strong className="text-zinc-200">Asset Pack</strong><br /><span className="text-zinc-500">1 canonical reference + 8 poses + 7 additional expressions (16 generations without an upload)</span></span>
           </label>
           <label className="flex cursor-pointer gap-2 text-xs">
             <input type="radio" checked={mode === "reference"} disabled={isBusy} onChange={() => setMode("reference")} />
@@ -408,7 +431,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
               disabled={isBusy || providerStatus === null}
               onClick={() => create(true)}
             >
-              Create {mode === "starter" ? "Starter Pack" : "Reference"}
+              Create {mode === "starter" ? "Asset Pack" : "Reference"}
             </button>
           )}
         </div>

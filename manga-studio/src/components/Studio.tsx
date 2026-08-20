@@ -14,6 +14,7 @@ import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { indexedDbPersistence } from "@/storage/projectStore";
 import { AiSettingsDialog } from "./dialogs/AiSettingsDialog";
+import { ArtStyleDialog } from "./dialogs/ArtStyleDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { AssetLibraryPanel } from "./library/AssetLibraryPanel";
 import { PagesBar } from "./PagesBar";
@@ -127,6 +128,7 @@ export function Studio() {
       <PagesBar />
       <GeneratorDialog />
       <AiSettingsDialog />
+      <ArtStyleDialog />
     </div>
   );
 }

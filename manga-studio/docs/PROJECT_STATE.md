@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-20 (virtual character rig and starter asset pack)
+Last updated: 2026-08-20 (project-level art style system)
 
 ## Current status
 
@@ -16,6 +16,10 @@ Last updated: 2026-08-20 (virtual character rig and starter asset pack)
 | Virtual character state | DEPLOYED | Placed characters carry independent pose, expression, outfit, and view fields. The shared resolver reuses only exact full-state matches, uses a compatible render as optional generation guidance, generates missing combinations against the canonical identity reference, and swaps the source without changing composition. |
 | Character starter pack | DEPLOYED | New characters default to Starter Pack (1 canonical reference, 4 neutral-expression poses, 4 additional expressions = 9 generations without an uploaded reference) with Reference Only, itemized progress, cache skipping, and cancel-remaining behavior. Completed assets are retained. |
 | Agent character editing | DEPLOYED | `set_character_slot` uses the same resolver as the Inspector and preserves all unspecified state fields. Pose, expression, outfit, and view are supported. |
+| Project Art Style | WORKING LOCALLY | Schema v4 persists one active provider-neutral StyleProfile per project plus custom profiles. All 32 requested built-in substyles contain real positive/negative prompt logic and semantic visual properties. Changing style leaves existing assets untouched. |
+| Visual style selection | WORKING LOCALLY | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
+| Style propagation | WORKING LOCALLY | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
+| Character identity UX | WORKING LOCALLY | Character creation separates Name, Appearance, and Personality / visual identity from Project Art Style. The progressive Asset Pack contains eight poses and eight expressions without a Cartesian-product explosion. |
 
 ## Root cause record
 
@@ -35,14 +39,16 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - The generator uses the `generateContent` adapter surface. Google currently promotes the newer Interactions API for image workflows, but the existing surface is retained until production evidence requires a migration.
 - Production Character creation, refresh persistence, and derived pose/expression generation must be recorded here only after the new deployment is exercised with the user’s BYOK session.
 - Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
+- Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
+- Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 18 files, 131 tests passed, including Yuri walking/neutral → walking/angry → running/angry → cached walking/angry reuse.
+- Tests: 19 files, 136 tests passed, covering built-in profile completeness, custom profile persistence, style-aware prompts/provenance, style-aware cache isolation, schema-v4 migration, and the progressive 15-state character pack.
 - Production build: passed with Next.js 15.5.23.
-- Local browser: passed (meaningful page render, no error overlay/console errors, Starter Pack and Reference Only controls, 9-image estimate).
+- Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.
 - Production deployment: READY, `dpl_AjFEj33GqoL7dwpo1nB1xbyur3cu` (`https://mangaharness.vercel.app`).
 - Production browser verification: passed (Starter Pack, Reference Only, 9-image estimate, no overlay, no console/page errors).

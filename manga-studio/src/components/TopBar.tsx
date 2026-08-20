@@ -10,6 +10,7 @@ import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { exportCurrentPagePng } from "@/export/exportPage";
+import { getActiveStyleProfile } from "@/styles/profiles";
 
 const BUBBLE_TYPES: { type: BubbleType; label: string }[] = [
   { type: "speech", label: "Speech bubble" },
@@ -33,11 +34,13 @@ export function TopBar() {
   const currentPageId = useEditorStore((s) => s.currentPageId);
   const selection = useEditorStore((s) => s.selection);
   const openSettings = useUiStore((s) => s.openSettings);
+  const openArtStyle = useUiStore((s) => s.openArtStyle);
   const [exporting, setExporting] = useState(false);
 
   if (!doc) return null;
 
   const page = currentPageId ? doc.pages[currentPageId] : null;
+  const activeStyle = getActiveStyleProfile(doc);
   // Toolbar tools target the selected panel, falling back to the first panel.
   const targetPanelId = selection.panelId ?? page?.panelIds[0];
 
@@ -111,6 +114,14 @@ export function TopBar() {
       <Dropdown label="+ Effect" items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))} onPick={(k) => addEffectToPanel(k as EffectKind)} />
 
       <div className="flex-1" />
+
+      <button
+        className="max-w-[220px] truncate rounded border border-violet-700/70 bg-violet-950/40 px-3 py-1 text-violet-200 hover:bg-violet-900/50"
+        onClick={openArtStyle}
+        title={`Project Art Style: ${activeStyle.name}`}
+      >
+        Art Style · {activeStyle.name}
+      </button>
 
       <button
         className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1 hover:bg-zinc-700"

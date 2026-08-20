@@ -6,6 +6,7 @@ import type {
   ProjectDocument,
   SourceAsset,
 } from "@/domain/types";
+import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 
 export const DEFAULT_CHARACTER_STATE = {
   pose: "standing",
@@ -74,6 +75,15 @@ export function characterReferenceId(character: Character): ID | undefined {
   return character.canonicalReferenceAssetId ?? character.referenceAssetId;
 }
 
+export function characterIdentityDescription(character: Character): string | undefined {
+  const appearance = character.appearance ?? character.description;
+  const parts = [
+    appearance ? `Appearance: ${appearance}` : "",
+    character.personalityNotes ? `Personality and visual identity: ${character.personalityNotes}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(". ") : undefined;
+}
+
 function selectableCharacterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
   return character.assetIds
     .map((id) => doc.assets[id])
@@ -90,6 +100,11 @@ export function findExactCharacterAsset(
 ): SourceAsset | undefined {
   return selectableCharacterAssets(doc, character)
     .filter((asset) => asset.id !== excludeAssetId)
+    .filter(
+      (asset) =>
+        (asset.metadata?.styleProfileId ?? DEFAULT_STYLE_PROFILE_ID) ===
+        doc.project.settings.artStyle.activeStyleId,
+    )
     .filter((asset) => {
       const state = stateFromAsset(asset, character.id);
       return Boolean(state && sameCharacterState(state, desired));
@@ -122,8 +137,8 @@ export function availableCharacterStateValues(
   key: keyof CharacterStatePatch,
 ): string[] {
   const defaults: Record<keyof CharacterStatePatch, string[]> = {
-    pose: ["standing", "walking", "running", "sitting"],
-    expression: ["neutral", "happy", "angry", "crying", "surprised"],
+    pose: ["standing", "walking", "running", "sitting", "jumping", "pointing", "arms crossed", "looking back"],
+    expression: ["neutral", "smile", "laugh", "angry", "crying", "shocked", "embarrassed", "worried"],
     outfit: [DEFAULT_CHARACTER_STATE.outfit, "casual outfit", "school uniform", "formal outfit", "battle outfit"],
     view: ["front", "three-quarter", "side", "back"],
   };

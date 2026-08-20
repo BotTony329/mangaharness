@@ -63,7 +63,7 @@ describe("project serialization", () => {
 
     const migrated = deserializeProject(JSON.stringify(legacy));
     const migratedInstance = migrated.items[instance.id];
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.characters[character.id].canonicalReferenceAssetId).toBe(character.referenceAssetId);
     expect(migrated.assets[asset.id].metadata).toMatchObject({ outfit: "default outfit", view: "front" });
     expect(migratedInstance.kind === "asset" && migratedInstance.characterState).toMatchObject({
@@ -72,6 +72,7 @@ describe("project serialization", () => {
       outfit: "default outfit",
       view: "front",
     });
+    expect(migrated.project.settings.artStyle.activeStyleId).toBe("japanese-manga/minimal-line-manga");
   });
 });
 

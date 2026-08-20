@@ -152,6 +152,32 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         />
       </div>
 
+      {item.kind === "asset" && asset && (
+        <div>
+          <Label>Scale</Label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={5}
+              max={200}
+              step={1}
+              value={Math.max(5, Math.min(200, Math.round((item.height / Math.max(asset.height, 1)) * 100)))}
+              className="min-w-0 flex-1 accent-indigo-500"
+              onChange={(event) => {
+                const scale = Number(event.target.value) / 100;
+                commit((doc) => updateItemTransform(doc, id, {
+                  width: asset.width * scale,
+                  height: asset.height * scale,
+                }));
+              }}
+            />
+            <span className="w-10 text-right text-[10px] text-zinc-500">
+              {Math.round((item.height / Math.max(asset.height, 1)) * 100)}%
+            </span>
+          </div>
+        </div>
+      )}
+
       <div>
         <Label>Rotation</Label>
         <input

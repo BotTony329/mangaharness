@@ -60,7 +60,7 @@ describe("legacy project migration", () => {
       generationHistory: [],
     };
     const migrated = deserializeProject(JSON.stringify(v1));
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.panels.pn1.points).toEqual([
       { x: 0.1, y: 0.1 },
       { x: 0.6, y: 0.1 },
