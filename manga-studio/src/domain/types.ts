@@ -26,6 +26,8 @@ export interface Point {
 
 /** Open union so future categories don't require a schema rewrite. */
 export type AssetCategory = "character" | "background" | "prop" | "upload";
+export type AssetType = "character-visual" | "background" | "prop" | "reference" | "effect" | "upload";
+export type AssetStatus = "ready" | "processing" | "failed" | "archived";
 
 // ─── Source assets (the library) ────────────────────────────────────────────
 
@@ -64,11 +66,29 @@ export interface AssetGenerationMetadata {
   generatedAt?: ISODate;
 }
 
+/** Provider-neutral origin information used for reuse, regeneration and audit. */
+export interface AssetProvenance {
+  provider?: string;
+  model?: string;
+  prompt?: string;
+  negativePrompt?: string;
+  generatedFromAssetIds?: ID[];
+  characterId?: ID;
+  characterState?: Partial<Omit<CharacterState, "characterId" | "assetId">>;
+  canonicalReferenceAssetId?: ID;
+  projectStyleId?: ID;
+  generationType?: string;
+  generatedAt?: ISODate;
+}
+
 export interface SourceAsset {
   id: ID;
   projectId: ID;
   category: AssetCategory;
+  /** Canonical semantic type. `category` remains as a schema-v1 compatibility alias. */
+  type: AssetType;
   name: string;
+  sourceUrl: string;
   /** Public URL in object storage (or same-origin dev path). Never a filesystem path. */
   storageUrl: string;
   /** Optional non-destructive derivative used for compositing and export. */
@@ -80,9 +100,12 @@ export interface SourceAsset {
   hasAlpha?: boolean;
   backgroundRemoved?: boolean;
   processingStatus?: "raw" | "processing" | "ready" | "failed";
+  status: AssetStatus;
   focusRegions?: FocusRegion[];
   metadata?: AssetGenerationMetadata;
+  provenance?: AssetProvenance;
   createdAt: ISODate;
+  updatedAt: ISODate;
 }
 
 // ─── Characters ─────────────────────────────────────────────────────────────
@@ -100,12 +123,14 @@ export interface Character {
   /** Identity facts only — rendering instructions belong to Project Art Style. */
   appearance?: string;
   personalityNotes?: string;
+  defaultOutfit?: string;
   /** Canonical identity reference sent with every generation for this character. */
   referenceAssetId?: ID;
   /** Stable v3 name. referenceAssetId remains as a legacy compatibility alias. */
   canonicalReferenceAssetId?: ID;
   assetIds: ID[];
   createdAt: ISODate;
+  updatedAt?: ISODate;
 }
 
 /** The semantic state of one placed character. Every field is independent. */
@@ -165,6 +190,44 @@ export interface Panel {
   border: PanelBorder;
   /** Ordered bottom → top. The layer list UI is a projection of this array. */
   itemIds: ID[];
+}
+
+// ─── Semantic panel scenes ─────────────────────────────────────────────────
+
+export type SceneDepth = "foreground" | "midground" | "background";
+export type SceneFacing = "left" | "right" | "camera";
+export type ScenePosition = "left" | "center" | "right";
+
+export interface SceneCharacter {
+  characterInstanceId: ID;
+  characterId: ID;
+  role?: string;
+  depth?: SceneDepth;
+  facing?: SceneFacing;
+  semanticPosition?: ScenePosition;
+}
+
+export interface SceneRelationship {
+  id: ID;
+  subjectCharacterId: ID;
+  action: string;
+  targetCharacterId?: ID;
+}
+
+export interface SceneContinuity {
+  sceneKey?: string;
+  backgroundSourcePanelId?: ID;
+  previousPanelId?: ID;
+}
+
+export interface PanelScene {
+  panelId: ID;
+  location?: string;
+  backgroundAssetId?: ID;
+  characters: SceneCharacter[];
+  relationships: SceneRelationship[];
+  dialogue: string[];
+  continuity?: SceneContinuity;
 }
 
 // ─── Panel items (instances — never the source) ─────────────────────────────
@@ -322,6 +385,7 @@ export interface ProjectDocument {
   characters: Record<ID, Character>;
   pages: Record<ID, Page>;
   panels: Record<ID, Panel>;
+  scenes: Record<ID, PanelScene>;
   items: Record<ID, PanelItem>;
   /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
   workspaceItems: Record<ID, WorkspaceItem>;
@@ -329,4 +393,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;

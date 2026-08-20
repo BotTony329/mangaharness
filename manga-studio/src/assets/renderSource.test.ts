@@ -6,11 +6,15 @@ const legacyAsset = {
   id: "asset-1",
   projectId: "project-1",
   category: "character",
+  type: "character-visual",
   name: "Yuri",
   storageUrl: "https://example.com/yuri-source.jpg",
+  sourceUrl: "https://example.com/yuri-source.jpg",
+  status: "ready",
   width: 100,
   height: 200,
   createdAt: "2026-08-20T00:00:00.000Z",
+  updatedAt: "2026-08-20T00:00:00.000Z",
 } satisfies SourceAsset;
 
 describe("asset render source", () => {

@@ -11,6 +11,7 @@ import type {
   ProjectDocument,
   SourceAsset,
 } from "./types";
+import { deleteAsset, deleteCharacter } from "./assetLifecycle";
 
 export interface NewAssetInput {
   category: AssetCategory;
@@ -24,6 +25,8 @@ export interface NewAssetInput {
   backgroundRemoved?: boolean;
   processingStatus?: SourceAsset["processingStatus"];
   metadata?: AssetGenerationMetadata;
+  type?: SourceAsset["type"];
+  provenance?: SourceAsset["provenance"];
 }
 
 /** Record a processed derivative without overwriting the immutable source. */
@@ -36,17 +39,27 @@ export function setAssetProcessedImage(
   const asset = next.assets[assetId];
   if (!asset) throw new Error(`Unknown asset: ${assetId}`);
   Object.assign(asset, update);
+  asset.status = update.processingStatus === "processing"
+    ? "processing"
+    : update.processingStatus === "failed" ? "failed" : asset.status === "archived" ? "archived" : "ready";
+  asset.updatedAt = now();
   touch(next);
   return next;
 }
 
 export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: ProjectDocument; assetId: ID } {
   const next = cloneDoc(doc);
+  const createdAt = now();
   const asset: SourceAsset = {
     id: newId(),
     projectId: next.project.id,
-    createdAt: now(),
     ...input,
+    type: input.type ?? assetTypeFromInput(input),
+    sourceUrl: input.storageUrl,
+    status: input.processingStatus === "processing" ? "processing" : input.processingStatus === "failed" ? "failed" : "ready",
+    provenance: input.provenance ?? provenanceFromMetadata(input.metadata),
+    createdAt,
+    updatedAt: createdAt,
   };
   next.assets[asset.id] = asset;
   // Character-tagged assets also join their character's library.
@@ -62,30 +75,38 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
   return { doc: next, assetId: asset.id };
 }
 
+function assetTypeFromInput(input: NewAssetInput): SourceAsset["type"] {
+  if (input.category === "character") return input.metadata?.characterAssetRole === "canonical" ? "reference" : "character-visual";
+  return input.category;
+}
+
+function provenanceFromMetadata(metadata: AssetGenerationMetadata | undefined): SourceAsset["provenance"] {
+  if (!metadata) return undefined;
+  return {
+    provider: metadata.provider,
+    model: metadata.model,
+    prompt: metadata.prompt,
+    negativePrompt: metadata.negativePrompt,
+    generatedFromAssetIds: metadata.referenceAssetIds,
+    characterId: metadata.characterId,
+    characterState: {
+      pose: metadata.pose,
+      expression: metadata.expression,
+      outfit: metadata.outfit,
+      view: metadata.view,
+    },
+    canonicalReferenceAssetId: metadata.canonicalReferenceAssetId,
+    projectStyleId: metadata.styleProfileId,
+    generatedAt: metadata.generatedAt,
+  };
+}
+
 /**
  * Removing a source asset removes every instance of it — the only case where
  * library changes cascade into panels. The inverse never happens.
  */
 export function removeAsset(doc: ProjectDocument, assetId: ID): ProjectDocument {
-  const next = cloneDoc(doc);
-  delete next.assets[assetId];
-  for (const character of Object.values(next.characters)) {
-    character.assetIds = character.assetIds.filter((id) => id !== assetId);
-    if (character.referenceAssetId === assetId) character.referenceAssetId = character.assetIds[0];
-    if (character.canonicalReferenceAssetId === assetId) {
-      character.canonicalReferenceAssetId = character.assetIds[0];
-    }
-  }
-  const orphaned = Object.values(next.items).filter(
-    (item) => item.kind === "asset" && item.sourceAssetId === assetId,
-  );
-  for (const item of orphaned) {
-    delete next.items[item.id];
-    const panel = next.panels[item.panelId];
-    if (panel) panel.itemIds = panel.itemIds.filter((id) => id !== item.id);
-  }
-  touch(next);
-  return next;
+  return deleteAsset(doc, assetId, "cascade");
 }
 
 export function addCharacter(
@@ -111,13 +132,7 @@ export function addCharacter(
 }
 
 export function removeCharacter(doc: ProjectDocument, characterId: ID): ProjectDocument {
-  const next = cloneDoc(doc);
-  const character = next.characters[characterId];
-  if (!character) return next;
-  for (const assetId of character.assetIds) delete next.assets[assetId];
-  delete next.characters[characterId];
-  touch(next);
-  return next;
+  return deleteCharacter(doc, characterId, "delete-all");
 }
 
 export function setCharacterReference(doc: ProjectDocument, characterId: ID, assetId: ID): ProjectDocument {

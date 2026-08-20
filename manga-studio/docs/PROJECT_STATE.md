@@ -1,11 +1,16 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-21 (authoritative agent scope and semantic character placement)
+Last updated: 2026-08-21 (controlled core architecture refactor)
 
 ## Current status
 
 | Area | Status | Verified reality |
 |---|---|---|
+| Core domain architecture | WORKING LOCALLY | Schema v6 adds first-class asset lifecycle/provenance and a semantic Panel Scene for every panel. Source assets remain distinct from instances; older projects migrate forward and rebuild scenes. |
+| Canonical Command Layer | WORKING LOCALLY | Persistent manual UI actions and every Agent tool dispatch the same typed commands. Live gestures use command-backed transient previews. No component, Agent, Character, asset, or AI client directly calls the legacy `commit` mutation path. |
+| Asset and Character lifecycle | WORKING LOCALLY | Rename, archive/restore, regenerate-and-replace, reference-aware asset deletion, state removal, Character deletion with explicit asset policy, background removal, and prop removal are implemented. Used-source deletion refuses an implicit unsafe operation. |
+| Semantic scenes and composition | WORKING LOCALLY | Panel scenes track exact background identity, location, Character roles/position/facing/depth, relationships, dialogue, and continuity. Agent composition reuses cached Character states and exact scene backgrounds before generation. |
+| Agent validation | WORKING LOCALLY | Plan/runtime scope checks are followed by structural before/after scope auditing and panel composition validation. Tiny/off-panel Characters are safely corrected; unresolved missing/occluded content remains visible as validation warnings. |
 | Image generation | PARTIAL | The previously failing production request reached provider result handling, then failed while persisting the returned image because Vercel Blob was not connected. The fixed production handler emits request-scoped stage traces and Blob is connected; a fresh real BYOK generation still requires the user's configured browser session. |
 | Gemini adapter | WORKING AT ADAPTER/UNIT LEVEL | `gemini-3.1-flash-lite-image` is a current stable Google image-generation/editing model. Adapter tests cover success, reference input, malformed/missing images, HTTP 400/401/403/404/429/5xx, and timeout. The prior production exception occurred after provider invocation, not in Gemini payload construction. |
 | BYOK credential storage | CONFIGURED | User credentials remain encrypted in HttpOnly cookies. `APP_ENCRYPTION_KEY` is an operator infrastructure secret configured once in Vercel for Preview and Production; users do not configure it. Trace tests verify successful retrieval/decryption and the missing-key failure path without logging secrets. |
@@ -48,15 +53,17 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
 - The bundled foreground extractor is optimized for plain or near-uniform edge-connected backgrounds. Complex scenery or an opaque fake checkerboard fails safely and preserves the source; the `AssetPostProcessor` boundary is ready for a future dedicated segmentation service.
 - Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
+- Archived sources remain visible in panels that already use them, by design, but are excluded from new library/Agent/Character-state resolution until restored.
 - A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 23 files, 151 tests passed. Agent coverage includes selected-object/panel/page/project scope resolution, explicit expansion language, server validation rejection, runtime rejection of injected cross-panel tools, Yuri lookup by entity relationship, display-name independence, cached walking-state reuse, recoverable missing-state generation, and the exact Panel 1 isolation workflow. Transparency coverage remains intact.
+- Tests: 26 files, 163 tests passed. Coverage includes lifecycle reference handling, source-vs-instance deletion, Character deletion/state removal, pose/expression orthogonality, schema-v6 migration, scene continuity, semantic cached composition, scope validation/runtime rejection/post-run auditing, and safe composition correction. Provider/security/transparency coverage remains intact.
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
+- Local controlled-core browser acceptance: passed. The app loaded with meaningful editor controls and no framework/page errors; Character creation exposed the lifecycle controls; explicit Character deletion removed the entity; after autosave and a full reload it remained deleted. The Manga Agent rendered its authoritative scope control (`Auto · Current Page · Page 1`).
 - Local transparent-compositing acceptance: passed with a real opaque white-background Yuri upload over a colored street, panel placement, scaling, clipping, and page export. Export pixels beside Yuri remained street blue (`118,181,212,255`) while the enclosed white shirt remained opaque (`255,255,255,255`); no white rectangle or browser errors.
 - Local agent acceptance: passed. With Panel 1 selected, a background, cached Yuri Walking state, and thought bubble were added only to Panel 1; panels 2–4 remained byte-for-byte unchanged and no generation history entry was created. A separate missing-state test generated and placed a reusable Yuri state. Runtime scope rejected a panel-2 call injected after plan validation.
 - Local agent UI verification: passed. Selecting Panel 1 changed the visible scope control to `Auto · Selected Panel · Panel 1`; Current Page and Whole Project overrides were available; no Next.js overlay or browser page errors were present.

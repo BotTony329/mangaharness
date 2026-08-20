@@ -87,7 +87,7 @@ export function characterIdentityDescription(character: Character): string | und
 function selectableCharacterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
   return character.assetIds
     .map((id) => doc.assets[id])
-    .filter((asset): asset is SourceAsset => Boolean(asset))
+    .filter((asset): asset is SourceAsset => Boolean(asset) && asset.status !== "archived")
     .filter((asset) => asset.metadata?.characterAssetRole !== "canonical");
 }
 
@@ -145,7 +145,7 @@ export function availableCharacterStateValues(
   const values = new Set(defaults[key]);
   for (const assetId of character.assetIds) {
     const asset = doc.assets[assetId];
-    if (!asset) continue;
+    if (!asset || asset.status === "archived") continue;
     const state = stateFromAsset(asset, character.id);
     if (state) values.add(state[key]);
   }

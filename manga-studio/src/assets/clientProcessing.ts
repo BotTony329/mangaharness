@@ -1,6 +1,5 @@
 "use client";
 
-import { setAssetProcessedImage } from "@/domain/libraryOps";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 
@@ -18,7 +17,7 @@ export async function removeAssetBackground(assetId: ID): Promise<void> {
   if (!asset || (asset.category !== "character" && asset.category !== "prop")) {
     throw new Error("Background removal is available for character and prop assets");
   }
-  useEditorStore.getState().commit((doc) => setAssetProcessedImage(doc, assetId, { processingStatus: "processing" }));
+  useEditorStore.getState().dispatch({ type: "set-asset-processed", assetId, update: { processingStatus: "processing" } });
   try {
     const response = await fetch("/api/assets/remove-background", {
       method: "POST",
@@ -29,16 +28,18 @@ export async function removeAssetBackground(assetId: ID): Promise<void> {
     if (!response.ok || body.processingStatus === "failed" || !body.processedImageUrl) {
       throw new Error(body.error ?? "Background removal failed");
     }
-    useEditorStore.getState().commit((doc) =>
-      setAssetProcessedImage(doc, assetId, {
+    useEditorStore.getState().dispatch({
+      type: "set-asset-processed",
+      assetId,
+      update: {
         processedImageUrl: body.processedImageUrl,
         hasAlpha: body.hasAlpha === true,
         backgroundRemoved: body.backgroundRemoved === true,
         processingStatus: "ready",
-      }),
-    );
+      },
+    });
   } catch (error) {
-    useEditorStore.getState().commit((doc) => setAssetProcessedImage(doc, assetId, { processingStatus: "failed" }));
+    useEditorStore.getState().dispatch({ type: "set-asset-processed", assetId, update: { processingStatus: "failed" } });
     throw error;
   }
 }

@@ -74,6 +74,33 @@ export const toolSchemas = {
     generateIfMissing: z.boolean().optional(),
   }),
 
+  compose_character: z.object({
+    panel: panelIndex,
+    characterName: z.string().min(1).max(80),
+    pose: z.string().max(80).optional(),
+    expression: z.string().max(80).optional(),
+    outfit: z.string().max(120).optional(),
+    view: z.string().max(80).optional(),
+    framing: z.enum(["full-body", "medium-full", "medium", "upper-body", "close-up", "face"]).optional(),
+    position: z.enum(["left", "center", "right"]).optional(),
+    facing: z.enum(["left", "right", "camera"]).optional(),
+    depth: z.enum(["foreground", "midground", "background"]).optional(),
+    role: z.string().max(100).optional(),
+    generateIfMissing: z.boolean().optional(),
+  }),
+
+  reuse_scene_background: z.object({
+    sourcePanel: panelIndex,
+    targetPanel: panelIndex,
+  }),
+
+  add_scene_relationship: z.object({
+    panel: panelIndex,
+    subjectCharacterName: z.string().min(1).max(80),
+    action: z.string().min(1).max(160),
+    targetCharacterName: z.string().min(1).max(80).optional(),
+  }),
+
   set_character_slot: z.object({
     panel: panelIndex.optional().describe("Omit to target the user's selected character instance"),
     characterName: z.string().max(80).optional(),
@@ -188,6 +215,8 @@ export function validatePlan(raw: unknown, scope?: AgentRunScope): PlanValidatio
 const PANEL_TOOLS = new Set<ToolName>([
   "place_asset",
   "place_character",
+  "compose_character",
+  "add_scene_relationship",
   "set_character_slot",
   "reshape_panel",
   "set_crop_mode",
@@ -210,9 +239,16 @@ export function validateStepScope(tool: ToolName, args: Record<string, unknown>,
     if (PANEL_TOOLS.has(tool) && args.panel !== scope.panelNumber) {
       return `Scope violation: ${scope.label} allows only panel ${scope.panelNumber}`;
     }
+    if (tool === "reuse_scene_background" && args.targetPanel !== scope.panelNumber) {
+      return `Scope violation: ${scope.label} allows only panel ${scope.panelNumber}`;
+    }
   }
   if (PANEL_TOOLS.has(tool) && typeof args.panel === "number" && args.panel > scope.panelCount) {
     return `Scope violation: panel ${args.panel} is outside ${scope.pageName}`;
+  }
+  if (tool === "reuse_scene_background") {
+    if (typeof args.sourcePanel === "number" && args.sourcePanel > scope.panelCount) return `Scope violation: source panel ${args.sourcePanel} is outside ${scope.pageName}`;
+    if (typeof args.targetPanel === "number" && args.targetPanel > scope.panelCount) return `Scope violation: target panel ${args.targetPanel} is outside ${scope.pageName}`;
   }
   return null;
 }
@@ -228,6 +264,9 @@ Available tools (call only these, with exactly these argument shapes):
 - set_page_layout {layout: "single"|"two-vertical"|"two-horizontal"|"three-vertical"|"four-grid"|"yonkoma"} — replace the current page's panel arrangement (existing content is preserved).
 - place_asset {panel?, target?, characterName?, pose?, expression?, outfit?, view?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead.
 - place_character {panel, characterName, pose?, expression?, outfit?, view?, cropMode?, flipX?, generateIfMissing?} — preferred semantic character placement. Resolve the Character entity first, reuse a cached asset matching every requested state field, and generate the missing state only when needed.
+- compose_character {panel, characterName, pose?, expression?, outfit?, view?, framing?, position?, facing?, depth?, role?, generateIfMissing?} — preferred scene-aware placement. Resolve or generate the semantic Character state, then compose it with explicit shot, position, facing, depth, and narrative role.
+- reuse_scene_background {sourcePanel, targetPanel} — reuse the exact same background asset and continuity metadata; never regenerate a merely similar location.
+- add_scene_relationship {panel, subjectCharacterName, action, targetCharacterName?} — record semantic action/interaction in the panel scene graph.
 - set_character_slot {panel?, characterName?, pose?, expression?, outfit?, view?, generateIfMissing?} — change the selected character's semantic state. Unspecified fields MUST remain unchanged ("make her cry" changes expression only; "run angrily" changes pose and expression). The shared resolver reuses an exact full-state cache hit or generates the missing combination, then swaps it without changing composition.
 - set_crop_mode {panel, characterName?, category?, mode: "fit"|"fill"|"upper-body"|"face"|"custom"} — reframe an already-placed instance. "upper-body" = medium shot, "fill" = full-bleed. Close-ups come from crop modes, never from regenerating.
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.

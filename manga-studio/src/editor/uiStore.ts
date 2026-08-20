@@ -19,6 +19,8 @@ export interface GeneratorRequest {
    * the selected instance).
    */
   targetInstanceId?: ID;
+  /** Regeneration replaces every reference to the old source after acceptance. */
+  replaceAssetId?: ID;
 }
 
 interface UiState {

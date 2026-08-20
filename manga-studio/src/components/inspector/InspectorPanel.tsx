@@ -12,19 +12,10 @@ import {
   type CharacterStatePatch,
 } from "@/characters/state";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
-import {
-  duplicateItem,
-  removeItem,
-  reorderItem,
-  setCropMode,
-  swapInstanceAsset,
-  updateBubble,
-  updateItemProps,
-  updateItemTransform,
-  type ReorderDirection,
-} from "@/domain/itemOps";
+import type { ReorderDirection } from "@/domain/itemOps";
+import type { DomainCommand } from "@/domain/commands";
 import type { AssetInstance, BubbleType, CharacterState, CropMode, PanelItem, SourceAsset } from "@/domain/types";
-import { useEditorStore, type DocMutation } from "@/editor/store";
+import { useEditorStore } from "@/editor/store";
 import { useState } from "react";
 
 const CROP_MODES: { mode: CropMode; label: string }[] = [
@@ -61,7 +52,7 @@ export function InspectorPanel() {
 }
 
 function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }) {
-  const commit = (mutation: DocMutation) => useEditorStore.getState().commit(mutation);
+  const dispatch = (command: DomainCommand) => useEditorStore.getState().dispatch(command);
   const id = item.id;
 
   return (
@@ -88,7 +79,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                       ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
                       : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30"
                   }`}
-                  onClick={() => commit((d) => setCropMode(d, id, mode))}
+                  onClick={() => dispatch({ type: "set-framing", instanceId: id, cropMode: mode })}
                 >
                   {label}
                 </button>
@@ -107,7 +98,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
             <textarea
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2"
               value={item.text}
-              onChange={(e) => commit((d) => updateBubble(d, id, { text: e.target.value }))}
+              onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { text: e.target.value } })}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -116,7 +107,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
               <select
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
                 value={item.bubbleType}
-                onChange={(e) => commit((d) => updateBubble(d, id, { bubbleType: e.target.value as BubbleType }))}
+                onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { bubbleType: e.target.value as BubbleType } })}
               >
                 <option value="speech">Speech</option>
                 <option value="thought">Thought</option>
@@ -132,7 +123,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                 max={96}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
                 value={item.fontSize}
-                onChange={(e) => commit((d) => updateBubble(d, id, { fontSize: Number(e.target.value) || 22 }))}
+                onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { fontSize: Number(e.target.value) || 22 } })}
               />
             </div>
           </div>
@@ -148,7 +139,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           step={0.05}
           value={item.opacity}
           className="w-full accent-indigo-500"
-          onChange={(e) => commit((d) => updateItemProps(d, id, { opacity: Number(e.target.value) }))}
+          onChange={(e) => dispatch({ type: "set-instance-props", instanceId: id, patch: { opacity: Number(e.target.value) } })}
         />
       </div>
 
@@ -165,10 +156,10 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
               className="min-w-0 flex-1 accent-indigo-500"
               onChange={(event) => {
                 const scale = Number(event.target.value) / 100;
-                commit((doc) => updateItemTransform(doc, id, {
+                dispatch({ type: "update-instance-transform", instanceId: id, patch: {
                   width: asset.width * scale,
                   height: asset.height * scale,
-                }));
+                }});
               }}
             />
             <span className="w-10 text-right text-[10px] text-zinc-500">
@@ -184,14 +175,14 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           type="number"
           className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
           value={Math.round(item.rotation)}
-          onChange={(e) => commit((d) => updateItemTransform(d, id, { rotation: Number(e.target.value) || 0 }))}
+          onChange={(e) => dispatch({ type: "update-instance-transform", instanceId: id, patch: { rotation: Number(e.target.value) || 0 } })}
         />
       </div>
 
       {item.kind === "asset" && (
         <button
           className="w-full rounded border border-zinc-700 bg-zinc-800 py-1.5 hover:bg-zinc-700"
-          onClick={() => commit((d) => updateItemProps(d, id, { flipX: !item.flipX }))}
+          onClick={() => dispatch({ type: "set-instance-props", instanceId: id, patch: { flipX: !item.flipX } })}
         >
           Flip horizontally {item.flipX ? "(flipped)" : ""}
         </button>
@@ -212,7 +203,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
               key={direction}
               title={`Send ${direction}`}
               className="rounded border border-zinc-700 bg-zinc-800 py-1.5 hover:bg-zinc-700"
-              onClick={() => commit((d) => reorderItem(d, id, direction))}
+              onClick={() => dispatch({ type: "reorder-instance", instanceId: id, direction })}
             >
               {glyph}
             </button>
@@ -223,7 +214,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
       <div className="flex gap-2 pt-1">
         <button
           className="flex-1 rounded border border-zinc-700 bg-zinc-800 py-1.5 hover:bg-zinc-700"
-          onClick={() => commit((d) => duplicateItem(d, id).doc)}
+          onClick={() => dispatch({ type: "duplicate-instance", instanceId: id })}
         >
           Duplicate
         </button>
@@ -231,7 +222,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           className="flex-1 rounded border border-red-900 bg-red-950/60 py-1.5 text-red-300 hover:bg-red-900/60"
           onClick={() => {
             useEditorStore.getState().select({ panelId: item.panelId });
-            commit((d) => removeItem(d, id));
+            dispatch({ type: "delete-instance", instanceId: id });
           }}
         >
           Delete
@@ -339,7 +330,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
               disabled={busy}
               className="rounded border border-zinc-700 py-1 hover:bg-zinc-800 disabled:opacity-50"
               onClick={() => {
-                useEditorStore.getState().commit((next) => swapInstanceAsset(next, item.id, review.previousAssetId));
+                useEditorStore.getState().dispatch({ type: "swap-instance-asset", instanceId: item.id, assetId: review.previousAssetId });
                 setReview(undefined);
               }}
             >

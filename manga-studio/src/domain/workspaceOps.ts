@@ -10,6 +10,7 @@ import { cloneDoc, touch } from "./docHelpers";
 import { newId } from "./factory";
 import { placeAsset } from "./itemOps";
 import type { CropMode, ID, Point, ProjectDocument, WorkspaceItem } from "./types";
+import { syncPanelScene } from "./sceneOps";
 
 /** Default display size for a freshly dropped loose asset. */
 const MAX_LOOSE_SIZE = 360;
@@ -133,6 +134,7 @@ export function instanceToWorkspaceItem(
   next.workspaceOrder.push(item.id);
   delete next.items[instanceId];
   next.panels[instance.panelId].itemIds = next.panels[instance.panelId].itemIds.filter((id) => id !== instanceId);
+  syncPanelScene(next, instance.panelId);
   touch(next);
   return { doc: next, itemId: item.id };
 }

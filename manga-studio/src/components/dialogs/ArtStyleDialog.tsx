@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { StyleFamilyId, StyleProfile } from "@/domain/types";
-import { addCustomStyle, setProjectStyle } from "@/domain/styleOps";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import {
@@ -78,7 +77,7 @@ function ArtStyleDialogInner({ onClose }: { onClose: () => void }) {
                     key={profile.id}
                     profile={profile}
                     active={profile.id === active.id}
-                    onSelect={() => useEditorStore.getState().commit((next) => setProjectStyle(next, profile.id))}
+                    onSelect={() => useEditorStore.getState().dispatch({ type: "set-project-style", styleId: profile.id })}
                   />
                 ))}
               </div>
@@ -180,16 +179,17 @@ function CustomStyleForm() {
       const referenceAssetId = reference
         ? await uploadImageFile(reference.file, "upload", { name: `${name.trim()} style reference` })
         : undefined;
-      useEditorStore.getState().commit((doc) =>
-        addCustomStyle(doc, {
+      useEditorStore.getState().dispatch({
+        type: "add-custom-style",
+        input: {
           name: name.trim(),
           description: description.trim(),
           positivePrompt: positive.trim() || description.trim(),
           negativePrompt: negative.trim() || undefined,
           referenceAssetId,
           visualProperties: { rendering: "custom", detailLevel: "user-defined" },
-        }).doc,
-      );
+        },
+      });
       setExpanded(false);
       setName("");
       setDescription("");

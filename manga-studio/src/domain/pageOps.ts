@@ -4,6 +4,7 @@ import { cloneDoc, touch } from "./docHelpers";
 import { createPanelFromRect, defaultPageWorkspacePosition, newId } from "./factory";
 import { LAYOUT_PRESETS } from "./layouts";
 import type { ID, LayoutPresetId, Page, ProjectDocument } from "./types";
+import { createEmptyScene, syncPanelScene } from "./sceneOps";
 
 export function addPage(
   doc: ProjectDocument,
@@ -38,6 +39,7 @@ export function setPageLayout(doc: ProjectDocument, pageId: ID, layout: LayoutPr
   const oldStacks = page.panelIds.map((panelId) => {
     const stack = next.panels[panelId]?.itemIds ?? [];
     delete next.panels[panelId];
+    delete next.scenes[panelId];
     return stack;
   });
 
@@ -53,6 +55,7 @@ export function setPageLayout(doc: ProjectDocument, pageId: ID, layout: LayoutPr
       const item = next.items[itemId];
       if (item) item.panelId = panelId;
     }
+    syncPanelScene(next, panelId);
   });
 
   touch(next);
@@ -66,6 +69,7 @@ export function removePage(doc: ProjectDocument, pageId: ID): ProjectDocument {
   for (const panelId of page.panelIds) {
     for (const itemId of next.panels[panelId]?.itemIds ?? []) delete next.items[itemId];
     delete next.panels[panelId];
+    delete next.scenes[panelId];
   }
   delete next.pages[pageId];
   Object.values(next.pages)
@@ -82,6 +86,7 @@ function applyLayout(doc: ProjectDocument, page: Page, layout: LayoutPresetId): 
   for (const rect of LAYOUT_PRESETS[layout].rects) {
     const panel = createPanelFromRect(page.id, rect);
     doc.panels[panel.id] = panel;
+    doc.scenes[panel.id] = createEmptyScene(panel.id);
     page.panelIds.push(panel.id);
   }
 }

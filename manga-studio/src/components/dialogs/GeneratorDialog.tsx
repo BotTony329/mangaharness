@@ -17,7 +17,6 @@ import {
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
-import { swapInstanceAsset } from "@/domain/itemOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
@@ -47,7 +46,7 @@ export function GeneratorDialog() {
 function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest; onClose: () => void }) {
   const doc = useEditorStore((s) => s.doc);
   const [provider, setProvider] = useState<ProviderInfo | null>(null);
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(request.prefill?.description ?? "");
   const [pose, setPose] = useState(request.prefill?.pose ?? "");
   const [expression, setExpression] = useState(request.prefill?.expression ?? "");
   const [phase, setPhase] = useState<"idle" | "generating" | "done">("idle");
@@ -144,8 +143,11 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     if (request.targetInstanceId) {
       const store = useEditorStore.getState();
       if (store.doc?.items[request.targetInstanceId]) {
-        store.commit((d) => swapInstanceAsset(d, request.targetInstanceId!, assetId));
+        store.dispatch({ type: "swap-instance-asset", instanceId: request.targetInstanceId, assetId });
       }
+    }
+    if (request.replaceAssetId && useEditorStore.getState().doc?.assets[request.replaceAssetId]) {
+      useEditorStore.getState().dispatch({ type: "replace-asset", oldAssetId: request.replaceAssetId, newAssetId: assetId });
     }
     onClose();
   };

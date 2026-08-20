@@ -57,7 +57,8 @@ export function resolveCharacterAsset(
 
   // No slot matched — fall back to the identity reference, then anything.
   const referenceId = character.canonicalReferenceAssetId ?? character.referenceAssetId;
-  const reference = referenceId ? doc.assets[referenceId] : undefined;
+  const candidateReference = referenceId ? doc.assets[referenceId] : undefined;
+  const reference = candidateReference?.status !== "archived" ? candidateReference : undefined;
   return reference ?? assets[assets.length - 1];
 }
 
@@ -66,7 +67,9 @@ function characterAssets(doc: ProjectDocument, character: Character): SourceAsse
   for (const asset of Object.values(doc.assets)) {
     if (asset.metadata?.characterId === character.id) ids.add(asset.id);
   }
-  return [...ids].map((id) => doc.assets[id]).filter((asset): asset is SourceAsset => Boolean(asset));
+  return [...ids]
+    .map((id) => doc.assets[id])
+    .filter((asset): asset is SourceAsset => Boolean(asset) && asset.status !== "archived");
 }
 
 export function requestedCharacterState(characterId: string, query: CharacterAssetQuery): CharacterState {
@@ -106,7 +109,7 @@ export interface LibraryAssetQuery {
 }
 
 export function resolveLibraryAsset(doc: ProjectDocument, query: LibraryAssetQuery): SourceAsset | null {
-  let candidates = Object.values(doc.assets);
+  let candidates = Object.values(doc.assets).filter((asset) => asset.status !== "archived");
   if (query.category) candidates = candidates.filter((a) => a.category === query.category);
   if (candidates.length === 0) return null;
 

@@ -2,7 +2,6 @@
 
 import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
 import { buildAssetPrompt, buildCharacterStatePrompt } from "@/ai/promptTemplates";
-import { swapInstanceAsset } from "@/domain/itemOps";
 import type { Character, CharacterState, ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import {
@@ -49,7 +48,8 @@ export async function generateCharacterAssetForState(input: {
   const role = input.role ?? "state";
   const style = getStyleGenerationContext(doc);
   const canonicalId = characterReferenceId(character);
-  const canonical = canonicalId ? doc.assets[canonicalId] : undefined;
+  const canonicalCandidate = canonicalId ? doc.assets[canonicalId] : undefined;
+  const canonical = canonicalCandidate?.status !== "archived" ? canonicalCandidate : undefined;
   const compatible = role === "state" ? findCompatibleCharacterAsset(doc, character, input.state) : undefined;
   const supportsReference = await providerSupportsReference();
   const useIdentityReference = role === "state" && Boolean(canonical) && supportsReference;
@@ -159,7 +159,7 @@ export async function applyCharacterStateToInstance(input: {
     input.onProgress?.({ stage: "saving", state: desired });
   }
 
-  useEditorStore.getState().commit((doc) => swapInstanceAsset(doc, input.instanceId, assetId));
+  useEditorStore.getState().dispatch({ type: "swap-instance-asset", instanceId: input.instanceId, assetId });
   input.onProgress?.({ stage: "complete", state: { ...desired, assetId } });
   return {
     assetId,

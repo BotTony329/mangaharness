@@ -32,7 +32,7 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
   lines.push("", `CHARACTERS (${characters.length}):`);
   if (characters.length === 0) lines.push("- none yet");
   for (const character of characters) {
-    const assets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean);
+    const assets = character.assetIds.map((id) => doc.assets[id]).filter((asset) => asset && asset.status !== "archived");
     const slots = assets.map((asset) => {
       const state = stateFromAsset(asset!, character.id);
       return asset!.metadata?.characterAssetRole === "canonical" || !state
@@ -47,7 +47,7 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
 
   // ── Backgrounds and props ──
   for (const category of ["background", "prop"] as const) {
-    const assets = Object.values(doc.assets).filter((a) => a.category === category);
+    const assets = Object.values(doc.assets).filter((a) => a.category === category && a.status !== "archived");
     lines.push("", `${category.toUpperCase()}S (${assets.length}):`);
     lines.push(...(assets.length > 0 ? assets.map((a) => `- ${a.name}`) : ["- none yet"]));
   }
@@ -58,8 +58,22 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
     lines.push("", `CURRENT PAGE: ${page.name} (${page.panelIds.length} panels)`);
     page.panelIds.forEach((panelId, index) => {
       const panel = doc.panels[panelId];
+      const scene = doc.scenes[panelId];
       const selectedMark = selection.panelId === panelId ? "  [SELECTED]" : "";
       lines.push(`Panel ${index + 1}:${selectedMark}`);
+      if (scene) {
+        const background = scene.backgroundAssetId ? doc.assets[scene.backgroundAssetId]?.name : undefined;
+        if (background || scene.location) lines.push(`  scene: ${scene.location ?? "unspecified location"}; background:${background ?? "none"}`);
+        for (const relation of scene.relationships) {
+          const subject = doc.characters[relation.subjectCharacterId]?.name ?? relation.subjectCharacterId;
+          const target = relation.targetCharacterId ? doc.characters[relation.targetCharacterId]?.name ?? relation.targetCharacterId : undefined;
+          lines.push(`  relationship: ${subject} ${relation.action}${target ? ` ${target}` : ""}`);
+        }
+        if (scene.continuity?.backgroundSourcePanelId) {
+          const sourceNumber = page.panelIds.indexOf(scene.continuity.backgroundSourcePanelId) + 1;
+          lines.push(`  continuity: exact background reused from Panel ${sourceNumber}`);
+        }
+      }
       if (!panel || panel.itemIds.length === 0) {
         lines.push("  - empty");
         return;

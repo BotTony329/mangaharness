@@ -9,8 +9,6 @@
 
 import { panelBoundsPx } from "@/domain/coords";
 import { supportsFaceFocus } from "@/domain/geometry";
-import { removeItem, setCropMode, updateItemProps } from "@/domain/itemOps";
-import { removeWorkspaceItem, updateWorkspaceItem } from "@/domain/workspaceOps";
 import type { AssetInstance, CropMode, ID, WorkspaceItem } from "@/domain/types";
 import { availableCharacterStateValues, stateFromInstance } from "@/characters/state";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
@@ -65,7 +63,7 @@ export function FloatingToolbar({ view, onEditBubble }: FloatingToolbarProps) {
         <DeleteButton
           onClick={() => {
             useEditorStore.getState().select({ panelId: item.panelId });
-            useEditorStore.getState().commit((d) => removeItem(d, item.id));
+            useEditorStore.getState().dispatch({ type: "delete-instance", instanceId: item.id });
           }}
         />
       </Bar>
@@ -96,7 +94,7 @@ function InstanceControls({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((s) => s.doc)!;
   const asset = doc.assets[item.sourceAssetId];
   const character = asset ? characterOfAsset(doc, asset.id) : null;
-  const commit = useEditorStore.getState().commit;
+  const dispatch = useEditorStore.getState().dispatch;
 
   return (
     <>
@@ -111,20 +109,20 @@ function InstanceControls({ item }: { item: AssetInstance }) {
             active={item.cropMode === mode}
             disabled={unavailable}
             title={unavailable ? "Needs face region metadata" : undefined}
-            onClick={() => commit((d) => setCropMode(d, item.id, mode))}
+            onClick={() => dispatch({ type: "set-framing", instanceId: item.id, cropMode: mode })}
           >
             {label}
           </ToolButton>
         );
       })}
       <Divider />
-      <ToolButton title="Flip horizontally" onClick={() => commit((d) => updateItemProps(d, item.id, { flipX: !item.flipX }))}>
+      <ToolButton title="Flip horizontally" onClick={() => dispatch({ type: "set-instance-props", instanceId: item.id, patch: { flipX: !item.flipX } })}>
         ⇋
       </ToolButton>
       <DeleteButton
         onClick={() => {
           useEditorStore.getState().select({ panelId: item.panelId });
-          commit((d) => removeItem(d, item.id));
+          dispatch({ type: "delete-instance", instanceId: item.id });
         }}
       />
     </>
@@ -176,17 +174,16 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
 // ─── Loose workspace item controls ──────────────────────────────────────────
 
 function LooseControls({ item }: { item: WorkspaceItem }) {
-  const commit = useEditorStore.getState().commit;
   return (
     <>
       <span className="px-1 text-[10px] text-zinc-500">Drag into a panel to use</span>
-      <ToolButton title="Flip horizontally" onClick={() => commit((d) => updateWorkspaceItem(d, item.id, { flipX: !item.flipX }))}>
+      <ToolButton title="Flip horizontally" onClick={() => useEditorStore.getState().dispatch({ type: "update-workspace-instance", itemId: item.id, patch: { flipX: !item.flipX } })}>
         ⇋
       </ToolButton>
       <DeleteButton
         onClick={() => {
           useEditorStore.getState().select({});
-          commit((d) => removeWorkspaceItem(d, item.id));
+          useEditorStore.getState().dispatch({ type: "delete-workspace-instance", itemId: item.id });
         }}
       />
     </>

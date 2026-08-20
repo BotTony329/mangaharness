@@ -128,7 +128,11 @@ describe("executePlan", () => {
       summary: "make her cry",
       steps: [{ tool: "set_character_slot", args: { expression: "crying" } }],
     });
-    const summary = await executePlan(plan, () => {});
+    const failures: string[] = [];
+    const summary = await executePlan(plan, (_index, status, detail) => {
+      if (status === "failed" && detail) failures.push(detail);
+    });
+    expect(failures).toEqual([]);
     expect(summary.failed).toBe(0);
 
     const after = useEditorStore.getState().doc!.items[instanceId] as AssetInstance;
@@ -228,7 +232,7 @@ describe("executePlan", () => {
     expect(validation.rejected).toHaveLength(1);
 
     const summary = await executePlan(validation.plan, () => {});
-    expect(summary).toEqual({ completed: 3, failed: 0 });
+    expect(summary).toEqual({ completed: 3, failed: 0, validationIssues: [] });
     const after = useEditorStore.getState().doc!;
     expect(page.panelIds.slice(1).map((id) => after.panels[id].itemIds)).toEqual(untouched);
     const panelItems = after.panels[page.panelIds[0]].itemIds.map((id) => after.items[id]);
@@ -236,6 +240,50 @@ describe("executePlan", () => {
     expect(characterInstance?.kind).toBe("asset");
     if (characterInstance?.kind === "asset") expect(characterInstance.sourceAssetId).toBe(walking.assetId);
     expect(panelItems.some((item) => item.kind === "bubble" && item.bubbleType === "thought")).toBe(true);
+    expect(after.generationHistory).toHaveLength(0);
+  });
+
+  it("semantically composes a cached Character and reuses exact scene continuity inside scope", async () => {
+    const state = useEditorStore.getState();
+    let doc = state.doc!;
+    const page = Object.values(doc.pages)[0];
+    const background = Object.values(doc.assets).find((asset) => asset.category === "background")!;
+    state.dispatch({ type: "set-panel-background", panelId: page.panelIds[0], assetId: background.id, location: "School gate" });
+    doc = useEditorStore.getState().doc!;
+    useEditorStore.getState().select({ panelId: page.panelIds[1] });
+    const scope = resolveAgentScope({
+      doc,
+      currentPageId: page.id,
+      selection: { panelId: page.panelIds[1] },
+      prompt: "In this panel, show Akari running past the same school gate.",
+    });
+    const untouched = page.panelIds.filter((id) => id !== page.panelIds[1]).slice(1).map((id) => doc.panels[id].itemIds);
+    const { plan, rejected } = validatePlan({
+      summary: "Continue the scene",
+      steps: [
+        { tool: "reuse_scene_background", args: { sourcePanel: 1, targetPanel: 2 } },
+        { tool: "compose_character", args: { panel: 2, characterName: "Akari", pose: "running", framing: "medium", position: "right", facing: "left", role: "runner" } },
+        { tool: "add_scene_relationship", args: { panel: 2, subjectCharacterName: "Akari", action: "runs past the gate" } },
+      ],
+    }, scope);
+    expect(rejected).toEqual([]);
+
+    const semanticFailures: string[] = [];
+    const summary = await executePlan(plan, (_index, status, detail) => {
+      if (status === "failed" && detail) semanticFailures.push(detail);
+    });
+    expect(semanticFailures).toEqual([]);
+    expect(summary.failed).toBe(0);
+    const after = useEditorStore.getState().doc!;
+    expect(after.scenes[page.panelIds[1]].backgroundAssetId).toBe(background.id);
+    expect(after.scenes[page.panelIds[1]].continuity?.backgroundSourcePanelId).toBe(page.panelIds[0]);
+    expect(after.scenes[page.panelIds[1]].characters[0]).toMatchObject({
+      semanticPosition: "right",
+      facing: "left",
+      role: "runner",
+    });
+    expect(after.scenes[page.panelIds[1]].relationships[0]?.action).toBe("runs past the gate");
+    expect(page.panelIds.filter((id) => id !== page.panelIds[1]).slice(1).map((id) => after.panels[id].itemIds)).toEqual(untouched);
     expect(after.generationHistory).toHaveLength(0);
   });
 
@@ -259,7 +307,7 @@ describe("executePlan", () => {
     const summary = await executePlan(plan, (_index, status, detail) => {
       if (status === "failed" && detail) details.push(detail);
     });
-    expect(summary).toEqual({ completed: 1, failed: 1 });
+    expect(summary).toEqual({ completed: 1, failed: 1, validationIssues: [] });
     expect(details[0]).toContain("Scope violation");
     expect(useEditorStore.getState().doc!.panels[page.panelIds[1]].itemIds).toHaveLength(0);
   });
@@ -308,7 +356,7 @@ describe("executePlan", () => {
       steps: [{ tool: "place_character", args: { panel: 1, characterName: "Yuri", pose: "backflip" } }],
     }, scope);
     const summary = await executePlan(plan, () => {});
-    expect(summary).toEqual({ completed: 1, failed: 0 });
+    expect(summary).toEqual({ completed: 1, failed: 0, validationIssues: [] });
     const after = useEditorStore.getState().doc!;
     expect(after.generationHistory).toHaveLength(1);
     const generated = Object.values(after.assets).find((asset) => asset.metadata?.pose === "backflip");

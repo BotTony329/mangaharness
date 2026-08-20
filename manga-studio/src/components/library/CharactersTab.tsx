@@ -13,11 +13,11 @@ import {
   stateFromAsset,
 } from "@/characters/state";
 import { generateCharacterAssetForState, starterPackStates } from "@/characters/stateRuntime";
-import { addCharacter, removeCharacter, setCharacterReference } from "@/domain/libraryOps";
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
+import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import {
@@ -57,26 +57,51 @@ function CharacterCard({ character }: { character: Character }) {
   const doc = useEditorStore((s) => s.doc)!;
   const openGenerator = useUiStore((s) => s.openGenerator);
   const [open, setOpen] = useState(true);
+  const [deleteAssetTarget, setDeleteAssetTarget] = useState<SourceAsset | null>(null);
+  const [deleteCharacterOpen, setDeleteCharacterOpen] = useState(false);
 
-  const assets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean) as SourceAsset[];
+  const allAssets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean) as SourceAsset[];
+  const assets = allAssets.filter((asset) => asset.status !== "archived");
+  const archivedAssets = allAssets.filter((asset) => asset.status === "archived");
   const referenceId = characterReferenceId(character);
-  const reference = referenceId ? doc.assets[referenceId] : undefined;
+  const referenceCandidate = referenceId ? doc.assets[referenceId] : undefined;
+  const reference = referenceCandidate?.status !== "archived" ? referenceCandidate : undefined;
   const stateAssets = assets.filter((asset) => asset.metadata?.characterAssetRole !== "canonical");
   const stateGroups = groupCharacterStates(stateAssets, character.id);
 
   return (
     <section className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
-      <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen(!open)}>
-        <span className="text-zinc-500">{open ? "▾" : "▸"}</span>
-        <span className="text-sm font-medium text-zinc-200">{character.name}</span>
-        <span className="ml-auto text-[10px] text-zinc-500">{assets.length} assets</span>
-      </button>
+      <div className="flex items-center gap-1">
+        <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen(!open)}>
+          <span className="text-zinc-500">{open ? "▾" : "▸"}</span>
+          <span className="truncate text-sm font-medium text-zinc-200">{character.name}</span>
+          <span className="ml-auto text-[10px] text-zinc-500">{assets.length} assets</span>
+        </button>
+        <button
+          type="button"
+          className="rounded px-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          title={`Rename ${character.name}`}
+          onClick={() => {
+            const name = prompt("Rename Character", character.name);
+            if (name?.trim()) useEditorStore.getState().dispatch({ type: "rename-character", characterId: character.id, name });
+          }}
+        >
+          ✎
+        </button>
+        <button type="button" className="rounded px-1.5 text-red-400 hover:bg-red-950/50" title={`Delete ${character.name}`} onClick={() => setDeleteCharacterOpen(true)}>✕</button>
+      </div>
       {open && (
         <div className="mt-2 space-y-3">
           {(character.appearance ?? character.description) && <p className="text-[11px] leading-4 text-zinc-500">{character.appearance ?? character.description}</p>}
           {character.personalityNotes && <p className="text-[10px] italic leading-4 text-zinc-600">{character.personalityNotes}</p>}
           {reference ? (
-            <AssetThumb asset={reference} subtitle="Reference" />
+            <AssetThumb
+              asset={reference}
+              subtitle="Reference"
+              onRegenerate={() => openGenerator({ assetType: "character", characterId: character.id, replaceAssetId: reference.id })}
+              onArchive={() => useEditorStore.getState().dispatch({ type: "archive-asset", assetId: reference.id })}
+              onDelete={() => setDeleteAssetTarget(reference)}
+            />
           ) : (
             <button
               className="w-full rounded border border-dashed border-zinc-700 py-2 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-300"
@@ -93,6 +118,29 @@ function CharacterCard({ character }: { character: Character }) {
                   key={label}
                   asset={variants[variants.length - 1]}
                   subtitle={variants.length > 1 ? `${label} · ${variants.length} variations` : label}
+                  onUse={() => {
+                    const store = useEditorStore.getState();
+                    const page = store.currentPageId ? store.doc?.pages[store.currentPageId] : undefined;
+                    const panelId = store.selection.panelId ?? page?.panelIds[0];
+                    if (panelId) store.dispatch({ type: "add-instance", panelId, assetId: variants[variants.length - 1].id });
+                  }}
+                  onRename={() => {
+                    const asset = variants[variants.length - 1];
+                    const name = prompt("Rename visual state", asset.name);
+                    if (name?.trim()) useEditorStore.getState().dispatch({ type: "rename-asset", assetId: asset.id, name });
+                  }}
+                  onRegenerate={() => {
+                    const asset = variants[variants.length - 1];
+                    const state = stateFromAsset(asset, character.id);
+                    openGenerator({
+                      assetType: "character-pose",
+                      characterId: character.id,
+                      replaceAssetId: asset.id,
+                      prefill: { pose: state?.pose ?? "standing", expression: state?.expression ?? "neutral" },
+                    });
+                  }}
+                  onArchive={() => useEditorStore.getState().dispatch({ type: "archive-asset", assetId: variants[variants.length - 1].id })}
+                  onDelete={() => setDeleteAssetTarget(variants[variants.length - 1])}
                 />
               ))}
               <button
@@ -103,8 +151,26 @@ function CharacterCard({ character }: { character: Character }) {
               </button>
             </div>
           </div>
+          {archivedAssets.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">Archived states ({archivedAssets.length})</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {archivedAssets.map((asset) => (
+                  <AssetThumb
+                    key={asset.id}
+                    asset={asset}
+                    subtitle="Archived"
+                    onRestore={() => useEditorStore.getState().dispatch({ type: "restore-asset", assetId: asset.id })}
+                    onDelete={() => setDeleteAssetTarget(asset)}
+                  />
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
+      {deleteAssetTarget && <AssetDeleteDialog asset={deleteAssetTarget} onClose={() => setDeleteAssetTarget(null)} />}
+      {deleteCharacterOpen && <CharacterDeleteDialog character={character} onClose={() => setDeleteCharacterOpen(false)} />}
     </section>
   );
 }
@@ -190,17 +256,14 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
     }
     setIsBusy(true);
     setError(null);
-    let characterId = "";
-    useEditorStore.getState().commit((d) => {
-      const result = addCharacter(
-        d,
-        name.trim(),
-        appearance.trim() || undefined,
-        personalityNotes.trim() || undefined,
-      );
-      characterId = result.characterId;
-      return result.doc;
+    const created = useEditorStore.getState().dispatch({
+      type: "create-character",
+      name: name.trim(),
+      appearance: appearance.trim() || undefined,
+      personalityNotes: personalityNotes.trim() || undefined,
     });
+    const characterId = created.createdId;
+    if (!characterId) throw new Error("Character creation failed");
     const referenceFile = reference?.file;
     if (referenceFile) {
       try {
@@ -212,9 +275,9 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
             characterAssetRole: "canonical",
           },
         });
-        useEditorStore.getState().commit((d) => setCharacterReference(d, characterId, assetId));
+        useEditorStore.getState().dispatch({ type: "set-character-reference", characterId, assetId });
       } catch (e) {
-        useEditorStore.getState().commit((d) => removeCharacter(d, characterId));
+        useEditorStore.getState().dispatch({ type: "delete-character", characterId, mode: "delete-all" });
         setError(e instanceof Error ? e.message : "Reference upload failed");
         setIsBusy(false);
         return;

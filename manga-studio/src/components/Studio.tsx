@@ -8,8 +8,6 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { createProjectDocument } from "@/domain/factory";
-import { duplicateItem, removeItem } from "@/domain/itemOps";
-import { removeWorkspaceItem } from "@/domain/workspaceOps";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { indexedDbPersistence } from "@/storage/projectStore";
@@ -92,16 +90,16 @@ export function Studio() {
       } else if (mod && e.key === "d" && store.selection.itemId) {
         e.preventDefault();
         const itemId = store.selection.itemId;
-        store.commit((d) => duplicateItem(d, itemId).doc);
+        store.dispatch({ type: "duplicate-instance", instanceId: itemId });
       } else if ((e.key === "Delete" || e.key === "Backspace") && store.selection.itemId) {
         e.preventDefault();
         const itemId = store.selection.itemId;
-        store.commit((d) => removeItem(d, itemId));
+        store.dispatch({ type: "delete-instance", instanceId: itemId });
         store.select({ panelId: store.selection.panelId });
       } else if ((e.key === "Delete" || e.key === "Backspace") && store.selection.workspaceItemId) {
         e.preventDefault();
         const looseId = store.selection.workspaceItemId;
-        store.commit((d) => removeWorkspaceItem(d, looseId));
+        store.dispatch({ type: "delete-workspace-instance", itemId: looseId });
         store.select({});
       } else if (e.key === "Escape") {
         store.select({});

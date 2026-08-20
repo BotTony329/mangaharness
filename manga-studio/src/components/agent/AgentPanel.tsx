@@ -44,6 +44,7 @@ export function AgentPanel() {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [skillsUsed, setSkillsUsed] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepProgress[]>([]);
+  const [activity, setActivity] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [agentConfigured, setAgentConfigured] = useState<boolean | null>(null);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
@@ -65,6 +66,7 @@ export function AgentPanel() {
     setError(null);
     setPlan(null);
     setSteps([]);
+    setActivity(["Understanding"]);
     setStatusLine("Understanding request…");
 
     try {
@@ -91,6 +93,7 @@ export function AgentPanel() {
 
       const received = body as { plan: AgentPlan; skillsUsed: string[]; rejected: { tool: string; error: string }[] };
       setSkillsUsed(received.skillsUsed);
+      setActivity((current) => [...current, "Scene plan"]);
       setPlan(received.plan);
       setSteps(received.plan.steps.map((s) => ({ label: describeStep(s), status: "pending" })));
 
@@ -113,16 +116,29 @@ export function AgentPanel() {
 
   const execute = async (planToRun: AgentPlan) => {
     setPhase("executing");
+    setActivity((current) => [...current, "Asset search", "Composition"]);
     setStatusLine("Composing…");
     const summary = await executePlan(planToRun, (index, status, detail) => {
       setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, status, detail } : s)));
       if (status === "running") setStatusLine(describeStep(planToRun.steps[index]) + "…");
     });
+    setActivity((current) => [...current, "Validation", "Done"]);
+    const unresolved = summary.validationIssues.filter((issue) => !issue.corrected);
     setStatusLine(
-      summary.failed === 0
+      summary.failed === 0 && unresolved.length === 0
         ? "Done. Everything stays editable — one Undo reverts the whole run."
-        : `Done with ${summary.failed} failed step${summary.failed > 1 ? "s" : ""} (see below).`,
+        : `Done with ${summary.failed} failed step${summary.failed !== 1 ? "s" : ""} and ${unresolved.length} validation warning${unresolved.length !== 1 ? "s" : ""}.`,
     );
+    if (summary.validationIssues.length > 0) {
+      setSteps((current) => [
+        ...current,
+        ...summary.validationIssues.map((issue) => ({
+          label: `Validation · ${issue.message}`,
+          status: issue.corrected ? "done" as const : "failed" as const,
+          detail: issue.corrected ? "Automatically corrected" : undefined,
+        })),
+      ]);
+    }
     setPhase("done");
   };
 
@@ -205,6 +221,11 @@ export function AgentPanel() {
       )}
 
       {statusLine && <p className="text-zinc-300">{statusLine}</p>}
+      {activity.length > 0 && (
+        <p className="text-[10px] text-zinc-500" aria-label="Agent activity">
+          {activity.join(" → ")}
+        </p>
+      )}
       {error && <p className="rounded border border-red-900 bg-red-950/50 p-2 text-red-300">{error}</p>}
 
       {plan && steps.length > 0 && (
@@ -242,6 +263,7 @@ export function AgentPanel() {
                   setStatusLine(null);
                   setPlan(null);
                   setSteps([]);
+                  setActivity([]);
                 }}
               >
                 Cancel

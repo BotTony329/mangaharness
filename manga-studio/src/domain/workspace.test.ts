@@ -17,7 +17,7 @@ import {
   updateWorkspaceItem,
   workspaceItemToInstance,
 } from "./workspaceOps";
-import type { AssetInstance, ProjectDocument } from "./types";
+import { SCHEMA_VERSION, type AssetInstance, type ProjectDocument } from "./types";
 
 function seeded(): { doc: ProjectDocument; assetId: string; panelId: string } {
   const base = createProjectDocument("Workspace");
@@ -60,7 +60,7 @@ describe("legacy project migration", () => {
       generationHistory: [],
     };
     const migrated = deserializeProject(JSON.stringify(v1));
-    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.panels.pn1.points).toEqual([
       { x: 0.1, y: 0.1 },
       { x: 0.6, y: 0.1 },

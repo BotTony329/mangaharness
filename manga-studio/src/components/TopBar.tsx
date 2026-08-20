@@ -4,8 +4,6 @@
 
 import { useState } from "react";
 import { LAYOUT_PRESETS } from "@/domain/layouts";
-import { addBubble, addEffect } from "@/domain/itemOps";
-import { setPageLayout } from "@/domain/pageOps";
 import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
@@ -46,16 +44,13 @@ export function TopBar() {
 
   const addBubbleToPanel = (type: BubbleType) => {
     if (!targetPanelId) return;
-    useEditorStore.getState().commit((d) => {
-      const result = addBubble(d, targetPanelId, type);
-      queueMicrotask(() => useEditorStore.getState().select({ itemId: result.itemId, panelId: targetPanelId }));
-      return result.doc;
-    });
+    const result = useEditorStore.getState().dispatch({ type: "add-bubble", panelId: targetPanelId, bubbleType: type, text: "..." });
+    if (result.createdId) useEditorStore.getState().select({ itemId: result.createdId, panelId: targetPanelId });
   };
 
   const addEffectToPanel = (kind: EffectKind) => {
     if (!targetPanelId) return;
-    useEditorStore.getState().commit((d) => addEffect(d, targetPanelId, kind).doc);
+    useEditorStore.getState().dispatch({ type: "add-effect", panelId: targetPanelId, effectKind: kind });
   };
 
   const onExport = async (scale: 1 | 2) => {
@@ -96,7 +91,7 @@ export function TopBar() {
         onChange={(e) => {
           const layout = e.target.value as LayoutPresetId;
           if (layout && page) {
-            useEditorStore.getState().commit((d) => setPageLayout(d, page.id, layout));
+            useEditorStore.getState().dispatch({ type: "set-page-layout", pageId: page.id, layout });
           }
         }}
       >
