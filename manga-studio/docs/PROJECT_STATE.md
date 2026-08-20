@@ -20,9 +20,9 @@ Last updated: 2026-08-20 (transparent asset compositing)
 | Visual style selection | DEPLOYED | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
 | Style propagation | DEPLOYED | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
 | Character identity UX | DEPLOYED | Character creation separates Name, Appearance, and Personality / visual identity from Project Art Style. The progressive Asset Pack contains eight poses and eight expressions without a Cartesian-product explosion. |
-| Transparent character assets | WORKING LOCALLY | Generated and uploaded characters, poses, expressions, and Asset Pack states pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque edge-connected backgrounds produce non-destructive transparent PNG derivatives. |
-| Background removal | WORKING LOCALLY | The MVP processor estimates the dominant perimeter background, flood-fills only connected background pixels, feathers antialiased edges, rejects opaque checkerboards, and preserves enclosed white artwork. Character and prop thumbnails expose a manual Remove/Reprocess Background action. |
-| Canvas compositing | WORKING LOCALLY | Library previews, generation references, loose objects, panel instances, ghosts, and export all use the processed derivative when present and fall back to the immutable source for legacy/failed assets. Background images remain rectangular. |
+| Transparent character assets | DEPLOYED | Generated and uploaded characters, poses, expressions, and Asset Pack states pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque edge-connected backgrounds produce non-destructive transparent PNG derivatives. |
+| Background removal | DEPLOYED | The MVP processor estimates the dominant perimeter background, flood-fills only connected background pixels, feathers antialiased edges, rejects opaque checkerboards, and preserves enclosed white artwork. Character and prop thumbnails expose a manual Remove/Reprocess Background action. |
+| Canvas compositing | DEPLOYED | Library previews, generation references, loose objects, panel instances, ghosts, and export all use the processed derivative when present and fall back to the immutable source for legacy/failed assets. Background images remain rectangular. |
 
 ## Root cause record
 
@@ -54,9 +54,12 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - Local transparent-compositing acceptance: passed with a real opaque white-background Yuri upload over a colored street, panel placement, scaling, clipping, and page export. Export pixels beside Yuri remained street blue (`118,181,212,255`) while the enclosed white shirt remained opaque (`255,255,255,255`); no white rectangle or browser errors.
+- GitHub transparent-compositing code commit: `604b512` on `agent/transparent-asset-compositing` (pushed to `origin`; not merged to `main`).
 - GitHub art-style-system code commit: `ec0b221` on `agent/project-art-style-system` (pushed to `origin`; not merged to `main`).
 - GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.
-- Production deployment: READY, `dpl_65DXLj9qZKKmKnmkrmx4DMuKpS2i` (`https://mangaharness.vercel.app`), deployed from the tested `ec0b221` feature commit.
+- Production deployment: READY, `dpl_FV5u8P1nf7Y6MRgAogy2wbzfoRom` (`https://mangaharness.vercel.app`), deployed from the tested `604b512` feature commit.
+- Production post-processor verification: passed. The live character upload returned separate source/processed Blob URLs with `hasAlpha: true`, `backgroundRemoved: true`, and `processingStatus: ready`; the manual removal route also returned HTTP 200 and another transparent derivative.
+- Production transparent-compositing browser acceptance: passed with opaque Yuri over the street, checkerboard library preview, manual Reprocess Background HTTP 200, panel placement, scale changed from 138% to 110%, clipping, and PNG export. Export pixel evidence matched local verification and the browser reported no console/page errors.
 - Production browser verification: passed (six style families; Western Comics and Minimal Line selection; custom style creation and Top Bar activation; identity-separated character form; Asset Pack and 16-generation estimate; no console/page errors).
 - Post-deploy error scan: clean; no error logs found for the new deployment.
 - Production status: HTTP 200; `storage.configured: true`; backend `vercel-blob`; no new serverless errors in the post-deploy scan.
