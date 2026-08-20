@@ -23,6 +23,18 @@ interface QuickAction {
   needs?: "character" | "panel";
 }
 
+interface AgentDiagnostics {
+  requestId?: string;
+  provider?: string;
+  model?: string;
+  stage?: string;
+  reason?: string;
+  elapsedMs?: number;
+  providerStatus?: number;
+  finishReason?: string;
+  timings?: Record<string, number | undefined>;
+}
+
 const QUICK_ACTIONS: QuickAction[] = [
   { label: "Create scene", prompt: "Create a four-panel scene on the current page using the existing characters." },
   { label: "Add dialogue", prompt: "Add fitting speech bubbles to the panels that have characters but no dialogue." },
@@ -46,6 +58,7 @@ export function AgentPanel() {
   const [steps, setSteps] = useState<StepProgress[]>([]);
   const [activity, setActivity] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<AgentDiagnostics | null>(null);
   const [agentConfigured, setAgentConfigured] = useState<boolean | null>(null);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -64,11 +77,18 @@ export function AgentPanel() {
     if (!state.doc) return;
     setPhase("planning");
     setError(null);
+    setErrorDetails(null);
     setPlan(null);
     setSteps([]);
     setActivity(["Understanding"]);
     setStatusLine("Understanding request…");
 
+    const progressTimers = [
+      window.setTimeout(() => setStatusLine("Sending to your agent model…"), 350),
+      window.setTimeout(() => setStatusLine("Waiting for a concise tool plan…"), 2_500),
+      window.setTimeout(() => setStatusLine("Your model is responding…"), 7_000),
+      window.setTimeout(() => setStatusLine("This is taking longer than usual…"), 18_000),
+    ];
     try {
       const scope = resolveAgentScope({
         doc: state.doc,
@@ -88,13 +108,17 @@ export function AgentPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: requestPrompt, context, scope }),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Agent planning failed");
+      const body = await response.json() as { error?: string; details?: AgentDiagnostics; diagnostics?: AgentDiagnostics };
+      if (!response.ok) {
+        setErrorDetails(body.details ?? null);
+        throw new Error(body.error ?? "Agent planning failed");
+      }
 
-      const received = body as { plan: AgentPlan; skillsUsed: string[]; rejected: { tool: string; error: string }[] };
+      const received = body as typeof body & { plan: AgentPlan; skillsUsed: string[]; rejected: { tool: string; error: string }[] };
       setSkillsUsed(received.skillsUsed);
       setActivity((current) => [...current, "Scene plan"]);
       setPlan(received.plan);
+      setStatusLine(received.diagnostics?.provider ? `Plan received from ${received.diagnostics.provider}.` : "Plan received.");
       setSteps(received.plan.steps.map((s) => ({ label: describeStep(s), status: "pending" })));
 
       if (received.plan.steps.length === 0) {
@@ -111,6 +135,8 @@ export function AgentPanel() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent failed");
       setPhase("error");
+    } finally {
+      for (const timer of progressTimers) window.clearTimeout(timer);
     }
   };
 
@@ -226,7 +252,34 @@ export function AgentPanel() {
           {activity.join(" → ")}
         </p>
       )}
-      {error && <p className="rounded border border-red-900 bg-red-950/50 p-2 text-red-300">{error}</p>}
+      {error && (
+        <div className="rounded border border-red-900 bg-red-950/50 p-3 text-red-200">
+          <p className="font-medium">Agent planning failed</p>
+          <p className="mt-1 text-[11px] text-red-300">{error}</p>
+          {errorDetails && (
+            <details className="mt-2 text-[10px] text-zinc-400">
+              <summary className="cursor-pointer text-zinc-300">Details</summary>
+              <dl className="mt-2 grid grid-cols-[76px_1fr] gap-x-2 gap-y-1">
+                {errorDetails.provider && <><dt>Provider</dt><dd>{errorDetails.provider}</dd></>}
+                {errorDetails.model && <><dt>Model</dt><dd>{errorDetails.model}</dd></>}
+                {errorDetails.stage && <><dt>Stage</dt><dd>{titleCase(errorDetails.stage)}</dd></>}
+                {errorDetails.elapsedMs !== undefined && <><dt>Elapsed</dt><dd>{formatMs(errorDetails.elapsedMs)}</dd></>}
+                {errorDetails.providerStatus && <><dt>HTTP status</dt><dd>{errorDetails.providerStatus}</dd></>}
+                {errorDetails.finishReason && <><dt>Finish reason</dt><dd>{errorDetails.finishReason}</dd></>}
+                {errorDetails.requestId && <><dt>Request ID</dt><dd className="break-all">{errorDetails.requestId}</dd></>}
+              </dl>
+              {errorDetails.timings && (
+                <div className="mt-2 border-t border-red-900/70 pt-2">
+                  {Object.entries(errorDetails.timings).filter((entry) => entry[1] !== undefined).map(([name, value]) => (
+                    <p key={name}>{titleCase(name)}: {formatMs(value!)}</p>
+                  ))}
+                </div>
+              )}
+            </details>
+          )}
+          <button className="mt-2 rounded border border-red-800 px-2.5 py-1 text-[10px] hover:bg-red-900/40" onClick={() => run(prompt.trim())}>Retry</button>
+        </div>
+      )}
 
       {plan && steps.length > 0 && (
         <div className="min-h-0 flex-1 overflow-y-auto rounded border border-zinc-800 bg-zinc-950/60 p-2">
@@ -281,4 +334,12 @@ export function AgentPanel() {
       )}
     </div>
   );
+}
+
+function formatMs(value: number): string {
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
+}
+
+function titleCase(value: string): string {
+  return value.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 }

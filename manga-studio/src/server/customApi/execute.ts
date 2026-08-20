@@ -39,18 +39,26 @@ export function buildHeaders(config: ProviderConfig, custom: CustomApiConfig): R
 }
 
 /** Fetch with timeout + SSRF validation on the (possibly runtime-built) URL. */
-export async function customFetch(url: string, init: RequestInit): Promise<Response> {
+export async function customFetch(
+  url: string,
+  init: RequestInit,
+  control: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<Response> {
   try {
     assertSafeProviderUrl(url);
   } catch (error) {
     throw new CustomApiError(error instanceof Error ? error.message : "Unsafe URL", 400);
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), control.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const signal = control.signal ? AbortSignal.any([controller.signal, control.signal]) : controller.signal;
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, { ...init, signal });
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new CustomApiError("Timed out", 504);
+    if (error instanceof Error && error.name === "AbortError") {
+      if (control.signal?.aborted) throw new CustomApiError("Agent planning was cancelled", 499);
+      throw new CustomApiError("Timed out", 504);
+    }
     throw new CustomApiError("Endpoint unreachable", 502);
   } finally {
     clearTimeout(timer);

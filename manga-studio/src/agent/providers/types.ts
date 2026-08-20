@@ -14,18 +14,55 @@ export interface AgentModelProvider {
   label: string;
   model: string;
   testConnection(): Promise<{ ok: boolean; message?: string }>;
-  completeJson(systemPrompt: string, userPrompt: string): Promise<string>;
+  completeJson(systemPrompt: string, userPrompt: string, options?: AgentCompletionOptions): Promise<AgentCompletion>;
+}
+
+export type AgentProviderStage =
+  | "outbound_request_start"
+  | "first_response_byte"
+  | "tool_calls_discovered"
+  | "provider_response_complete";
+
+export interface AgentProviderEvent {
+  stage: AgentProviderStage;
+  responseMode?: "stream" | "buffered";
+  providerStatus?: number;
+  finishReason?: string;
+}
+
+export interface AgentCompletionOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onEvent?: (event: AgentProviderEvent) => void;
+}
+
+export interface AgentCompletion {
+  text: string;
+  finishReason?: string;
+  responseMode: "stream" | "buffered";
 }
 
 export class AgentModelError extends Error {
   readonly safeMessage: string;
   readonly status: number;
 
-  constructor(safeMessage: string, status = 502) {
+  readonly stage: "planning" | "parsing" | "validation";
+  readonly providerStatus?: number;
+  readonly finishReason?: string;
+
+  constructor(
+    safeMessage: string,
+    status = 502,
+    details: { stage?: "planning" | "parsing" | "validation"; providerStatus?: number; finishReason?: string } = {},
+  ) {
     super(safeMessage);
     this.safeMessage = safeMessage;
     this.status = status;
+    this.stage = details.stage ?? "planning";
+    this.providerStatus = details.providerStatus;
+    this.finishReason = details.finishReason;
   }
 }
 
-export const AGENT_REQUEST_TIMEOUT_MS = 120_000;
+/** Planner calls must return before the platform timeout and before the UI feels frozen. */
+export const AGENT_REQUEST_TIMEOUT_MS = 25_000;

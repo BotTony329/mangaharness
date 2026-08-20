@@ -6,7 +6,8 @@
 
 import type { ProviderConfig } from "@/server/providerSession";
 import { agentErrorFrom, boundedFetch } from "./http";
-import { AgentModelError, type AgentModelProvider } from "./types";
+import type { AgentModelProvider } from "./types";
+import { readOpenAiCompletion } from "./openaiResponse";
 
 export function createOpenAiCompatibleAgent(config: ProviderConfig): AgentModelProvider {
   const base = config.baseUrl.replace(/\/$/, "");
@@ -40,7 +41,8 @@ export function createOpenAiCompatibleAgent(config: ProviderConfig): AgentModelP
       return { ok: false, message: (await agentErrorFrom(probe)).safeMessage };
     },
 
-    async completeJson(systemPrompt, userPrompt) {
+    async completeJson(systemPrompt, userPrompt, options) {
+      const qwenPlannerMode = isQwenHybridModel(config.model);
       const response = await boundedFetch(`${base}/chat/completions`, {
         method: "POST",
         headers,
@@ -52,17 +54,21 @@ export function createOpenAiCompatibleAgent(config: ProviderConfig): AgentModelP
           ],
           response_format: { type: "json_object" },
           temperature: 0.2,
+          max_tokens: 2048,
+          stream: true,
+          stream_options: { include_usage: true },
+          ...(qwenPlannerMode ? { enable_thinking: false } : {}),
         }),
-      });
+      }, options);
       if (!response.ok) throw await agentErrorFrom(response);
-      const body = (await response.json().catch(() => null)) as {
-        choices?: { message?: { content?: string } }[];
-      } | null;
-      const content = body?.choices?.[0]?.message?.content;
-      if (!content) throw new AgentModelError("Agent model returned an empty response");
-      return content;
+      return readOpenAiCompletion(response, options);
     },
   };
+}
+
+/** Qwen hybrid models support disabling thought traces for latency-sensitive planning. */
+function isQwenHybridModel(model: string): boolean {
+  return /qwen/i.test(model) && !/(thinking|qwq)/i.test(model);
 }
 
 /** Fetch the provider's model list for the settings model picker. */

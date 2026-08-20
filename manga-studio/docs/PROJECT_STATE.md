@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-21 (controlled core architecture refactor)
+Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
 
 ## Current status
 
@@ -11,6 +11,7 @@ Last updated: 2026-08-21 (controlled core architecture refactor)
 | Asset and Character lifecycle | WORKING LOCALLY | Rename, archive/restore, regenerate-and-replace, reference-aware asset deletion, state removal, Character deletion with explicit asset policy, background removal, and prop removal are implemented. Used-source deletion refuses an implicit unsafe operation. |
 | Semantic scenes and composition | WORKING LOCALLY | Panel scenes track exact background identity, location, Character roles/position/facing/depth, relationships, dialogue, and continuity. Agent composition reuses cached Character states and exact scene backgrounds before generation. |
 | Agent validation | WORKING LOCALLY | Plan/runtime scope checks are followed by structural before/after scope auditing and panel composition validation. Tiny/off-panel Characters are safely corrected; unresolved missing/occluded content remains visible as validation warnings. |
+| Agent planning reliability | WORKING LOCALLY | The exact Panel 2 prompt returned a streamed plan in 77 ms of route work against the local Qwen-compatible fixture. Planning has a 25 s application deadline, safe stage timings, streamed content/tool-call parsing, Qwen hybrid non-thinking mode, and controlled timeout/provider/parser/validation failures. |
 | Image generation | PARTIAL | The previously failing production request reached provider result handling, then failed while persisting the returned image because Vercel Blob was not connected. The fixed production handler emits request-scoped stage traces and Blob is connected; a fresh real BYOK generation still requires the user's configured browser session. |
 | Gemini adapter | WORKING AT ADAPTER/UNIT LEVEL | `gemini-3.1-flash-lite-image` is a current stable Google image-generation/editing model. Adapter tests cover success, reference input, malformed/missing images, HTTP 400/401/403/404/429/5xx, and timeout. The prior production exception occurred after provider invocation, not in Gemini payload construction. |
 | BYOK credential storage | CONFIGURED | User credentials remain encrypted in HttpOnly cookies. `APP_ENCRYPTION_KEY` is an operator infrastructure secret configured once in Vercel for Preview and Production; users do not configure it. Trace tests verify successful retrieval/decryption and the missing-key failure path without logging secrets. |
@@ -41,6 +42,14 @@ Generation failed: Persistent storage is not configured. Connect a Vercel Blob s
 
 Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObject()` from `src/ai/generate.ts` after provider image bytes were returned. `APP_ENCRYPTION_KEY` was not the thrown exception and is currently configured. The historical deployment lacked `BLOB_READ_WRITE_TOKEN`.
 
+Production log for the observed `/api/agent` 500:
+
+```text
+Agent planning failed: Timed out
+```
+
+Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIMEOUT_MS = 90_000` timer for the user-configured Custom API call. The external POST began, but no response headers/body reached Manga Studio before that application timer aborted fetch. `CustomApiError("Timed out", 504)` escaped the adapter's conversion boundary and the route collapsed it to a generic 500. The route is Node with `maxDuration = 120`; Vercel did not terminate it at 90 seconds. There is no evidence that Qwen returned a response, so response parsing and post-processing did not begin.
+
 ## Known limitations
 
 - Project documents are browser-local IndexedDB data; there is no authenticated cross-device project sync in the MVP.
@@ -55,13 +64,15 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
 - Archived sources remain visible in panels that already use them, by design, but are excluded from new library/Agent/Character-state resolution until restored.
 - A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.
+- The exact Mio/Panel 2 production acceptance remains dependent on the user's browser-held BYOK cookie. Clean CLI/browser verification cannot impersonate or extract that HttpOnly credential.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 26 files, 163 tests passed. Coverage includes lifecycle reference handling, source-vs-instance deletion, Character deletion/state removal, pose/expression orthogonality, schema-v6 migration, scene continuity, semantic cached composition, scope validation/runtime rejection/post-run auditing, and safe composition correction. Provider/security/transparency coverage remains intact.
+- Tests: 30 files, 177 tests passed. New coverage includes provider timeout/cancellation, slow SSE, content JSON, tool-call-only/null-content responses, malformed/invalid/missing-action output, provider 429/500, Custom API timeout normalization, Qwen planning flags, and selected-Panel-2 scope rejection. Existing lifecycle, provider/security, compositing, scene, and command coverage remains intact.
 - Production build: passed with Next.js 15.5.23.
+- Local exact-prompt route acceptance: passed. With Panel 2 authoritative scope and `Suddenly, her besty's smile face jumped into the panel`, `/api/agent` returned HTTP 200; first streamed event was 16 ms after outbound start, provider completion was 57 ms, route work was 77 ms, finish reason was `stop`, and the only accepted action was `compose_character` for Mio smiling in Panel 2. No other-panel action was present.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - Local controlled-core browser acceptance: passed. The app loaded with meaningful editor controls and no framework/page errors; Character creation exposed the lifecycle controls; explicit Character deletion removed the entity; after autosave and a full reload it remained deleted. The Manga Agent rendered its authoritative scope control (`Auto · Current Page · Page 1`).
 - Local transparent-compositing acceptance: passed with a real opaque white-background Yuri upload over a colored street, panel placement, scaling, clipping, and page export. Export pixels beside Yuri remained street blue (`118,181,212,255`) while the enclosed white shirt remained opaque (`255,255,255,255`); no white rectangle or browser errors.
