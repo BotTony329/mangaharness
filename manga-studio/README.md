@@ -27,16 +27,18 @@ npm run typecheck # tsc --noEmit
 npm run build     # production build
 ```
 
-## Configuration (all server-side)
+## Configuration — bring your own API (BYOK)
+
+AI providers are configured **inside the app**: open AI Settings, pick an API standard (OpenAI-compatible / Anthropic-compatible / Gemini for the agent; Gemini / OpenAI-compatible for images), enter base URL + key + model, Test Connection, Save. Credentials are AES-GCM-encrypted into HttpOnly session cookies — never client-readable, never in project data. Replace or forget them anytime; no redeploys.
+
+Deployment env vars (server-side only):
 
 | Variable | Purpose |
 |---|---|
-| `IMAGE_PROVIDER` | `gemini` (default) or `generic-rest` |
-| `GEMINI_API_KEY` | Gemini image generation key |
-| `IMAGE_API_BASE_URL` / `IMAGE_API_KEY` / `IMAGE_MODEL` | Generic REST adapter (and optional Gemini overrides) |
-| `AGENT_API_KEY` | Manga Agent LLM key (OpenAI-compatible; defaults target DeepSeek) |
-| `AGENT_API_BASE_URL` / `AGENT_MODEL` | Agent endpoint/model overrides |
+| `APP_ENCRYPTION_KEY` | **Required.** Encrypts users' BYOK credentials (contains no AI key itself) |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob (auto-injected on Vercel) |
+| `GEMINI_API_KEY`, `AGENT_API_KEY`, … | *Optional* operator-default providers; user BYOK settings override them |
+| `ALLOW_PRIVATE_NETWORKS=1` | Dev only: allow localhost model servers (Ollama, LM Studio) |
 
 Deployment walkthrough: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 

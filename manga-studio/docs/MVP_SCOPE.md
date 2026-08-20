@@ -10,6 +10,10 @@ Plus the agentic revision: **prompt → editable composition** via the Manga Age
 
 ## Shipped
 
+- Infinite workspace canvas: pan (drag/space/wheel), zoom (⌘/Ctrl+wheel, fit page, fit all); the page is one object inside it; loose reference/staged assets live beside pages, convert to panel instances (and back) by dragging, and never export.
+- Polygon panels: presets are starting points; double-click enters shape-edit mode with draggable vertices; clipping/border/export follow the shape (schema v2 with v1 migration).
+- Semantic character instances: floating-toolbar Pose/Expression switching that reuses matching library assets or generates missing slots and swaps them in place.
+- Contextual floating toolbar (framing, flip, slot switching, delete) beside the selected object.
 - Project with pages, predefined layouts (single, 2-stacked, 2-side-by-side, 3-stacked, 4-grid, yonkoma), panel borders.
 - Panel viewport clipping; Fit / Fill / Upper Body / Face (metadata-gated) / Custom framing; ghosted overflow preview.
 - Non-destructive instances: move, resize, rotate, flip, opacity, duplicate, delete, layer reorder (forward/backward/front/back).
@@ -19,7 +23,7 @@ Plus the agentic revision: **prompt → editable composition** via the Manga Age
 - Persistence: IndexedDB project document + autosave; images in Vercel Blob.
 - Export: current page PNG at 1×/2× via the live scene graph, CORS-safe.
 - Real AI generation: Gemini adapter (reference-aware) + generic OpenAI-compatible adapter, server-side keys, capability-adaptive UI, provenance metadata, generation history.
-- Manga Agent: 10 validated tools, 6 skills, DeepSeek-compatible planner, per-step execution status, generation-count confirmation, contextual quick actions.
+- Manga Agent: 12 validated tools (including selection-aware `set_character_slot` and `reshape_panel`), 6 skills, DeepSeek-compatible planner, per-step execution status, generation-count confirmation, contextual quick actions, results staged spatially on the workspace.
 
 ## Deliberately deferred (per spec)
 
@@ -32,3 +36,5 @@ Authentication/accounts/billing; collaboration; multi-project management UI (dom
 - Identity consistency depends on the provider; the UI labels reference-aware generation as provider-dependent, never guaranteed.
 - The agent plans in a single pass (no mid-run replanning); failed steps are reported and skipped.
 - One page-size preset (1200×1800); RTL reading direction is stored but doesn't yet reorder panel numbering.
+- One page renders on the workspace at a time (others via the pages bar); the domain model already positions every page in workspace space for future side-by-side display.
+- Shape editing moves existing polygon vertices; adding/removing vertices and skeletal character posing are future levels.

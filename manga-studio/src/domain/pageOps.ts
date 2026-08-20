@@ -1,7 +1,7 @@
 /** Mutations for pages and panel layouts. */
 
 import { cloneDoc, touch } from "./docHelpers";
-import { createPanel, newId } from "./factory";
+import { createPanelFromRect, defaultPageWorkspacePosition, newId } from "./factory";
 import { LAYOUT_PRESETS } from "./layouts";
 import type { ID, LayoutPresetId, Page, ProjectDocument } from "./types";
 
@@ -17,6 +17,7 @@ export function addPage(
     name: `Page ${index + 1}`,
     index,
     panelIds: [],
+    workspace: defaultPageWorkspacePosition(index, next.project.settings.pageWidth),
   };
   next.pages[page.id] = page;
   applyLayout(next, page, layout);
@@ -79,7 +80,7 @@ export function removePage(doc: ProjectDocument, pageId: ID): ProjectDocument {
 function applyLayout(doc: ProjectDocument, page: Page, layout: LayoutPresetId): void {
   page.panelIds = [];
   for (const rect of LAYOUT_PRESETS[layout].rects) {
-    const panel = createPanel(page.id, rect);
+    const panel = createPanelFromRect(page.id, rect);
     doc.panels[panel.id] = panel;
     page.panelIds.push(panel.id);
   }

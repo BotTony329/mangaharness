@@ -22,17 +22,10 @@ interface GeminiConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  name?: string;
 }
 
-export function geminiConfigFromEnv(): GeminiConfig | null {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.IMAGE_API_KEY;
-  if (!apiKey) return null;
-  return {
-    apiKey,
-    baseUrl: process.env.IMAGE_API_BASE_URL || DEFAULT_BASE_URL,
-    model: process.env.IMAGE_MODEL || DEFAULT_MODEL,
-  };
-}
+export const GEMINI_DEFAULTS = { baseUrl: DEFAULT_BASE_URL, model: DEFAULT_MODEL };
 
 export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvider {
   return {

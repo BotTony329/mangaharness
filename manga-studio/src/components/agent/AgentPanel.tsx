@@ -12,6 +12,7 @@ import { buildAgentContext } from "@/agent/contextBuilder";
 import { countGenerations, describeStep, executePlan, type StepProgress } from "@/agent/executor";
 import type { AgentPlan } from "@/agent/tools/schemas";
 import { useEditorStore } from "@/editor/store";
+import { useUiStore } from "@/editor/uiStore";
 
 type Phase = "idle" | "planning" | "confirm" | "executing" | "done" | "error";
 
@@ -41,13 +42,17 @@ export function AgentPanel() {
   const [steps, setSteps] = useState<StepProgress[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [agentConfigured, setAgentConfigured] = useState<boolean | null>(null);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const openSettings = useUiStore((s) => s.openSettings);
 
+  // Re-check when settings close so connecting a model enables Run instantly.
   useEffect(() => {
+    if (settingsOpen) return;
     fetch("/api/provider/status")
       .then((r) => r.json())
       .then((s) => setAgentConfigured(Boolean(s?.agent?.configured)))
       .catch(() => setAgentConfigured(false));
-  }, []);
+  }, [settingsOpen]);
 
   const run = async (requestPrompt: string) => {
     const state = useEditorStore.getState();
@@ -138,10 +143,15 @@ export function AgentPanel() {
       </div>
 
       {agentConfigured === false && (
-        <p className="rounded border border-amber-900 bg-amber-950/50 p-2 text-amber-300">
-          Agent model not configured. Set <code>AGENT_API_KEY</code> in the server environment (see AI Settings) to
-          enable the Manga Agent.
-        </p>
+        <div className="rounded border border-zinc-700 bg-zinc-950/80 p-3 text-center">
+          <p className="mb-2 text-zinc-400">Connect an AI model to use the Manga Agent.</p>
+          <button
+            className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+            onClick={openSettings}
+          >
+            Connect Model
+          </button>
+        </div>
       )}
 
       <div>

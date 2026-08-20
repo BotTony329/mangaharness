@@ -15,6 +15,8 @@ const HISTORY_LIMIT = 50;
 export interface Selection {
   itemId?: ID;
   panelId?: ID;
+  /** A loose asset on the workspace (outside any page). */
+  workspaceItemId?: ID;
 }
 
 /** Mutations are doc → doc pure functions (see src/domain/*Ops.ts). */
@@ -170,5 +172,9 @@ function pruneSelection(selection: Selection, doc: ProjectDocument): Selection {
   return {
     itemId: selection.itemId && doc.items[selection.itemId] ? selection.itemId : undefined,
     panelId: selection.panelId && doc.panels[selection.panelId] ? selection.panelId : undefined,
+    workspaceItemId:
+      selection.workspaceItemId && doc.workspaceItems[selection.workspaceItemId]
+        ? selection.workspaceItemId
+        : undefined,
   };
 }

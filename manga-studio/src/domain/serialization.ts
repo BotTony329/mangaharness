@@ -4,7 +4,9 @@
  * order before validation.
  */
 
-import { SCHEMA_VERSION, type ProjectDocument } from "./types";
+import { defaultPageWorkspacePosition } from "./factory";
+import { rectToPoints } from "./geometry";
+import { SCHEMA_VERSION, type ProjectDocument, type Rect } from "./types";
 
 export function serializeProject(doc: ProjectDocument): string {
   return JSON.stringify(doc);
@@ -24,13 +26,35 @@ export function deserializeProject(json: string): ProjectDocument {
 
 type Migration = (doc: Record<string, unknown>) => Record<string, unknown>;
 
-/** Index N migrates version N → N+1. Empty until schema v2 exists. */
-const MIGRATIONS: Record<number, Migration> = {};
+/** Index N migrates version N → N+1. */
+const MIGRATIONS: Record<number, Migration> = {
+  // v1 → v2: panels move from rect to polygon points; pages gain a workspace
+  // position; loose workspace items are introduced.
+  1: (doc) => {
+    const panels = (doc.panels ?? {}) as Record<string, { rect?: Rect; points?: unknown }>;
+    for (const panel of Object.values(panels)) {
+      if (panel.rect && !panel.points) {
+        panel.points = rectToPoints(panel.rect);
+        delete panel.rect;
+      }
+    }
+    const settings = (doc.project as { settings?: { pageWidth?: number } } | undefined)?.settings;
+    const pages = (doc.pages ?? {}) as Record<string, { index?: number; workspace?: unknown }>;
+    for (const page of Object.values(pages)) {
+      page.workspace ??= defaultPageWorkspacePosition(page.index ?? 0, settings?.pageWidth ?? 1200);
+    }
+    doc.workspaceItems ??= {};
+    doc.workspaceOrder ??= [];
+    return { ...doc, schemaVersion: 2 };
+  },
+};
 
 function migrate(input: unknown): ProjectDocument {
   if (typeof input !== "object" || input === null) throw new Error("Project file is not an object");
   let doc = input as Record<string, unknown>;
-  let version = typeof doc.schemaVersion === "number" ? doc.schemaVersion : 0;
+  // v1 documents predate explicit versioning discipline but always carried
+  // schemaVersion: 1; treat a missing field as v1 rather than refusing.
+  let version = typeof doc.schemaVersion === "number" ? doc.schemaVersion : 1;
   if (version > SCHEMA_VERSION) {
     throw new Error(`Project was saved by a newer app version (schema ${version})`);
   }
@@ -49,4 +73,6 @@ function assertDocumentShape(doc: ProjectDocument): void {
   );
   if (missing.length > 0) throw new Error(`Corrupt project document: missing ${missing.join(", ")}`);
   if (!Array.isArray(doc.generationHistory)) doc.generationHistory = [];
+  if (typeof doc.workspaceItems !== "object" || doc.workspaceItems === null) doc.workspaceItems = {};
+  if (!Array.isArray(doc.workspaceOrder)) doc.workspaceOrder = [];
 }

@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { completeJson, type AgentModelConfig } from "./providers/openaiCompatible";
+import type { AgentModelProvider } from "./providers/types";
 import { selectSkills } from "./skills/selector";
 import { TOOL_DOCS, validatePlan, type PlanValidation } from "./tools/schemas";
 
@@ -20,7 +20,7 @@ export interface AgentPlanResponse extends PlanValidation {
   skillsUsed: string[];
 }
 
-export async function planAgentRun(config: AgentModelConfig, input: AgentRequestInput): Promise<AgentPlanResponse> {
+export async function planAgentRun(provider: AgentModelProvider, input: AgentRequestInput): Promise<AgentPlanResponse> {
   const skills = selectSkills(input.prompt);
   const systemPrompt = buildSystemPrompt(skills.map((s) => s.instructions));
   const userPrompt = [
@@ -33,7 +33,7 @@ export async function planAgentRun(config: AgentModelConfig, input: AgentRequest
     "Respond with the JSON plan now.",
   ].join("\n");
 
-  const raw = await completeJson(config, systemPrompt, userPrompt);
+  const raw = await provider.completeJson(systemPrompt, userPrompt);
   const validation = validatePlan(parseModelJson(raw));
   return { ...validation, skillsUsed: skills.map((s) => s.name) };
 }

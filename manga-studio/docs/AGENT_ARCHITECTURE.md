@@ -26,7 +26,13 @@ Prompt (+ current page / selection)
 
 ## Tools (`src/agent/tools/schemas.ts`)
 
-`create_character`, `generate_character_asset`, `generate_background`, `generate_prop`, `set_page_layout`, `place_asset`, `set_crop_mode`, `add_speech_bubble`, `add_effect`, `remove_items`.
+`create_character`, `generate_character_asset`, `generate_background`, `generate_prop`, `set_page_layout`, `place_asset` (into a panel or staged onto the workspace), `set_character_slot`, `reshape_panel`, `set_crop_mode`, `add_speech_bubble`, `add_effect`, `remove_items`.
+
+Two tools embody the workspace revision: `set_character_slot` is the "select + prompt" primitive — it changes which asset a placed character instance shows (reusing an exact slot match, generating on miss) while the composition stays put; `reshape_panel` gives the agent the same polygon-editing capability the double-click shape editor gives humans. Anything important a human can do manually maps to a tool on the same command layer.
+
+## The agent is a canvas operator
+
+Agent-generated images are staged as loose workspace items beside the page (and saved to the library with provenance), so the creator reviews spatially — compare, drag into a panel, or delete — instead of results vanishing into a modal. Selection is part of the context: "make her cry" resolves to the selected character instance; the context block names the selected character, its current slot, and its panel, plus the loose material on the workspace.
 
 Tools address things **semantically** — panel numbers in reading order, character names, slot descriptors — instead of internal IDs. That lets a single planning pass place assets that earlier steps will create, with the executor's resolver mapping semantics onto real IDs at execution time.
 

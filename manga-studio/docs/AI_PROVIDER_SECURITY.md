@@ -1,19 +1,21 @@
 # AI Provider Security
 
-## Key handling
+## BYOK key handling (`src/server/secretBox.ts`, `src/server/providerSession.ts`)
 
-All credentials (`GEMINI_API_KEY`, `IMAGE_API_KEY`, `AGENT_API_KEY`, `BLOB_READ_WRITE_TOKEN`) are **server-side environment variables**. They are:
+Users bring their own API keys through AI Settings. The key travels to the server exactly once (`POST /api/provider/config`), is validated, and is sealed with **AES-256-GCM authenticated encryption** (Node's crypto — no custom cryptography) into an **HttpOnly, SameSite=Lax, Secure-in-production cookie**. From then on:
 
-- never sent to the browser (the status endpoint returns configuration presence and capabilities only);
-- never stored in React props, client state, Zustand, localStorage, IndexedDB, project JSON, or exports;
-- never logged — error paths pass through `redactSecrets()` (strips configured key values, bearer tokens, and `key=` query params) before anything is logged or surfaced;
-- never committed — `.gitignore` excludes every `.env*` except `.env.example`, which contains names only.
+- browser JavaScript cannot read the credential (HttpOnly) — verified in the E2E by scanning `document.cookie`, `localStorage`, IndexedDB, and the serialized project for the key;
+- every AI call goes browser → our server route → decrypt cookie → provider adapter → external API; the raw key never reaches client code;
+- `/api/provider/status` returns configuration presence, provider identity, and capabilities — **never the key, not even masked** (unit-tested on the summary builder);
+- the API-key input never round-trips the stored secret: once saved it shows "Configured — enter a new key to replace", and saving with an empty key field keeps the stored one;
+- **Forget credentials** deletes the cookie; credentials are per-browser-session by design (no accounts were built just for this) and the UI says so;
+- tampered or wrong-key ciphertexts decrypt to null (GCM auth tag), so a corrupted cookie degrades to "not configured", never to garbage config.
 
-The architecture is strictly `Browser → our server API → provider adapter → external API`. There is no browser-side provider call anywhere.
+`APP_ENCRYPTION_KEY` is the one deployment secret this system needs: it encrypts user configs and contains no AI key itself. Production refuses BYOK saves without it; development uses a fixed fallback key (dev cookies never leave the machine).
 
-## No temporary key input
+Deployment env vars (`GEMINI_API_KEY`, `AGENT_API_KEY`, …) remain an **optional operator fallback**; a user's session configuration always overrides them.
 
-The optional "paste a key in the UI" idea was **deliberately not built**: any browser-entered credential path either touches client persistence or requires server session state that Vercel's serverless model doesn't provide safely. Production configuration is Vercel environment variables; local testing uses `.env.local` (gitignored) or the fake-provider scripts. This follows the spec's instruction to prefer no feature over a weak one.
+Error paths still pass through `redactSecrets()` (configured env values, bearer tokens, `key=` params) before logging or surfacing, and provider error bodies are truncated + redacted.
 
 ## SSRF protection (`src/ai/security.ts`)
 
@@ -25,7 +27,7 @@ Configurable endpoints (generic REST base URL, agent base URL) are validated by 
 
 Reference images are only fetched from **our own storage** (`isAllowedReferenceUrl`: the Vercel Blob public host or the local `/api/files/` route). The server never fetches arbitrary user-supplied URLs. Reference fetches have a 15 s timeout and a 10 MB cap.
 
-Known limitation: hostname-based checks don't resolve DNS, so a public hostname pointing at a private IP isn't caught. Mitigated by the reference allow-list (the only server-side fetch of non-configured URLs) and by provider URLs being deploy-time configuration, not user input.
+With BYOK, provider base URLs are user input — every saved endpoint passes `assertSafeProviderUrl` at configuration time and again at adapter construction. Known limitation: hostname-based checks don't resolve DNS, so a public hostname pointing at a private IP (DNS rebinding) isn't caught; accepted for MVP because the request executes from a serverless egress with nothing else reachable on its network, and documented here rather than hidden. `ALLOW_PRIVATE_NETWORKS=1` enables localhost endpoints (Ollama, LM Studio, ComfyUI) in local development only — a hosted Vercel function couldn't reach a user's localhost anyway; future desktop builds can support local models directly.
 
 ## Upload validation (`src/storage/imageValidation.ts`)
 

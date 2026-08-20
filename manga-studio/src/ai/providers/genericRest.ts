@@ -20,13 +20,7 @@ interface GenericRestConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-}
-
-export function genericRestConfigFromEnv(): GenericRestConfig | null {
-  const apiKey = process.env.IMAGE_API_KEY;
-  const baseUrl = process.env.IMAGE_API_BASE_URL;
-  if (!apiKey || !baseUrl) return null;
-  return { apiKey, baseUrl, model: process.env.IMAGE_MODEL || "" };
+  name?: string;
 }
 
 export function createGenericRestProvider(config: GenericRestConfig): ImageGenerationProvider {

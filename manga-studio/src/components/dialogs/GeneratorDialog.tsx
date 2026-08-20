@@ -14,6 +14,7 @@ import {
   type GenerateApiResult,
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
+import { swapInstanceAsset } from "@/domain/itemOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
@@ -97,7 +98,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const addToLibrary = async () => {
     if (!result || !doc) return;
     const category: AssetCategory = isCharacterType ? "character" : (request.assetType as AssetCategory);
-    await storeGeneratedAsset({
+    const assetId = await storeGeneratedAsset({
       result,
       assetType: request.assetType,
       category,
@@ -112,6 +113,14 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         referenceAssetIds: result.referenceUsed && referenceAsset ? [referenceAsset.id] : undefined,
       },
     });
+    // "Generate missing slot" flows started from a selected instance also
+    // swap that instance to the new asset — composition stays intact.
+    if (request.targetInstanceId) {
+      const store = useEditorStore.getState();
+      if (store.doc?.items[request.targetInstanceId]) {
+        store.commit((d) => swapInstanceAsset(d, request.targetInstanceId!, assetId));
+      }
+    }
     onClose();
   };
 
@@ -128,10 +137,18 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         </p>
 
         {provider && !provider.configured && (
-          <p className="mb-3 rounded border border-amber-900 bg-amber-950/50 p-2 text-xs text-amber-300">
-            No image provider is configured. Set the server environment variables (see AI Settings) to enable real
-            generation.
-          </p>
+          <div className="mb-3 rounded border border-zinc-700 bg-zinc-950/80 p-3 text-center text-xs">
+            <p className="mb-2 text-zinc-400">Connect an image model to generate assets.</p>
+            <button
+              className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+              onClick={() => {
+                onClose();
+                useUiStore.getState().openSettings();
+              }}
+            >
+              Connect Image Model
+            </button>
+          </div>
         )}
 
         {phase !== "done" && (

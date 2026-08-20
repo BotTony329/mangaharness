@@ -172,6 +172,32 @@ export function setCropMode(doc: ProjectDocument, itemId: ID, mode: CropMode): P
   return next;
 }
 
+/**
+ * Semantic asset switching: replace which source asset an instance shows
+ * ("Pose: Standing → Running") while preserving the composition — position,
+ * panel membership, z-order, rotation, flip. Non-custom crop modes recompute
+ * for the new asset's dimensions; custom keeps the height and follows the
+ * new aspect ratio. The panel is never recreated.
+ */
+export function swapInstanceAsset(doc: ProjectDocument, itemId: ID, newSourceAssetId: ID): ProjectDocument {
+  const next = cloneDoc(doc);
+  const item = requireItem(next, itemId);
+  if (item.kind !== "asset") throw new Error("Only asset instances can swap sources");
+  const asset = next.assets[newSourceAssetId];
+  if (!asset) throw new Error(`Unknown asset: ${newSourceAssetId}`);
+
+  item.sourceAssetId = newSourceAssetId;
+  const panelRect = panelPxRect(next, item.panelId);
+  const transform = cropModeTransform(item.cropMode, asset, panelRect.width, panelRect.height);
+  if (transform) {
+    Object.assign(item, transform);
+  } else {
+    item.width = item.height * (asset.width / asset.height);
+  }
+  touch(next);
+  return next;
+}
+
 export function updateBubble(
   doc: ProjectDocument,
   itemId: ID,

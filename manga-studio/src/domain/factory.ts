@@ -1,5 +1,6 @@
 /** Constructors for domain objects. IDs are uuid v4; time is injected-able for tests. */
 
+import { rectToPoints } from "./geometry";
 import { LAYOUT_PRESETS } from "./layouts";
 import {
   SCHEMA_VERSION,
@@ -8,12 +9,21 @@ import {
   type LayoutPresetId,
   type Page,
   type Panel,
+  type Point,
   type ProjectDocument,
   type Rect,
 } from "./types";
 
 export function newId(): ID {
-  return crypto.randomUUID();
+  // crypto.randomUUID only exists in secure contexts (https / localhost);
+  // opening the dev server via a LAN IP would crash on boot without this
+  // fallback, which builds a v4 UUID from getRandomValues instead.
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function now(): string {
@@ -22,8 +32,17 @@ export function now(): string {
 
 export const DEFAULT_PANEL_BORDER = { visible: true, strokeWidthPx: 4, color: "#111111" };
 
-export function createPanel(pageId: ID, rect: Rect): Panel {
-  return { id: newId(), pageId, rect, border: { ...DEFAULT_PANEL_BORDER }, itemIds: [] };
+/** Pages sit side by side on the workspace with a fixed gap. */
+export function defaultPageWorkspacePosition(index: number, pageWidth: number): Point {
+  return { x: index * (pageWidth + 240), y: 0 };
+}
+
+export function createPanel(pageId: ID, points: Point[]): Panel {
+  return { id: newId(), pageId, points, border: { ...DEFAULT_PANEL_BORDER }, itemIds: [] };
+}
+
+export function createPanelFromRect(pageId: ID, rect: Rect): Panel {
+  return createPanel(pageId, rectToPoints(rect));
 }
 
 export function createCharacter(projectId: ID, name: string, description?: string): Character {
@@ -33,10 +52,17 @@ export function createCharacter(projectId: ID, name: string, description?: strin
 /** A fresh project starts with one four-grid page so the canvas is never empty. */
 export function createProjectDocument(name: string, layout: LayoutPresetId = "four-grid"): ProjectDocument {
   const projectId = newId();
-  const page: Page = { id: newId(), projectId, name: "Page 1", index: 0, panelIds: [] };
+  const page: Page = {
+    id: newId(),
+    projectId,
+    name: "Page 1",
+    index: 0,
+    panelIds: [],
+    workspace: defaultPageWorkspacePosition(0, 1200),
+  };
   const panels: Record<ID, Panel> = {};
   for (const rect of LAYOUT_PRESETS[layout].rects) {
-    const panel = createPanel(page.id, rect);
+    const panel = createPanelFromRect(page.id, rect);
     panels[panel.id] = panel;
     page.panelIds.push(panel.id);
   }
@@ -56,6 +82,8 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
     pages: { [page.id]: page },
     panels,
     items: {},
+    workspaceItems: {},
+    workspaceOrder: [],
     generationHistory: [],
   };
 }

@@ -1,98 +1,85 @@
 /**
- * Agent model provider: any OpenAI-compatible chat-completions endpoint.
- * Defaults target DeepSeek. Kept fully separate from the image provider —
- * the two services rarely come from the same vendor.
+ * OpenAI-compatible chat-completions adapter — the workhorse: DeepSeek,
+ * Kimi/Moonshot, OpenAI, OpenRouter, self-hosted gateways, Ollama's
+ * compatible endpoint, and most other vendors speak this shape.
  */
 
-import { assertSafeProviderUrl, redactSecrets } from "@/ai/security";
+import type { ProviderConfig } from "@/server/providerSession";
+import { agentErrorFrom, boundedFetch } from "./http";
+import { AgentModelError, type AgentModelProvider } from "./types";
 
-const DEFAULT_BASE_URL = "https://api.deepseek.com";
-const DEFAULT_MODEL = "deepseek-chat";
-const REQUEST_TIMEOUT_MS = 120_000;
+export function createOpenAiCompatibleAgent(config: ProviderConfig): AgentModelProvider {
+  const base = config.baseUrl.replace(/\/$/, "");
+  const headers = {
+    Authorization: `Bearer ${config.apiKey}`,
+    "Content-Type": "application/json",
+  };
 
-export interface AgentModelConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  providerLabel: string;
-}
-
-export function agentConfigFromEnv(): AgentModelConfig | null {
-  const apiKey = process.env.AGENT_API_KEY;
-  if (!apiKey) return null;
-  const baseUrl = process.env.AGENT_API_BASE_URL || DEFAULT_BASE_URL;
   return {
-    apiKey,
-    baseUrl,
-    model: process.env.AGENT_MODEL || DEFAULT_MODEL,
-    providerLabel: new URL(baseUrl).hostname,
+    label: config.name || `openai-compatible @ ${hostOf(base)}`,
+    model: config.model,
+
+    async testConnection() {
+      // Prefer the cheap models listing; some gateways don't expose it, so
+      // fall back to a one-token completion rather than reporting failure.
+      const models = await boundedFetch(`${base}/models`, { method: "GET", headers });
+      if (models.ok) return { ok: true };
+      if (models.status === 401 || models.status === 403) {
+        return { ok: false, message: "Authentication failed — check the API key" };
+      }
+      const probe = await boundedFetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        }),
+      });
+      if (probe.ok) return { ok: true };
+      return { ok: false, message: (await agentErrorFrom(probe)).safeMessage };
+    },
+
+    async completeJson(systemPrompt, userPrompt) {
+      const response = await boundedFetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+        }),
+      });
+      if (!response.ok) throw await agentErrorFrom(response);
+      const body = (await response.json().catch(() => null)) as {
+        choices?: { message?: { content?: string } }[];
+      } | null;
+      const content = body?.choices?.[0]?.message?.content;
+      if (!content) throw new AgentModelError("Agent model returned an empty response");
+      return content;
+    },
   };
 }
 
-export class AgentModelError extends Error {
-  readonly safeMessage: string;
-  readonly status: number;
-
-  constructor(safeMessage: string, status = 502) {
-    super(safeMessage);
-    this.safeMessage = safeMessage;
-    this.status = status;
-  }
+/** Fetch the provider's model list for the settings model picker. */
+export async function listOpenAiCompatibleModels(config: ProviderConfig): Promise<string[]> {
+  const response = await boundedFetch(`${config.baseUrl.replace(/\/$/, "")}/models`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${config.apiKey}` },
+  });
+  if (!response.ok) throw await agentErrorFrom(response);
+  const body = (await response.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+  return (body?.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id));
 }
 
-/**
- * One JSON-mode completion. The planner asks for a strict JSON object, which
- * is far more reliable across OpenAI-compatible vendors than parallel
- * function-calling.
- */
-export async function completeJson(
-  config: AgentModelConfig,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  const base = assertSafeProviderUrl(config.baseUrl).toString().replace(/\/$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response: Response;
+function hostOf(url: string): string {
   try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-      }),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new AgentModelError("The agent model timed out", 504);
-    }
-    throw new AgentModelError("Agent model provider unavailable", 502);
-  } finally {
-    clearTimeout(timer);
+    return new URL(url).hostname;
+  } catch {
+    return url;
   }
-
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new AgentModelError("Agent authentication failed — check the API key", 401);
-    }
-    const text = await response.text().catch(() => "");
-    throw new AgentModelError(`Agent model error (HTTP ${response.status}): ${redactSecrets(text).slice(0, 200)}`);
-  }
-
-  const body = (await response.json().catch(() => null)) as {
-    choices?: { message?: { content?: string } }[];
-  } | null;
-  const content = body?.choices?.[0]?.message?.content;
-  if (!content) throw new AgentModelError("Agent model returned an empty response");
-  return content;
 }

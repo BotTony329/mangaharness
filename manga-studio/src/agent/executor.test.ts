@@ -7,9 +7,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createProjectDocument } from "@/domain/factory";
 import { addAsset, addCharacter } from "@/domain/libraryOps";
+import type { AssetInstance } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { executePlan } from "./executor";
 import { validatePlan } from "./tools/schemas";
+
+const seedIds: { crying?: string } = {};
 
 function seedStore() {
   let doc = createProjectDocument("Agent E2E");
@@ -24,6 +27,16 @@ function seedStore() {
     metadata: { characterId: akari.characterId, pose: "running", expression: "happy" },
   });
   doc = asset.doc;
+  const crying = addAsset(doc, {
+    category: "character",
+    name: "Akari crying",
+    storageUrl: "https://example.com/cry.png",
+    width: 800,
+    height: 1600,
+    metadata: { characterId: akari.characterId, pose: "standing", expression: "crying" },
+  });
+  doc = crying.doc;
+  seedIds.crying = crying.assetId;
   const bg = addAsset(doc, {
     category: "background",
     name: "School gate",
@@ -94,6 +107,73 @@ describe("executePlan", () => {
     // Whole run = one undo entry.
     useEditorStore.getState().undo();
     expect(useEditorStore.getState().doc).toBe(before);
+  });
+
+  it("set_character_slot reuses an existing slot asset on the SELECTED instance (no generation)", async () => {
+    // Place Akari (running/happy) in panel 1 and select her.
+    const place = validatePlan({
+      summary: "place",
+      steps: [{ tool: "place_asset", args: { panel: 1, characterName: "Akari", pose: "running" } }],
+    }).plan;
+    await executePlan(place, () => {});
+    const state = useEditorStore.getState();
+    const doc = state.doc!;
+    const instanceId = Object.keys(doc.items)[0];
+    const before = doc.items[instanceId] as AssetInstance;
+    state.select({ itemId: instanceId, panelId: before.panelId });
+
+    // "Make her cry" — no panel/name given: the selection is the target.
+    const { plan } = validatePlan({
+      summary: "make her cry",
+      steps: [{ tool: "set_character_slot", args: { expression: "crying" } }],
+    });
+    const summary = await executePlan(plan, () => {});
+    expect(summary.failed).toBe(0);
+
+    const after = useEditorStore.getState().doc!.items[instanceId] as AssetInstance;
+    expect(after.sourceAssetId).toBe(seedIds.crying);
+    // Composition preserved: same panel, same slot in the stack.
+    expect(after.panelId).toBe(before.panelId);
+    // Reuse, not regeneration: no generation history entries were added.
+    expect(useEditorStore.getState().doc!.generationHistory).toHaveLength(0);
+  });
+
+  it("reshape_panel turns a rectangle into a polygon that survives in state", async () => {
+    const { plan } = validatePlan({
+      summary: "diagonal cut",
+      steps: [
+        {
+          tool: "reshape_panel",
+          args: {
+            panel: 1,
+            points: [
+              { x: 0.03, y: 0.03 },
+              { x: 0.97, y: 0.03 },
+              { x: 0.6, y: 0.5 },
+              { x: 0.03, y: 0.5 },
+            ],
+          },
+        },
+      ],
+    });
+    const summary = await executePlan(plan, () => {});
+    expect(summary.failed).toBe(0);
+    const doc = useEditorStore.getState().doc!;
+    const panel = doc.panels[Object.values(doc.pages)[0].panelIds[0]];
+    expect(panel.points).toHaveLength(4);
+    expect(panel.points[2]).toEqual({ x: 0.6, y: 0.5 });
+  });
+
+  it("place_asset target:'workspace' stages a loose item instead of touching panels", async () => {
+    const { plan } = validatePlan({
+      summary: "stage reference",
+      steps: [{ tool: "place_asset", args: { target: "workspace", characterName: "Akari" } }],
+    });
+    const summary = await executePlan(plan, () => {});
+    expect(summary.failed).toBe(0);
+    const doc = useEditorStore.getState().doc!;
+    expect(Object.keys(doc.workspaceItems)).toHaveLength(1);
+    expect(Object.keys(doc.items)).toHaveLength(0);
   });
 
   it("reports failed steps but keeps executing the rest", async () => {

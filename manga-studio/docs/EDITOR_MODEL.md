@@ -1,5 +1,17 @@
 # Editor Model
 
+## The infinite workspace
+
+The root canvas is an infinite workspace, not the page. A manga page is one object inside it (`page.workspace` position); loose assets — reference sheets, staged generations, mood-board material — live beside pages as `WorkspaceItem`s. Loose items are working material: they are never exported with a page, and they convert to panel instances (and back) by dragging across the panel boundary. Navigation: drag empty space or hold Space to pan, wheel pans, ⌘/Ctrl+wheel zooms at the pointer, plus Fit page / Fit all controls.
+
+### Coordinate spaces (see `src/domain/coords.ts`)
+
+Viewport (screen) → stage transform → **Workspace** (pages + loose items) → subtract `page.workspace` → **Page** (panel polygons) → subtract panel bbox origin → **Panel-local** (item transforms). Each helper converts exactly one hop; conversions are explicit at call sites and unit-tested.
+
+## Panels are polygons
+
+A panel's geometry is a polygon (`points`, normalized page coords, 3–10 vertices) — a rectangle is just a 4-point polygon. Presets create the starting shape; after that the creator owns it: double-click a panel to enter shape-edit mode and drag vertex anchors (diagonal action panels). Clipping, the white fill, the border, hit testing, and export all follow the polygon — never the bounding box. Framing math (Fit/Fill/Upper Body) works against the polygon's bounding box.
+
 ## Source assets vs panel instances — the core invariant
 
 A `SourceAsset` is an immutable library item (image URL + metadata). Placing it in a panel creates an `AssetInstance` that stores **only presentation state**: center position, size, rotation, flip, opacity, crop mode. 
@@ -26,6 +38,10 @@ Computed by pure functions in `src/domain/geometry.ts`:
 - **Custom** — whatever the user made it. Any manual move/resize switches the instance to custom.
 
 A mode computes a starting transform; the user (or agent) can keep adjusting afterwards. The panel does the cropping — sources are never cropped destructively.
+
+## Semantic character instances
+
+A placed character is not a static image: the floating toolbar exposes Pose and Expression dropdowns built from the character's slot metadata. Picking an existing slot swaps the instance's source asset (`swapInstanceAsset`) while preserving position, panel membership, z-order, and framing; picking "Generate…" opens the generator and swaps in the accepted result. The agent's `set_character_slot` tool is the same operation ("make her cry"), with generate-on-miss.
 
 ## Layers
 

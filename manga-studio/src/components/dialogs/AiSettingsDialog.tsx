@@ -1,124 +1,351 @@
 "use client";
 
 /**
- * AI provider status. Read-only by design: credentials live in server
- * environment variables and are never sent to (or from) the browser —
- * this dialog only shows safe status metadata.
+ * Bring-your-own-key AI settings: users connect their own agent LLM and
+ * image provider directly here — no environment variables, no redeploy.
+ * Keys go to the server once, come back never (encrypted HttpOnly cookie);
+ * this dialog only ever sees "configured / not configured".
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useUiStore } from "@/editor/uiStore";
 
-interface ProviderStatus {
+interface ProviderSummary {
   configured: boolean;
-  provider?: string;
+  source?: "session" | "deployment";
+  providerType?: string;
+  name?: string;
+  baseUrl?: string;
   model?: string;
-  capabilities?: Record<string, boolean>;
-  agent?: { configured: boolean; provider?: string; model?: string };
-  storage?: { configured: boolean; backend: string };
 }
 
-export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
-  const [status, setStatus] = useState<ProviderStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+interface StatusResponse {
+  agent: ProviderSummary;
+  image: ProviderSummary & { capabilities?: Record<string, boolean> };
+}
 
-  useEffect(() => {
+const AGENT_TYPES = [
+  { id: "openai-compatible", label: "OpenAI Compatible", placeholder: "https://api.deepseek.com" },
+  { id: "anthropic-compatible", label: "Anthropic Compatible", placeholder: "https://api.anthropic.com" },
+  { id: "gemini", label: "Google Gemini", placeholder: "https://generativelanguage.googleapis.com" },
+];
+
+const IMAGE_TYPES = [
+  { id: "gemini", label: "Google Gemini (reference images)", placeholder: "https://generativelanguage.googleapis.com" },
+  { id: "openai-compatible", label: "OpenAI-Compatible Image API", placeholder: "https://api.example.com/v1" },
+];
+
+export function AiSettingsDialog() {
+  const open = useUiStore((s) => s.settingsOpen);
+  const close = useUiStore((s) => s.closeSettings);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
+
+  const refresh = useCallback(() => {
     fetch("/api/provider/status")
       .then((r) => r.json())
       .then(setStatus)
-      .catch(() => setError("Could not reach the server"));
+      .catch(() => setStatus(null));
   }, []);
 
-  const testConnection = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const response = await fetch("/api/provider/status", { method: "POST" });
-      const body = await response.json();
-      setTestResult(body.ok ? "Connection OK — provider responded." : `Failed: ${body.error ?? "unknown error"}`);
-    } catch {
-      setTestResult("Failed: could not reach the server");
-    } finally {
-      setTesting(false);
-    }
-  };
+  useEffect(() => {
+    if (open) refresh();
+  }, [open, refresh]);
+
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/60 py-6" onMouseDown={close}>
       <div
-        className="w-[420px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="w-[520px] max-h-[92vh] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-3 font-semibold text-zinc-100">AI Providers</h2>
-        {error && <p className="text-red-400">{error}</p>}
-        {!status && !error && <p className="text-zinc-500">Checking…</p>}
-        {status && (
-          <div className="space-y-4">
-            <StatusBlock
-              title="Image generation"
-              configured={status.configured}
-              lines={
-                status.configured
-                  ? [
-                      `Provider: ${status.provider}`,
-                      `Model: ${status.model}`,
-                      `Reference images: ${status.capabilities?.referenceImage ? "supported" : "not supported"}`,
-                    ]
-                  : []
-              }
-            />
-            <StatusBlock
-              title="Manga Agent (LLM)"
-              configured={Boolean(status.agent?.configured)}
-              lines={status.agent?.configured ? [`Provider: ${status.agent.provider}`, `Model: ${status.agent.model}`] : []}
-            />
-            <StatusBlock
-              title="Asset storage"
-              configured={Boolean(status.storage?.configured)}
-              lines={[`Backend: ${status.storage?.backend ?? "unknown"}`]}
-            />
-            {!status.configured && (
-              <p className="rounded border border-zinc-700 bg-zinc-950 p-2 text-xs leading-5 text-zinc-400">
-                Configure providers with server environment variables (see <code>.env.example</code> and{" "}
-                <code>docs/DEPLOYMENT.md</code>): set <code>GEMINI_API_KEY</code> and <code>AGENT_API_KEY</code> in
-                Vercel → Project → Settings → Environment Variables, then redeploy.
-              </p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button
-                className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs hover:bg-zinc-700 disabled:opacity-40"
-                onClick={testConnection}
-                disabled={testing || !status.configured}
-              >
-                {testing ? "Testing…" : "Test Connection"}
-              </button>
-              <button className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500" onClick={onClose}>
-                Close
-              </button>
-            </div>
-            {testResult && <p className="text-xs text-zinc-300">{testResult}</p>}
-          </div>
-        )}
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-semibold text-zinc-100">AI Providers</h2>
+          <button aria-label="Close settings" className="text-zinc-500 hover:text-zinc-200" onClick={close}>
+            ✕
+          </button>
+        </div>
+        <p className="mb-4 text-xs leading-5 text-zinc-500">
+          Bring your own API: connect any compatible provider for each capability. Credentials are encrypted and stored
+          for this browser session only — they never appear in project data, exports, or client-side storage.
+        </p>
+
+        <ProviderCard
+          kind="agent"
+          title="Manga Agent (LLM)"
+          types={AGENT_TYPES}
+          summary={status?.agent ?? null}
+          onChanged={refresh}
+          supportsModelDiscovery
+        />
+        <ProviderCard
+          kind="image"
+          title="Image Generation"
+          types={IMAGE_TYPES}
+          summary={status?.image ?? null}
+          onChanged={refresh}
+          footnote={
+            status?.image?.configured
+              ? status.image.capabilities?.referenceImage
+                ? "This provider supports reference images — character identity can be carried into pose/expression generation (provider-dependent, never guaranteed)."
+                : "This provider does not support reference images: identity preservation relies on text descriptions only."
+              : undefined
+          }
+        />
       </div>
     </div>
   );
 }
 
-function StatusBlock({ title, configured, lines }: { title: string; configured: boolean; lines: string[] }) {
+// ─── One provider configuration card ────────────────────────────────────────
+
+interface ProviderCardProps {
+  kind: "agent" | "image";
+  title: string;
+  types: { id: string; label: string; placeholder: string }[];
+  summary: ProviderSummary | null;
+  onChanged: () => void;
+  supportsModelDiscovery?: boolean;
+  footnote?: string;
+}
+
+function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDiscovery, footnote }: ProviderCardProps) {
+  const [providerType, setProviderType] = useState(types[0].id);
+  const [name, setName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [model, setModel] = useState("");
+  const [models, setModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState<"save" | "test" | "forget" | "models" | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Prefill the form from the saved summary once (never the key — the server
+  // doesn't return it; an empty key field means "keep the stored key").
+  useEffect(() => {
+    if (!summary || hydrated) return;
+    if (summary.configured) {
+      setProviderType(summary.providerType ?? types[0].id);
+      setName(summary.name ?? "");
+      setBaseUrl(summary.baseUrl ?? "");
+      setModel(summary.model ?? "");
+    }
+    setHydrated(true);
+  }, [summary, hydrated, types]);
+
+  const typeInfo = types.find((t) => t.id === providerType) ?? types[0];
+  const configured = summary?.configured ?? false;
+
+  const save = async () => {
+    setBusy("save");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/provider/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          providerType,
+          name: name || undefined,
+          baseUrl: baseUrl || undefined,
+          // Empty field + already configured = keep the stored key.
+          apiKey: apiKey || undefined,
+          model,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Save failed");
+      setApiKey("");
+      setMessage({ ok: true, text: "Saved. Credentials are stored securely for this browser session." });
+      onChanged();
+    } catch (e) {
+      setMessage({ ok: false, text: e instanceof Error ? e.message : "Save failed" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const test = async () => {
+    setBusy("test");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/provider/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      const body = await response.json();
+      setMessage(body.ok ? { ok: true, text: "Connected" } : { ok: false, text: body.error ?? "Connection failed" });
+    } catch {
+      setMessage({ ok: false, text: "Endpoint unreachable" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const forget = async () => {
+    if (!confirm(`Forget the ${title} credentials for this browser?`)) return;
+    setBusy("forget");
+    await fetch(`/api/provider/config?kind=${kind}`, { method: "DELETE" });
+    setApiKey("");
+    setModel("");
+    setName("");
+    setBaseUrl("");
+    setMessage({ ok: true, text: "Credentials forgotten." });
+    setBusy(null);
+    onChanged();
+  };
+
+  const fetchModels = async () => {
+    setBusy("models");
+    try {
+      const response = await fetch("/api/provider/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      const body = await response.json();
+      setModels(Array.isArray(body.models) ? body.models : []);
+      if (!body.models?.length) setMessage({ ok: false, text: "This provider doesn't expose a model list — enter the model ID manually." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
-    <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-zinc-300">{title}</span>
-        <span className={`text-xs ${configured ? "text-emerald-400" : "text-amber-400"}`}>
-          {configured ? "● Configured" : "○ Not configured"}
+    <section className="mb-4 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{title}</h3>
+        <span className={`text-xs ${configured ? "text-emerald-400" : "text-zinc-500"}`}>
+          {configured ? `● Connected${summary?.source === "deployment" ? " (deployment default)" : ""}` : "○ Not configured"}
         </span>
       </div>
-      {lines.map((line) => (
-        <p key={line} className="mt-1 text-[11px] text-zinc-500">
-          {line}
-        </p>
-      ))}
-    </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="API standard">
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+            value={providerType}
+            onChange={(e) => {
+              setProviderType(e.target.value);
+              setBaseUrl("");
+              setModels([]);
+            }}
+          >
+            {types.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Provider name (optional)">
+          <input
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Kimi, MiniMax, …"
+          />
+        </Field>
+      </div>
+
+      <Field label="Base URL">
+        <input
+          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-xs"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder={typeInfo.placeholder}
+        />
+      </Field>
+
+      <Field label="API key">
+        <div className="relative">
+          <input
+            type={showKey ? "text" : "password"}
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 pr-9 font-mono text-xs"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={configured ? "Configured — enter a new key to replace" : "sk-…"}
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            onClick={() => setShowKey(!showKey)}
+            title={showKey ? "Hide" : "Show while typing"}
+          >
+            {showKey ? "🙈" : "👁"}
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Model">
+        <div className="flex gap-2">
+          <input
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-xs"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="model-name"
+            list={models.length > 0 ? `${kind}-models` : undefined}
+          />
+          {supportsModelDiscovery && providerType === "openai-compatible" && configured && (
+            <button
+              className="shrink-0 rounded border border-zinc-700 bg-zinc-800 px-2 text-xs hover:bg-zinc-700"
+              onClick={fetchModels}
+              disabled={busy !== null}
+              title="Fetch the provider's model list (optional)"
+            >
+              {busy === "models" ? "…" : "Fetch models"}
+            </button>
+          )}
+        </div>
+        {models.length > 0 && (
+          <datalist id={`${kind}-models`}>
+            {models.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+        )}
+      </Field>
+
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+          onClick={save}
+          disabled={busy !== null || !model || (!configured && !apiKey)}
+        >
+          {busy === "save" ? "Saving…" : "Save"}
+        </button>
+        <button
+          className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs hover:bg-zinc-700 disabled:opacity-40"
+          onClick={test}
+          disabled={busy !== null || !configured}
+          title={configured ? "Round-trip to the provider" : "Save first, then test"}
+        >
+          {busy === "test" ? "Testing…" : "Test Connection"}
+        </button>
+        <div className="flex-1" />
+        {configured && summary?.source === "session" && (
+          <button className="text-xs text-zinc-500 hover:text-red-400" onClick={forget} disabled={busy !== null}>
+            Forget credentials
+          </button>
+        )}
+      </div>
+
+      {message && (
+        <p className={`mt-2 text-xs ${message.ok ? "text-emerald-400" : "text-red-400"}`}>{message.text}</p>
+      )}
+      {footnote && <p className="mt-2 text-[11px] leading-4 text-zinc-500">{footnote}</p>}
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="mb-2 block">
+      <span className="mb-1 block text-[10px] uppercase tracking-wider text-zinc-500">{label}</span>
+      {children}
+    </label>
   );
 }
