@@ -1,8 +1,8 @@
 "use client";
 
-import { Group, Rect } from "react-konva";
-import { panelRectToPx } from "@/domain/geometry";
-import type { ID, Panel, PanelItem, ProjectDocument } from "@/domain/types";
+import { Group, Line } from "react-konva";
+import { panelBoundsPx, panelPolygonPx } from "@/domain/coords";
+import type { ID, Panel, PanelItem, Point, ProjectDocument } from "@/domain/types";
 import { AssetNode } from "./AssetNode";
 import { BubbleNode } from "./BubbleNode";
 import { EffectNode } from "./EffectNode";
@@ -15,6 +15,7 @@ export interface PanelInteraction {
   onItemDragEnd?: (itemId: ID, cx?: number, cy?: number) => void;
   onEditBubble?: (itemId: ID) => void;
   onTailMove?: (itemId: ID, x: number, y: number) => void;
+  onPanelDoubleClick?: (panelId: ID) => void;
 }
 
 interface PanelRendererProps {
@@ -25,42 +26,40 @@ interface PanelRendererProps {
 }
 
 /**
- * The panel viewport: a clipped group with Figma-frame semantics. Items may
- * extend beyond the panel; only pixels inside the rect render. The border is
- * drawn unclipped on top so strokes aren't half-cut.
+ * The panel viewport, in page coordinates. The panel's polygon drives
+ * everything: the clip path, the white fill, the border, and hit testing —
+ * a diagonal panel clips diagonally, not to its bounding box. Item
+ * coordinates are panel-local, anchored at the polygon's bbox origin.
  */
 export function PanelRenderer({ doc, panel, interactive, interaction = {} }: PanelRendererProps) {
-  const { pageWidth, pageHeight } = doc.project.settings;
-  const rect = panelRectToPx(panel.rect, pageWidth, pageHeight);
+  const polygon = panelPolygonPx(doc, panel);
+  const bounds = panelBoundsPx(doc, panel);
+  const localPoints = polygon.map((p) => ({ x: p.x - bounds.x, y: p.y - bounds.y }));
+  const flat = localPoints.flatMap((p) => [p.x, p.y]);
   const items = panel.itemIds.map((id) => doc.items[id]).filter(Boolean) as PanelItem[];
 
   return (
     <>
-      <Group
-        x={rect.x}
-        y={rect.y}
-        clipX={0}
-        clipY={0}
-        clipWidth={rect.width}
-        clipHeight={rect.height}
-      >
-        {/* Transparent catcher: clicking empty panel space selects the panel. */}
-        <Rect
-          width={rect.width}
-          height={rect.height}
+      <Group x={bounds.x} y={bounds.y} clipFunc={(ctx) => tracePolygon(ctx, localPoints)}>
+        {/* White panel sheet doubles as the click target for panel selection. */}
+        <Line
+          points={flat}
+          closed
           fill="#ffffff"
           listening={interactive}
           onMouseDown={() => interaction.onSelectPanel?.(panel.id)}
           onTap={() => interaction.onSelectPanel?.(panel.id)}
+          onDblClick={() => interaction.onPanelDoubleClick?.(panel.id)}
+          onDblTap={() => interaction.onPanelDoubleClick?.(panel.id)}
         />
         {items.map((item) => renderItem(doc, panel.id, item, interactive, interaction))}
       </Group>
       {panel.border.visible && (
-        <Rect
-          x={rect.x}
-          y={rect.y}
-          width={rect.width}
-          height={rect.height}
+        <Line
+          x={bounds.x}
+          y={bounds.y}
+          points={flat}
+          closed
           stroke={panel.border.color}
           strokeWidth={panel.border.strokeWidthPx}
           listening={false}
@@ -68,6 +67,13 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
       )}
     </>
   );
+}
+
+function tracePolygon(ctx: { beginPath(): void; moveTo(x: number, y: number): void; lineTo(x: number, y: number): void; closePath(): void }, points: Point[]): void {
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
+  ctx.closePath();
 }
 
 function renderItem(
@@ -123,10 +129,9 @@ function renderItem(
 export function PanelGhost({ doc, panel, itemId }: { doc: ProjectDocument; panel: Panel; itemId: ID }) {
   const item = doc.items[itemId];
   if (!item || item.kind !== "asset" || item.panelId !== panel.id) return null;
-  const { pageWidth, pageHeight } = doc.project.settings;
-  const rect = panelRectToPx(panel.rect, pageWidth, pageHeight);
+  const bounds = panelBoundsPx(doc, panel);
   return (
-    <Group x={rect.x} y={rect.y} listening={false}>
+    <Group x={bounds.x} y={bounds.y} listening={false}>
       <AssetNode item={item} storageUrl={doc.assets[item.sourceAssetId]?.storageUrl} interactive={false} ghost />
     </Group>
   );

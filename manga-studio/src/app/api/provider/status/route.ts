@@ -1,43 +1,37 @@
-import { NextResponse } from "next/server";
-import { getImageProvider } from "@/ai/providerRegistry";
-import { agentConfigFromEnv } from "@/agent/providers/openaiCompatible";
+import { NextRequest, NextResponse } from "next/server";
+import { createImageProvider } from "@/ai/providerRegistry";
+import { resolveProvider, summarize } from "@/server/providerSession";
 import { isBlobConfigured } from "@/storage/objectStore";
 
 export const runtime = "nodejs";
 
 /**
- * Safe provider status for the settings UI. Returns configuration presence
- * and capabilities only — never key material.
+ * Safe provider status: configuration presence, provider identity, and
+ * capabilities. Never key material — the frontend only needs to know
+ * configured / not configured.
  */
-export async function GET(): Promise<NextResponse> {
-  const provider = getImageProvider();
-  const agent = agentConfigFromEnv();
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const image = resolveProvider(request, "image");
+  const agent = resolveProvider(request, "agent");
+
+  let capabilities: unknown;
+  if (image) {
+    try {
+      capabilities = createImageProvider(image.config).capabilities;
+    } catch {
+      capabilities = undefined;
+    }
+  }
+
   return NextResponse.json({
-    configured: provider !== null,
-    ...(provider
-      ? { provider: provider.id, model: provider.model, capabilities: provider.capabilities }
-      : {}),
-    agent: {
-      configured: agent !== null,
-      ...(agent ? { provider: agent.providerLabel, model: agent.model } : {}),
-    },
+    image: { ...summarize(image), capabilities },
+    agent: summarize(agent),
+    // Legacy top-level fields kept for the generator/agent panels.
+    configured: image !== null,
+    capabilities,
     storage: {
       configured: true,
       backend: isBlobConfigured() ? "vercel-blob" : "local-dev-files",
     },
   });
-}
-
-/** Test Connection button — performs a real round-trip to the provider. */
-export async function POST(): Promise<NextResponse> {
-  const provider = getImageProvider();
-  if (!provider) {
-    return NextResponse.json({ ok: false, error: "Provider not configured" }, { status: 503 });
-  }
-  try {
-    const status = await provider.testConnection();
-    return NextResponse.json(status.ok ? { ok: true } : { ok: false, error: status.message ?? "Connection failed" });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Provider temporarily unavailable" }, { status: 502 });
-  }
 }

@@ -6,8 +6,9 @@
  */
 
 import { z } from "zod";
+import type { ProviderConfig } from "@/server/providerSession";
 import { readLocalObject, putObject } from "@/storage/objectStore";
-import { getImageProvider } from "./providerRegistry";
+import { createImageProvider } from "./providerRegistry";
 import { isAllowedReferenceUrl } from "./security";
 import { ProviderError, type GeneratedAssetType } from "./types";
 
@@ -37,11 +38,14 @@ const SIZE_MAP: Record<string, { width: number; height: number }> = {
 
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 
-export async function generateAssetImage(input: GenerateRequestInput): Promise<GenerateResult> {
-  const provider = getImageProvider();
-  if (!provider) {
-    throw new ProviderError("Provider not configured. Set the image provider environment variables.", 503);
+export async function generateAssetImage(
+  input: GenerateRequestInput,
+  config: ProviderConfig | null,
+): Promise<GenerateResult> {
+  if (!config) {
+    throw new ProviderError("No image provider connected. Open AI Settings to add one.", 503);
   }
+  const provider = createImageProvider(config);
 
   // References are only sent when the provider actually supports them —
   // the UI must never pretend identity preservation happens when it can't.

@@ -1,6 +1,6 @@
 /** Small shared lookups used by the mutation modules. */
 
-import { panelRectToPx } from "./geometry";
+import { panelBoundsPx } from "./coords";
 import type { ID, PanelItem, ProjectDocument, Rect } from "./types";
 
 /** All mutations clone-then-edit so callers can keep snapshots for undo. */
@@ -12,11 +12,15 @@ export function touch(doc: ProjectDocument): void {
   doc.project.updatedAt = new Date().toISOString();
 }
 
+/**
+ * Panel bounding box in page pixels. Framing math and panel-local item
+ * coordinates are anchored to this box; the polygon itself only decides
+ * clipping/borders/hit testing.
+ */
 export function panelPxRect(doc: ProjectDocument, panelId: ID): Rect {
   const panel = doc.panels[panelId];
   if (!panel) throw new Error(`Unknown panel: ${panelId}`);
-  const { pageWidth, pageHeight } = doc.project.settings;
-  return panelRectToPx(panel.rect, pageWidth, pageHeight);
+  return panelBoundsPx(doc, panel);
 }
 
 /**

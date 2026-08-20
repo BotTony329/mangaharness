@@ -27,36 +27,33 @@ git push -u origin main
 2. Connect it to the project. Vercel injects `BLOB_READ_WRITE_TOKEN` automatically.
 3. Redeploy. (Without Blob, image uploads/generations fail loudly on Vercel — the local `.data/` fallback is dev-only by design.)
 
-## 4. Configure the image-generation provider
+## 4. Set the one required app secret
 
-Project → **Settings → Environment Variables** (Production; add to Preview if you want):
-
-| Name | Value |
-|---|---|
-| `IMAGE_PROVIDER` | `gemini` |
-| `GEMINI_API_KEY` | your Google AI Studio key (aistudio.google.com → Get API key) |
-| `IMAGE_MODEL` | *(optional)* defaults to `gemini-2.5-flash-image` |
-
-For an OpenAI-compatible gateway instead: `IMAGE_PROVIDER=generic-rest`, `IMAGE_API_BASE_URL=https://…/v1`, `IMAGE_API_KEY=…`, `IMAGE_MODEL=…`. Note the generic adapter cannot send character reference images.
-
-## 5. Configure the Manga Agent LLM
+Project → **Settings → Environment Variables** (Production):
 
 | Name | Value |
 |---|---|
-| `AGENT_API_KEY` | your DeepSeek key (platform.deepseek.com) |
-| `AGENT_API_BASE_URL` | *(optional)* defaults to `https://api.deepseek.com` |
-| `AGENT_MODEL` | *(optional)* defaults to `deepseek-chat` |
+| `APP_ENCRYPTION_KEY` | a long random string, e.g. `openssl rand -base64 32` |
 
-Any OpenAI-compatible chat-completions endpoint with JSON-mode support works.
+This encrypts users' BYOK provider credentials into HttpOnly session cookies. It is **not** an AI API key. Redeploy after adding it.
 
-**Redeploy after adding variables** (env changes need a new deployment).
+## 5. AI providers are configured IN THE APP (BYOK)
+
+No AI keys go into Vercel. Each user opens **AI Settings** in the deployed app and connects their own providers:
+
+- **Manga Agent (LLM):** pick an API standard (OpenAI Compatible / Anthropic Compatible / Google Gemini), enter base URL, API key, and model — e.g. DeepSeek, Kimi/Moonshot, OpenRouter, Claude, Gemini, or any compatible gateway.
+- **Image Generation:** Google Gemini (supports reference images for character consistency) or any OpenAI-compatible image endpoint.
+
+Test Connection, Save — done. Credentials are encrypted per browser session; "Forget credentials" removes them. Replacing an endpoint/key/model later needs no redeploy and doesn't touch projects.
+
+*(Optional operator fallback: the old `GEMINI_API_KEY` / `AGENT_API_KEY` env vars still work as deployment-wide defaults, but any user's own AI Settings override them.)*
 
 ## 6. Verify after deployment
 
-1. Open the app → **AI Settings** — both providers should show *Configured*, storage `vercel-blob`.
-2. Click **Test Connection** — performs a real round-trip to the image provider.
-3. Create a character → *Create & Generate* → a real image should arrive and enter the library.
-4. Run the acceptance flow: agent prompt → compose → edit → save → refresh → export PNG.
+1. Open the app → **AI Settings** → enter your agent + image providers → **Test Connection** on both → Save.
+2. Create a character → *Create & Generate* → a real image should arrive and enter the library.
+3. Run the acceptance flow: agent prompt → compose → edit → save → refresh → export PNG.
+4. Storage should read `vercel-blob` in AI Settings' status (via the API) — if uploads fail, the Blob store isn't connected.
 
 ## Local development
 

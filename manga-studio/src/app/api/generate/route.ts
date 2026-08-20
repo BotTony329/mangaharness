@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateAssetImage, generateRequestSchema } from "@/ai/generate";
 import { redactSecrets } from "@/ai/security";
 import { ProviderError } from "@/ai/types";
+import { resolveProvider } from "@/server/providerSession";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -15,7 +16,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const result = await generateAssetImage(parsed.data);
+    // BYOK session config first; deployment env vars as operator fallback.
+    const resolved = resolveProvider(request, "image");
+    const result = await generateAssetImage(parsed.data, resolved?.config ?? null);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ProviderError) {

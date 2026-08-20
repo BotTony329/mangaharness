@@ -10,11 +10,32 @@
 
 import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
+import { findSlotAsset } from "@/characters/slotSwitch";
 import { addCharacter } from "@/domain/libraryOps";
-import { addBubble, addEffect, placeAsset, removeItem, setCropMode, updateItemProps } from "@/domain/itemOps";
+import {
+  addBubble,
+  addEffect,
+  placeAsset,
+  removeItem,
+  setCropMode,
+  swapInstanceAsset,
+  updateItemProps,
+} from "@/domain/itemOps";
 import { setPageLayout } from "@/domain/pageOps";
+import { reshapePanel } from "@/domain/panelOps";
+import { addWorkspaceItem } from "@/domain/workspaceOps";
 import { panelPxRect } from "@/domain/docHelpers";
-import type { BubbleType, CropMode, EffectKind, ID, LayoutPresetId, ProjectDocument } from "@/domain/types";
+import type {
+  AssetInstance,
+  BubbleType,
+  Character,
+  CropMode,
+  EffectKind,
+  ID,
+  LayoutPresetId,
+  Point,
+  ProjectDocument,
+} from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { findCharacter, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
 import type { AgentPlan, ToolName } from "./tools/schemas";
@@ -50,7 +71,13 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
     case "set_page_layout":
       return `Set page layout to ${args.layout}`;
     case "place_asset":
-      return `Place ${args.characterName ?? args.assetName ?? args.category ?? "asset"} in panel ${args.panel}`;
+      return args.target === "workspace"
+        ? `Stage ${args.characterName ?? args.assetName ?? args.category ?? "asset"} on the workspace`
+        : `Place ${args.characterName ?? args.assetName ?? args.category ?? "asset"} in panel ${args.panel}`;
+    case "set_character_slot":
+      return `Change ${args.characterName ?? "selected character"} to ${[args.pose, args.expression].filter(Boolean).join(" + ") || "new slot"}`;
+    case "reshape_panel":
+      return `Reshape panel ${args.panel}`;
     case "set_crop_mode":
       return `Set panel ${args.panel} framing to ${args.mode}`;
     case "add_speech_bubble":
@@ -120,6 +147,10 @@ async function executeStep(step: AgentPlan["steps"][number], caps: ProviderCaps)
       return doSetPageLayout(args);
     case "place_asset":
       return doPlaceAsset(args);
+    case "set_character_slot":
+      return doSetCharacterSlot(args, caps);
+    case "reshape_panel":
+      return doReshapePanel(args);
     case "set_crop_mode":
       return doSetCropMode(args);
     case "add_speech_bubble":
@@ -159,6 +190,20 @@ async function doGenerateCharacterAsset(
 ): Promise<void> {
   const character = findCharacter(currentDoc(), args.characterName);
   if (!character) throw new Error(`Character "${args.characterName}" not found`);
+  const assetId = await generateCharacterSlotAsset(character, args, caps);
+  stageOnWorkspace(assetId);
+}
+
+/**
+ * Generate one character slot asset and register it in the library.
+ * Shared by explicit generation steps and set_character_slot's
+ * generate-on-miss path — one implementation of the generation flow.
+ */
+async function generateCharacterSlotAsset(
+  character: Character,
+  args: { kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; instruction?: string },
+  caps: ProviderCaps,
+): Promise<ID> {
   const reference = character.referenceAssetId ? currentDoc().assets[character.referenceAssetId] : undefined;
   const useReference = caps.referenceImage && Boolean(reference) && args.kind !== "reference";
 
@@ -179,7 +224,7 @@ async function doGenerateCharacterAsset(
     size: defaultAspect(assetType),
     referenceUrls: useReference && reference ? [reference.storageUrl] : undefined,
   });
-  await storeGeneratedAsset({
+  return storeGeneratedAsset({
     result,
     assetType,
     category: "character",
@@ -200,13 +245,32 @@ async function doGenerateScenery(
 ): Promise<void> {
   const prompt = buildAssetPrompt({ assetType: category, description: args.description });
   const result = await callGenerateApi({ assetType: category, prompt, size: defaultAspect(category) });
-  await storeGeneratedAsset({
+  const assetId = await storeGeneratedAsset({
     result,
     assetType: category,
     category,
     name: args.name ?? args.description.slice(0, 40),
     prompt,
   });
+  stageOnWorkspace(assetId);
+}
+
+/**
+ * Agent-generated results are staged as loose items beside the page — the
+ * creator reviews spatially (compare, drag into a panel, or delete) instead
+ * of results vanishing into the library.
+ */
+function stageOnWorkspace(assetId: ID): void {
+  const state = useEditorStore.getState();
+  const doc = state.doc;
+  const page = state.currentPageId ? doc?.pages[state.currentPageId] : null;
+  if (!doc || !page) return;
+  const index = doc.workspaceOrder.length;
+  const at: Point = {
+    x: page.workspace.x + doc.project.settings.pageWidth + 300 + Math.floor(index / 4) * 400,
+    y: page.workspace.y + 220 + (index % 4) * 420,
+  };
+  state.commit((d) => addWorkspaceItem(d, assetId, at).doc);
 }
 
 function doSetPageLayout(args: { layout: LayoutPresetId }): void {
@@ -216,7 +280,8 @@ function doSetPageLayout(args: { layout: LayoutPresetId }): void {
 }
 
 function doPlaceAsset(args: {
-  panel: number;
+  panel?: number;
+  target?: "panel" | "workspace";
   characterName?: string;
   pose?: string;
   expression?: string;
@@ -226,8 +291,6 @@ function doPlaceAsset(args: {
   flipX?: boolean;
 }): void {
   const doc = currentDoc();
-  const panelId = panelIdByNumber(args.panel);
-
   const asset = args.characterName
     ? resolveFromCharacter(doc, args)
     : resolveLibraryAsset(doc, { assetName: args.assetName, category: args.category });
@@ -237,10 +300,93 @@ function doPlaceAsset(args: {
     );
   }
 
+  if (args.target === "workspace" || args.panel === undefined) {
+    stageOnWorkspace(asset.id);
+    return;
+  }
+
+  const panelId = panelIdByNumber(args.panel);
   useEditorStore.getState().commit((d) => {
     const placed = placeAsset(d, panelId, asset.id, { cropMode: args.cropMode });
     return args.flipX ? updateItemProps(placed.doc, placed.itemId, { flipX: true }) : placed.doc;
   });
+}
+
+/**
+ * Semantic slot change on an already-placed character instance — the tool
+ * behind "make her cry". Reuse an exact-matching library asset when one
+ * exists; otherwise generate the missing slot, then swap the instance while
+ * the composition stays put.
+ */
+async function doSetCharacterSlot(
+  args: { panel?: number; characterName?: string; pose?: string; expression?: string; generateIfMissing?: boolean },
+  caps: ProviderCaps,
+): Promise<void> {
+  if (!args.pose && !args.expression) throw new Error("set_character_slot needs a pose or an expression");
+  const doc = currentDoc();
+  const instance = findTargetInstance(doc, args);
+  const asset = doc.assets[instance.sourceAssetId];
+  const characterId = asset?.metadata?.characterId;
+  const character = characterId ? doc.characters[characterId] : null;
+  if (!character) throw new Error("The targeted instance is not a character");
+
+  const current = { pose: asset?.metadata?.pose, expression: asset?.metadata?.expression };
+  const existing = findSlotAsset(doc, character, { pose: args.pose, expression: args.expression }, current);
+
+  let replacementId = existing?.id;
+  if (!replacementId) {
+    if (args.generateIfMissing === false) {
+      throw new Error(`${character.name} has no ${[args.pose, args.expression].filter(Boolean).join("/")} asset`);
+    }
+    replacementId = await generateCharacterSlotAsset(
+      character,
+      { kind: args.pose ? "pose" : "expression", pose: args.pose, expression: args.expression },
+      caps,
+    );
+  }
+  const swapId = replacementId;
+  useEditorStore.getState().commit((d) => swapInstanceAsset(d, instance.id, swapId));
+}
+
+/** Resolve which character instance a slot change targets: explicit panel/name, else the user's selection. */
+function findTargetInstance(
+  doc: ProjectDocument,
+  args: { panel?: number; characterName?: string },
+): AssetInstance {
+  const state = useEditorStore.getState();
+  const characterByName = args.characterName ? findCharacter(doc, args.characterName) : null;
+
+  const candidates: AssetInstance[] = [];
+  if (args.panel !== undefined) {
+    const panel = doc.panels[panelIdByNumber(args.panel)];
+    for (const id of panel.itemIds) {
+      const item = doc.items[id];
+      if (item?.kind === "asset") candidates.push(item);
+    }
+  } else if (state.selection.itemId) {
+    const item = doc.items[state.selection.itemId];
+    if (item?.kind === "asset") candidates.push(item);
+  }
+
+  const matching = candidates.filter((item) => {
+    const meta = doc.assets[item.sourceAssetId]?.metadata;
+    if (!meta?.characterId) return false;
+    return characterByName ? meta.characterId === characterByName.id : true;
+  });
+  const target = matching[matching.length - 1];
+  if (!target) {
+    throw new Error(
+      args.panel !== undefined
+        ? `No character instance found in panel ${args.panel}`
+        : "No character instance is selected — select one or specify a panel",
+    );
+  }
+  return target;
+}
+
+function doReshapePanel(args: { panel: number; points: Point[] }): void {
+  const panelId = panelIdByNumber(args.panel);
+  useEditorStore.getState().commit((d) => reshapePanel(d, panelId, args.points));
 }
 
 function resolveFromCharacter(

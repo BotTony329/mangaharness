@@ -4,7 +4,7 @@
  * and they are guarded by unit tests (wrong math here renders silently wrong).
  */
 
-import type { CropMode, FocusRegion, Rect, SourceAsset } from "./types";
+import type { CropMode, FocusRegion, Point, Rect, SourceAsset } from "./types";
 
 export interface ItemTransform {
   cx: number;
@@ -102,18 +102,49 @@ export function cropModeTransform(
   }
 }
 
-/** Panel rect (normalized 0–1) → page pixels. */
-export function panelRectToPx(rect: Rect, pageW: number, pageH: number): Rect {
-  return {
-    x: rect.x * pageW,
-    y: rect.y * pageH,
-    width: rect.width * pageW,
-    height: rect.height * pageH,
-  };
-}
-
 export function rectContains(rect: Rect, x: number, y: number): boolean {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
+
+// ─── Panel polygons ─────────────────────────────────────────────────────────
+// Panels are polygons in normalized 0–1 page coordinates. Framing math
+// (fit/fill/upper-body) works against the polygon's bounding box; clipping,
+// borders, and hit testing use the polygon itself.
+
+/** A rect expressed as the equivalent 4-point polygon (clockwise). */
+export function rectToPoints(rect: Rect): Point[] {
+  return [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height },
+  ];
+}
+
+/** Normalized polygon → page-pixel polygon. */
+export function polygonToPx(points: Point[], pageW: number, pageH: number): Point[] {
+  return points.map((p) => ({ x: p.x * pageW, y: p.y * pageH }));
+}
+
+/** Axis-aligned bounding box of a pixel-space polygon. */
+export function polygonBounds(points: Point[]): Rect {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+/** Ray-casting point-in-polygon test (same coordinate space as the polygon). */
+export function pointInPolygon(x: number, y: number, points: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i];
+    const b = points[j];
+    const crosses = a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
 }
 
 function centered(width: number, height: number, panelW: number, panelH: number): ItemTransform {

@@ -19,6 +19,11 @@ export interface Rect {
   height: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 /** Open union so future categories don't require a schema rewrite. */
 export type AssetCategory = "character" | "background" | "prop" | "upload";
 
@@ -100,6 +105,12 @@ export interface Page {
   name: string;
   index: number;
   panelIds: ID[];
+  /**
+   * Top-left of the page in workspace pixels. The page is one object inside
+   * the infinite workspace, not the root canvas — multiple pages can sit
+   * side by side.
+   */
+  workspace: Point;
 }
 
 export interface PanelBorder {
@@ -110,13 +121,18 @@ export interface PanelBorder {
 
 /**
  * A panel is a clipping viewport (Figma-frame semantics): items may extend
- * beyond its bounds; only pixels inside render. `rect` is normalized 0–1
- * in page coordinates so layouts survive page-size changes.
+ * beyond its bounds; only pixels inside render.
+ *
+ * Geometry is a polygon (`points`, normalized 0–1 page coordinates, ≥3
+ * vertices) — rectangles are just 4-point polygons. Presets create the
+ * initial shape; the creator owns it afterwards (double-click → drag
+ * corners → diagonal manga panels). Clipping, borders, hit testing, and
+ * export all follow the polygon, never a bounding box.
  */
 export interface Panel {
   id: ID;
   pageId: ID;
-  rect: Rect;
+  points: Point[];
   border: PanelBorder;
   /** Ordered bottom → top. The layer list UI is a projection of this array. */
   itemIds: ID[];
@@ -174,6 +190,27 @@ export interface EffectItem extends PanelItemBase {
 
 export type PanelItem = AssetInstance | SpeechBubbleItem | EffectItem;
 
+// ─── Loose workspace objects ────────────────────────────────────────────────
+
+/**
+ * An asset placed on the workspace outside any page: reference sheets,
+ * staged generations, mood-board material. Position is the item's center in
+ * workspace pixels. Loose items are working material — they are never
+ * exported with a page, and dragging one into a panel converts it into a
+ * PanelItem (and back out again) without touching the source asset.
+ */
+export interface WorkspaceItem {
+  id: ID;
+  sourceAssetId: ID;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  flipX: boolean;
+  opacity: number;
+}
+
 // ─── Generation history ─────────────────────────────────────────────────────
 
 export interface GenerationRecord {
@@ -219,7 +256,10 @@ export interface ProjectDocument {
   pages: Record<ID, Page>;
   panels: Record<ID, Panel>;
   items: Record<ID, PanelItem>;
+  /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
+  workspaceItems: Record<ID, WorkspaceItem>;
+  workspaceOrder: ID[];
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

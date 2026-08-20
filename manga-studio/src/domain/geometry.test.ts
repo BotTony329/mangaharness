@@ -5,7 +5,10 @@ import {
   fillTransform,
   fitTransform,
   frameRegionTransform,
-  panelRectToPx,
+  pointInPolygon,
+  polygonBounds,
+  polygonToPx,
+  rectToPoints,
   supportsFaceFocus,
 } from "./geometry";
 
@@ -93,9 +96,31 @@ describe("cropModeTransform", () => {
   });
 });
 
-describe("panelRectToPx", () => {
-  it("converts normalized page rects to pixels", () => {
-    const px = panelRectToPx({ x: 0.5, y: 0.25, width: 0.5, height: 0.5 }, 1200, 1800);
-    expect(px).toEqual({ x: 600, y: 450, width: 600, height: 900 });
+describe("panel polygons", () => {
+  it("rectToPoints produces the equivalent clockwise quad", () => {
+    const points = rectToPoints({ x: 0.1, y: 0.2, width: 0.4, height: 0.3 });
+    expect(points).toEqual([
+      { x: 0.1, y: 0.2 },
+      { x: 0.5, y: 0.2 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.1, y: 0.5 },
+    ]);
+  });
+
+  it("polygonToPx + polygonBounds recover the pixel rect", () => {
+    const px = polygonToPx(rectToPoints({ x: 0.5, y: 0.25, width: 0.5, height: 0.5 }), 1200, 1800);
+    expect(polygonBounds(px)).toEqual({ x: 600, y: 450, width: 600, height: 900 });
+  });
+
+  it("pointInPolygon works for non-rectangular (diagonal) panels", () => {
+    // Right triangle: the classic diagonal manga panel cut.
+    const triangle = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 100 },
+    ];
+    expect(pointInPolygon(10, 10, triangle)).toBe(true);
+    expect(pointInPolygon(90, 90, triangle)).toBe(false); // inside bbox, outside polygon
+    expect(pointInPolygon(150, 50, triangle)).toBe(false);
   });
 });

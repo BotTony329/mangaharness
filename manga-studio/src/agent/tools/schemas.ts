@@ -43,7 +43,8 @@ export const toolSchemas = {
   }),
 
   place_asset: z.object({
-    panel: panelIndex,
+    panel: panelIndex.optional().describe("Omit with target:'workspace' to stage the asset beside the page"),
+    target: z.enum(["panel", "workspace"]).optional(),
     characterName: z.string().max(80).optional(),
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
@@ -51,6 +52,24 @@ export const toolSchemas = {
     category: z.enum(["character", "background", "prop", "upload"]).optional(),
     cropMode: z.enum(cropModes).optional(),
     flipX: z.boolean().optional(),
+  }),
+
+  set_character_slot: z.object({
+    panel: panelIndex.optional().describe("Omit to target the user's selected character instance"),
+    characterName: z.string().max(80).optional(),
+    pose: z.string().max(80).optional(),
+    expression: z.string().max(80).optional(),
+    /** Missing slots generate a new asset by default; set false to only reuse. */
+    generateIfMissing: z.boolean().optional(),
+  }),
+
+  reshape_panel: z.object({
+    panel: panelIndex,
+    points: z
+      .array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }))
+      .min(3)
+      .max(8)
+      .describe("Polygon in normalized page coordinates (0-1); diagonal cuts make action layouts"),
   }),
 
   set_crop_mode: z.object({
@@ -147,8 +166,10 @@ Available tools (call only these, with exactly these argument shapes):
 - generate_background {description, name?} — AI-generate a reusable background.
 - generate_prop {description, name?} — AI-generate a reusable prop.
 - set_page_layout {layout: "single"|"two-vertical"|"two-horizontal"|"three-vertical"|"four-grid"|"yonkoma"} — replace the current page's panel arrangement (existing content is preserved).
-- place_asset {panel, characterName?, pose?, expression?, assetName?, category?, cropMode?, flipX?} — place a library asset into a panel as an independent instance. Use characterName+pose/expression for characters; assetName or category:"background"/"prop" for scenery.
+- place_asset {panel?, target?, characterName?, pose?, expression?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead (reference sheets, comparisons).
+- set_character_slot {panel?, characterName?, pose?, expression?, generateIfMissing?} — change WHICH asset an already-placed character instance shows ("make her cry" → expression:"crying"). Targets the user's selected character when panel/characterName are omitted. Reuses a matching library asset when one exists; otherwise generates the missing slot and swaps it in. Composition (position, panel, size) is preserved — never re-place the character for this.
 - set_crop_mode {panel, characterName?, category?, mode: "fit"|"fill"|"upper-body"|"face"|"custom"} — reframe an already-placed instance. "upper-body" = medium shot, "fill" = full-bleed. Close-ups come from crop modes, never from regenerating.
+- reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.
 - add_speech_bubble {panel, bubbleType: "speech"|"thought"|"shout"|"narration", text, position?} — add dialogue.
 - add_effect {panel, effectKind: "speed-lines"|"focus-lines"|"screentone"|"impact-burst"} — add a manga effect layer.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).

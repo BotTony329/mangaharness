@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redactSecrets } from "@/ai/security";
 import { planAgentRun, agentRequestSchema } from "@/agent/planner";
-import { AgentModelError, agentConfigFromEnv } from "@/agent/providers/openaiCompatible";
+import { createAgentProvider } from "@/agent/providers/registry";
+import { AgentModelError } from "@/agent/providers/types";
+import { resolveProvider } from "@/server/providerSession";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /**
- * Manga Agent planning endpoint. Returns a validated tool plan; execution
- * happens client-side through the editor command layer (same commands the
- * manual UI uses), so agent work is undoable and never a privileged path.
+ * Manga Agent planning endpoint. The reasoning model is whatever the user
+ * connected in AI Settings (session config first, deployment env fallback);
+ * the harness — context, skills, tools, validation — is Manga Studio's.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = await request.json().catch(() => null);
@@ -18,16 +20,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid agent request" }, { status: 400 });
   }
 
-  const config = agentConfigFromEnv();
-  if (!config) {
+  const resolved = resolveProvider(request, "agent");
+  if (!resolved) {
     return NextResponse.json(
-      { error: "Agent model not configured. Set AGENT_API_KEY (and optionally AGENT_API_BASE_URL, AGENT_MODEL)." },
+      { error: "No agent model connected. Open AI Settings to add one." },
       { status: 503 },
     );
   }
 
   try {
-    const result = await planAgentRun(config, parsed.data);
+    const provider = createAgentProvider(resolved.config);
+    const result = await planAgentRun(provider, parsed.data);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof AgentModelError) {

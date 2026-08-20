@@ -4,6 +4,8 @@
 
 Next.js 15 (App Router) + React 19 + TypeScript strict. The editor is a client application; the server exists only for the security boundary (AI keys, storage writes) — there is no server-side project database in the MVP.
 
+**Mental model:** an infinite workspace canvas where the manga page is one object among loose working material; polygon panels clip their contents; manual direct manipulation and the Manga Agent operate the same domain command layer; AI generates reusable semantic assets, never flattened pages. (See EDITOR_MODEL.md for coordinate spaces and the panel/instance invariants.)
+
 ```
 Browser
 ├── Domain document (single source of truth, plain JSON)

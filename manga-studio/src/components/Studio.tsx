@@ -9,8 +9,11 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { createProjectDocument } from "@/domain/factory";
 import { duplicateItem, removeItem } from "@/domain/itemOps";
+import { removeWorkspaceItem } from "@/domain/workspaceOps";
 import { useEditorStore } from "@/editor/store";
+import { useUiStore } from "@/editor/uiStore";
 import { indexedDbPersistence } from "@/storage/projectStore";
+import { AiSettingsDialog } from "./dialogs/AiSettingsDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { AssetLibraryPanel } from "./library/AssetLibraryPanel";
 import { PagesBar } from "./PagesBar";
@@ -30,10 +33,12 @@ export function Studio() {
   const dirty = useEditorStore((s) => s.dirty);
   const [ready, setReady] = useState(false);
 
-  // Dev-only: expose the store for browser-automation tests.
+  // Dev-only: expose the stores for browser-automation tests.
   useEffect(() => {
     if (process.env.NODE_ENV === "development") {
-      (window as unknown as Record<string, unknown>).__editorStore = useEditorStore;
+      const w = window as unknown as Record<string, unknown>;
+      w.__editorStore = useEditorStore;
+      w.__uiStore = useUiStore;
     }
   }, []);
 
@@ -92,6 +97,11 @@ export function Studio() {
         const itemId = store.selection.itemId;
         store.commit((d) => removeItem(d, itemId));
         store.select({ panelId: store.selection.panelId });
+      } else if ((e.key === "Delete" || e.key === "Backspace") && store.selection.workspaceItemId) {
+        e.preventDefault();
+        const looseId = store.selection.workspaceItemId;
+        store.commit((d) => removeWorkspaceItem(d, looseId));
+        store.select({});
       } else if (e.key === "Escape") {
         store.select({});
       }
@@ -116,6 +126,7 @@ export function Studio() {
       </div>
       <PagesBar />
       <GeneratorDialog />
+      <AiSettingsDialog />
     </div>
   );
 }

@@ -8,8 +8,8 @@ import { addBubble, addEffect } from "@/domain/itemOps";
 import { setPageLayout } from "@/domain/pageOps";
 import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { useUiStore } from "@/editor/uiStore";
 import { exportCurrentPagePng } from "@/export/exportPage";
-import { AiSettingsDialog } from "./dialogs/AiSettingsDialog";
 
 const BUBBLE_TYPES: { type: BubbleType; label: string }[] = [
   { type: "speech", label: "Speech bubble" },
@@ -32,7 +32,7 @@ export function TopBar() {
   const canRedo = useEditorStore((s) => s.future.length > 0);
   const currentPageId = useEditorStore((s) => s.currentPageId);
   const selection = useEditorStore((s) => s.selection);
-  const [showAiSettings, setShowAiSettings] = useState(false);
+  const openSettings = useUiStore((s) => s.openSettings);
   const [exporting, setExporting] = useState(false);
 
   if (!doc) return null;
@@ -114,7 +114,7 @@ export function TopBar() {
 
       <button
         className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1 hover:bg-zinc-700"
-        onClick={() => setShowAiSettings(true)}
+        onClick={openSettings}
       >
         AI Settings
       </button>
@@ -127,8 +127,6 @@ export function TopBar() {
         ]}
         onPick={(k) => onExport(Number(k) as 1 | 2)}
       />
-
-      {showAiSettings && <AiSettingsDialog onClose={() => setShowAiSettings(false)} />}
     </header>
   );
 }
