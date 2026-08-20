@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createProjectDocument } from "@/domain/factory";
 import { addAsset, addCharacter } from "@/domain/libraryOps";
 import { buildAgentContext } from "./contextBuilder";
-import { findCharacter, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
+import { findCharacter, resolveCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
 import { selectSkills } from "./skills/selector";
 import { validatePlan, MAX_PLAN_STEPS } from "./tools/schemas";
 
@@ -130,17 +130,63 @@ describe("asset resolver", () => {
     expect(resolveCharacterAsset(doc, character, { expression: "crying" })?.id).toBe(crying);
   });
 
-  it("falls back to a compatible asset instead of failing (reuse over regeneration)", () => {
-    const { doc, crying } = libraryDoc();
+  it("does not mislabel a compatible asset as an exact full-state match", () => {
+    const { doc } = libraryDoc();
     const character = findCharacter(doc, "Akari")!;
-    // "crying + running" doesn't exist; the crying-standing asset is compatible.
-    expect(resolveCharacterAsset(doc, character, { pose: "running", expression: "crying" })?.id).toBe(crying);
+    // A missing combination must generate instead of silently resetting pose.
+    expect(resolveCharacterAsset(doc, character, { pose: "running", expression: "crying" })).toBeNull();
   });
 
-  it("falls back to the reference for unknown slots", () => {
-    const { doc, reference } = libraryDoc();
+  it("returns no match for unknown slots so the state resolver can generate them", () => {
+    const { doc } = libraryDoc();
     const character = findCharacter(doc, "Akari")!;
-    expect(resolveCharacterAsset(doc, character, { pose: "backflip" })?.id).toBe(reference);
+    expect(resolveCharacterAsset(doc, character, { pose: "backflip" })).toBeNull();
+  });
+
+  it("resolves a character by entity relationship and semantic state, not the asset display name", () => {
+    let doc = createProjectDocument("Yuri resolver");
+    const yuri = addCharacter(doc, "Yuri");
+    doc = yuri.doc;
+    const reference = addAsset(doc, {
+      category: "character",
+      name: "Primary Identity Sheet",
+      storageUrl: "https://example.com/reference.png",
+      width: 800,
+      height: 1600,
+      metadata: { characterId: yuri.characterId, characterAssetRole: "canonical" },
+    });
+    doc = reference.doc;
+    const walking = addAsset(doc, {
+      category: "character",
+      name: "Asset 8F2A",
+      storageUrl: "https://example.com/walking.png",
+      width: 800,
+      height: 1600,
+      metadata: {
+        characterId: yuri.characterId,
+        characterAssetRole: "state",
+        pose: "walking",
+        expression: "smile",
+        outfit: "school uniform",
+        view: "side",
+      },
+    });
+    doc = walking.doc;
+    const unrelated = addAsset(doc, {
+      category: "character",
+      name: "Yuri Walking Final",
+      storageUrl: "https://example.com/not-yuri.png",
+      width: 800,
+      height: 1600,
+    });
+    doc = unrelated.doc;
+
+    const cached = resolveCharacterState(doc, "Yuri", { pose: "walking" });
+    expect(cached.status).toBe("cached");
+    expect(cached.asset?.id).toBe(walking.assetId);
+    expect(resolveCharacterState(doc, yuri.characterId, { pose: "walking" }).asset?.id).toBe(walking.assetId);
+    expect(resolveCharacterState(doc, "Yuri", { pose: "backflip" }).status).toBe("missing-state");
+    expect(resolveCharacterState(doc, "Unrelated", { pose: "walking" }).status).toBe("character-not-found");
   });
 
   it("resolves backgrounds by name fragment and category", () => {
@@ -172,5 +218,6 @@ describe("buildAgentContext", () => {
     const panelId = doc.pages[pageId].panelIds[2];
     const context = buildAgentContext({ doc, currentPageId: pageId, selection: { panelId } });
     expect(context).toContain("Panel 3:  [SELECTED]");
+    expect(context).toContain("AUTHORITATIVE TARGET SCOPE: Selected Panel · Panel 3");
   });
 });

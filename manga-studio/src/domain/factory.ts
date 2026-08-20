@@ -13,6 +13,8 @@ import {
   type ProjectDocument,
   type Rect,
 } from "./types";
+import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
+import { createEmptyScene } from "./sceneOps";
 
 export function newId(): ID {
   // crypto.randomUUID only exists in secure contexts (https / localhost);
@@ -61,9 +63,11 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
     workspace: defaultPageWorkspacePosition(0, 1200),
   };
   const panels: Record<ID, Panel> = {};
+  const scenes: ProjectDocument["scenes"] = {};
   for (const rect of LAYOUT_PRESETS[layout].rects) {
     const panel = createPanelFromRect(page.id, rect);
     panels[panel.id] = panel;
+    scenes[panel.id] = createEmptyScene(panel.id);
     page.panelIds.push(panel.id);
   }
   const created = now();
@@ -73,7 +77,12 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
       id: projectId,
       name,
       // B5-ish proportions at screen-friendly resolution; export can scale 2x.
-      settings: { pageWidth: 1200, pageHeight: 1800, readingDirection: "rtl" },
+      settings: {
+        pageWidth: 1200,
+        pageHeight: 1800,
+        readingDirection: "rtl",
+        artStyle: { activeStyleId: DEFAULT_STYLE_PROFILE_ID, customProfiles: {} },
+      },
       createdAt: created,
       updatedAt: created,
     },
@@ -81,6 +90,7 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
     characters: {},
     pages: { [page.id]: page },
     panels,
+    scenes,
     items: {},
     workspaceItems: {},
     workspaceOrder: [],

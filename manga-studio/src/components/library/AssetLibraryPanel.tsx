@@ -6,13 +6,13 @@
  */
 
 import { useRef, useState } from "react";
-import { removeAsset } from "@/domain/libraryOps";
-import type { AssetCategory } from "@/domain/types";
+import type { AssetCategory, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { CharactersTab } from "./CharactersTab";
 import { uploadImageFile } from "./uploadAsset";
+import { AssetDeleteDialog } from "./LifecycleDialogs";
 
 type LibraryTab = "characters" | "backgrounds" | "props" | "uploads";
 
@@ -60,9 +60,11 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SourceAsset | null>(null);
 
   if (!doc) return null;
-  const assets = Object.values(doc.assets).filter((a) => a.category === category);
+  const assets = Object.values(doc.assets).filter((a) => a.category === category && a.status !== "archived");
+  const archived = Object.values(doc.assets).filter((a) => a.category === category && a.status === "archived");
   const generatorType = category === "background" ? "background" : category === "prop" ? "prop" : null;
 
   const onFiles = async (files: FileList | null) => {
@@ -118,15 +120,44 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
             <AssetThumb
               key={asset.id}
               asset={asset}
-              onDelete={() => {
-                if (confirm(`Remove "${asset.name}" and all its panel instances?`)) {
-                  useEditorStore.getState().commit((d) => removeAsset(d, asset.id));
-                }
+              onUse={() => {
+                const store = useEditorStore.getState();
+                const page = store.currentPageId ? store.doc?.pages[store.currentPageId] : undefined;
+                const panelId = store.selection.panelId ?? page?.panelIds[0];
+                if (panelId) store.dispatch({ type: "add-instance", panelId, assetId: asset.id });
               }}
+              onRename={() => {
+                const name = prompt("Rename asset", asset.name);
+                if (name?.trim()) useEditorStore.getState().dispatch({ type: "rename-asset", assetId: asset.id, name });
+              }}
+              onRegenerate={generatorType ? () => openGenerator({
+                assetType: generatorType,
+                replaceAssetId: asset.id,
+                prefill: { description: asset.provenance?.prompt ?? asset.name },
+              }) : undefined}
+              onArchive={() => useEditorStore.getState().dispatch({ type: "archive-asset", assetId: asset.id })}
+              onDelete={() => setDeleteTarget(asset)}
             />
           ))}
         </div>
       )}
+      {archived.length > 0 && (
+        <details className="mt-4 border-t border-zinc-800 pt-3">
+          <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">Archived ({archived.length})</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {archived.map((asset) => (
+              <AssetThumb
+                key={asset.id}
+                asset={asset}
+                subtitle="Archived"
+                onRestore={() => useEditorStore.getState().dispatch({ type: "restore-asset", assetId: asset.id })}
+                onDelete={() => setDeleteTarget(asset)}
+              />
+            ))}
+          </div>
+        </details>
+      )}
+      {deleteTarget && <AssetDeleteDialog asset={deleteTarget} onClose={() => setDeleteTarget(null)} />}
     </div>
   );
 }

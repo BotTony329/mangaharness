@@ -17,7 +17,7 @@ import {
   updateWorkspaceItem,
   workspaceItemToInstance,
 } from "./workspaceOps";
-import type { AssetInstance, ProjectDocument } from "./types";
+import { SCHEMA_VERSION, type AssetInstance, type ProjectDocument } from "./types";
 
 function seeded(): { doc: ProjectDocument; assetId: string; panelId: string } {
   const base = createProjectDocument("Workspace");
@@ -33,7 +33,7 @@ function seeded(): { doc: ProjectDocument; assetId: string; panelId: string } {
 
 // ─── Schema migration ───────────────────────────────────────────────────────
 
-describe("v1 → v2 migration", () => {
+describe("legacy project migration", () => {
   it("converts rect panels to polygons and adds workspace fields", () => {
     const v1 = {
       schemaVersion: 1,
@@ -60,7 +60,7 @@ describe("v1 → v2 migration", () => {
       generationHistory: [],
     };
     const migrated = deserializeProject(JSON.stringify(v1));
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.panels.pn1.points).toEqual([
       { x: 0.1, y: 0.1 },
       { x: 0.6, y: 0.1 },
@@ -199,9 +199,12 @@ describe("swapInstanceAsset", () => {
     expect(after.sourceAssetId).toBe(running.assetId);
     expect(after.panelId).toBe(panelId);
     expect(doc.panels[panelId].itemIds.indexOf(placed.itemId)).toBe(zBefore);
-    // Non-custom crop mode recomputes for the new asset; still centered.
+    // Every composition field stays owned by the instance.
     expect(after.cropMode).toBe(before.cropMode);
     expect(after.cx).toBeCloseTo(before.cx);
+    expect(after.cy).toBeCloseTo(before.cy);
+    expect(after.width).toBeCloseTo(before.width);
+    expect(after.height).toBeCloseTo(before.height);
     // The old source asset still exists untouched.
     expect(doc.assets[standing.assetId]).toBeDefined();
   });

@@ -18,7 +18,7 @@ export function createGeminiAgent(config: ProviderConfig): AgentModelProvider {
       return { ok: false, message: (await agentErrorFrom(response)).safeMessage };
     },
 
-    async completeJson(systemPrompt, userPrompt) {
+    async completeJson(systemPrompt, userPrompt, options) {
       const response = await boundedFetch(`${base}/v1beta/models/${config.model}:generateContent`, {
         method: "POST",
         headers,
@@ -27,14 +27,16 @@ export function createGeminiAgent(config: ProviderConfig): AgentModelProvider {
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
           generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
         }),
-      });
+      }, options);
       if (!response.ok) throw await agentErrorFrom(response);
+      options?.onEvent?.({ stage: "first_response_byte", responseMode: "buffered", providerStatus: response.status });
       const body = (await response.json().catch(() => null)) as {
         candidates?: { content?: { parts?: { text?: string }[] } }[];
       } | null;
       const text = body?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
       if (!text) throw new AgentModelError("Agent model returned an empty response");
-      return text;
+      options?.onEvent?.({ stage: "provider_response_complete", responseMode: "buffered", providerStatus: response.status });
+      return { text, responseMode: "buffered" };
     },
   };
 }

@@ -14,14 +14,22 @@ A panel's geometry is a polygon (`points`, normalized page coords, 3–10 vertic
 
 ## Source assets vs panel instances — the core invariant
 
-A `SourceAsset` is an immutable library item (image URL + metadata). Placing it in a panel creates an `AssetInstance` that stores **only presentation state**: center position, size, rotation, flip, opacity, crop mode. 
+A `SourceAsset` is a reusable library entity with source/processed URLs, semantic type, lifecycle status (`ready`, `processing`, `failed`, `archived`), provenance, and timestamps. Placing it in a panel creates an `AssetInstance` that stores **only presentation state**: center position, size, rotation, flip, opacity, crop mode.
 
 - Mutating an instance never mutates the source.
 - The same source can live in many panels with independent transforms.
 - Deleting an instance never deletes the source.
-- Deleting a source removes its instances (the only cascading direction).
+- Deleting a used source requires an explicit choice: archive it while preserving uses, or cascade through every indexed reference. An implicit unsafe delete is rejected.
 
-These rules are enforced in `src/domain/itemOps.ts` and guarded by `src/domain/instances.test.ts`.
+These rules are enforced in `itemOps.ts` and `assetLifecycle.ts`, and guarded by instance/lifecycle tests. Library menus expose rename, regenerate-and-replace, background processing, archive/restore, and reference-aware delete. Character deletion separately offers keeping assets or deleting linked assets.
+
+## Panel scene graph
+
+Each panel owns a semantic `PanelScene` alongside its visual stack. It records location, exact background asset identity, Character instance roles/position/facing/depth, relationships, dialogue, and continuity links. The scene projection is synchronized after item mutations. “Same street” is represented by reusing the exact source asset plus `backgroundSourcePanelId`, not by generating a visually similar replacement.
+
+## Command boundary
+
+All persistent manual actions and Agent actions dispatch the same typed commands through `editor/store.ts`. Drag/reshape previews use `transientDispatch`; `commitTransient` coalesces the command previews into one undo snapshot. Direct Zustand document mutation is not an Agent capability.
 
 ## Panel = viewport
 

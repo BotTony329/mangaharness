@@ -11,37 +11,94 @@ import type {
   ProjectDocument,
   SourceAsset,
 } from "./types";
+import { deleteAsset, deleteCharacter } from "./assetLifecycle";
 
 export interface NewAssetInput {
   category: AssetCategory;
   name: string;
   storageUrl: string;
+  processedImageUrl?: string;
   width: number;
   height: number;
   mimeType?: string;
   hasAlpha?: boolean;
+  backgroundRemoved?: boolean;
+  processingStatus?: SourceAsset["processingStatus"];
   metadata?: AssetGenerationMetadata;
+  type?: SourceAsset["type"];
+  provenance?: SourceAsset["provenance"];
+}
+
+/** Record a processed derivative without overwriting the immutable source. */
+export function setAssetProcessedImage(
+  doc: ProjectDocument,
+  assetId: ID,
+  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus">,
+): ProjectDocument {
+  const next = cloneDoc(doc);
+  const asset = next.assets[assetId];
+  if (!asset) throw new Error(`Unknown asset: ${assetId}`);
+  Object.assign(asset, update);
+  asset.status = update.processingStatus === "processing"
+    ? "processing"
+    : update.processingStatus === "failed" ? "failed" : asset.status === "archived" ? "archived" : "ready";
+  asset.updatedAt = now();
+  touch(next);
+  return next;
 }
 
 export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: ProjectDocument; assetId: ID } {
   const next = cloneDoc(doc);
+  const createdAt = now();
   const asset: SourceAsset = {
     id: newId(),
     projectId: next.project.id,
-    createdAt: now(),
     ...input,
+    type: input.type ?? assetTypeFromInput(input),
+    sourceUrl: input.storageUrl,
+    status: input.processingStatus === "processing" ? "processing" : input.processingStatus === "failed" ? "failed" : "ready",
+    provenance: input.provenance ?? provenanceFromMetadata(input.metadata),
+    createdAt,
+    updatedAt: createdAt,
   };
   next.assets[asset.id] = asset;
   // Character-tagged assets also join their character's library.
   const characterId = input.metadata?.characterId;
   if (characterId && next.characters[characterId]) {
     next.characters[characterId].assetIds.push(asset.id);
-    if (!next.characters[characterId].referenceAssetId) {
+    if (input.metadata?.characterAssetRole === "canonical" || !next.characters[characterId].referenceAssetId) {
       next.characters[characterId].referenceAssetId = asset.id;
+      next.characters[characterId].canonicalReferenceAssetId = asset.id;
     }
   }
   touch(next);
   return { doc: next, assetId: asset.id };
+}
+
+function assetTypeFromInput(input: NewAssetInput): SourceAsset["type"] {
+  if (input.category === "character") return input.metadata?.characterAssetRole === "canonical" ? "reference" : "character-visual";
+  return input.category;
+}
+
+function provenanceFromMetadata(metadata: AssetGenerationMetadata | undefined): SourceAsset["provenance"] {
+  if (!metadata) return undefined;
+  return {
+    provider: metadata.provider,
+    model: metadata.model,
+    prompt: metadata.prompt,
+    negativePrompt: metadata.negativePrompt,
+    generatedFromAssetIds: metadata.referenceAssetIds,
+    characterId: metadata.characterId,
+    characterState: {
+      pose: metadata.pose,
+      expression: metadata.expression,
+      outfit: metadata.outfit,
+      view: metadata.view,
+    },
+    canonicalReferenceAssetId: metadata.canonicalReferenceAssetId,
+    projectStyleId: metadata.styleProfileId,
+    generatedAt: metadata.generatedAt,
+  };
 }
 
 /**
@@ -49,35 +106,23 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
  * library changes cascade into panels. The inverse never happens.
  */
 export function removeAsset(doc: ProjectDocument, assetId: ID): ProjectDocument {
-  const next = cloneDoc(doc);
-  delete next.assets[assetId];
-  for (const character of Object.values(next.characters)) {
-    character.assetIds = character.assetIds.filter((id) => id !== assetId);
-    if (character.referenceAssetId === assetId) character.referenceAssetId = character.assetIds[0];
-  }
-  const orphaned = Object.values(next.items).filter(
-    (item) => item.kind === "asset" && item.sourceAssetId === assetId,
-  );
-  for (const item of orphaned) {
-    delete next.items[item.id];
-    const panel = next.panels[item.panelId];
-    if (panel) panel.itemIds = panel.itemIds.filter((id) => id !== item.id);
-  }
-  touch(next);
-  return next;
+  return deleteAsset(doc, assetId, "cascade");
 }
 
 export function addCharacter(
   doc: ProjectDocument,
   name: string,
-  description?: string,
+  appearance?: string,
+  personalityNotes?: string,
 ): { doc: ProjectDocument; characterId: ID } {
   const next = cloneDoc(doc);
   const character: Character = {
     id: newId(),
     projectId: next.project.id,
     name,
-    description,
+    description: appearance,
+    appearance,
+    personalityNotes,
     assetIds: [],
     createdAt: now(),
   };
@@ -86,12 +131,23 @@ export function addCharacter(
   return { doc: next, characterId: character.id };
 }
 
+export function removeCharacter(doc: ProjectDocument, characterId: ID): ProjectDocument {
+  return deleteCharacter(doc, characterId, "delete-all");
+}
+
 export function setCharacterReference(doc: ProjectDocument, characterId: ID, assetId: ID): ProjectDocument {
   const next = cloneDoc(doc);
   const character = next.characters[characterId];
   if (!character) throw new Error(`Unknown character: ${characterId}`);
   if (!next.assets[assetId]) throw new Error(`Unknown asset: ${assetId}`);
   character.referenceAssetId = assetId;
+  character.canonicalReferenceAssetId = assetId;
+  next.assets[assetId].metadata = {
+    ...next.assets[assetId].metadata,
+    characterId,
+    characterAssetRole: "canonical",
+    canonicalReferenceAssetId: assetId,
+  };
   touch(next);
   return next;
 }

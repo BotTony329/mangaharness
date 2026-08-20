@@ -9,15 +9,14 @@
 
 import { panelBoundsPx } from "@/domain/coords";
 import { supportsFaceFocus } from "@/domain/geometry";
-import { removeItem, setCropMode, swapInstanceAsset, updateItemProps } from "@/domain/itemOps";
-import { removeWorkspaceItem, updateWorkspaceItem } from "@/domain/workspaceOps";
 import type { AssetInstance, CropMode, ID, WorkspaceItem } from "@/domain/types";
-import { availableSlotValues, characterOfAsset, findSlotAsset } from "@/characters/slotSwitch";
+import { availableCharacterStateValues, stateFromInstance } from "@/characters/state";
+import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
+import { characterOfAsset } from "@/characters/slotSwitch";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import type { Viewport } from "./useViewport";
-
-const GENERATE = "__generate__";
+import { useState } from "react";
 
 interface FloatingToolbarProps {
   view: Viewport;
@@ -64,7 +63,7 @@ export function FloatingToolbar({ view, onEditBubble }: FloatingToolbarProps) {
         <DeleteButton
           onClick={() => {
             useEditorStore.getState().select({ panelId: item.panelId });
-            useEditorStore.getState().commit((d) => removeItem(d, item.id));
+            useEditorStore.getState().dispatch({ type: "delete-instance", instanceId: item.id });
           }}
         />
       </Bar>
@@ -95,7 +94,7 @@ function InstanceControls({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((s) => s.doc)!;
   const asset = doc.assets[item.sourceAssetId];
   const character = asset ? characterOfAsset(doc, asset.id) : null;
-  const commit = useEditorStore.getState().commit;
+  const dispatch = useEditorStore.getState().dispatch;
 
   return (
     <>
@@ -110,20 +109,20 @@ function InstanceControls({ item }: { item: AssetInstance }) {
             active={item.cropMode === mode}
             disabled={unavailable}
             title={unavailable ? "Needs face region metadata" : undefined}
-            onClick={() => commit((d) => setCropMode(d, item.id, mode))}
+            onClick={() => dispatch({ type: "set-framing", instanceId: item.id, cropMode: mode })}
           >
             {label}
           </ToolButton>
         );
       })}
       <Divider />
-      <ToolButton title="Flip horizontally" onClick={() => commit((d) => updateItemProps(d, item.id, { flipX: !item.flipX }))}>
+      <ToolButton title="Flip horizontally" onClick={() => dispatch({ type: "set-instance-props", instanceId: item.id, patch: { flipX: !item.flipX } })}>
         ⇋
       </ToolButton>
       <DeleteButton
         onClick={() => {
           useEditorStore.getState().select({ panelId: item.panelId });
-          commit((d) => removeItem(d, item.id));
+          dispatch({ type: "delete-instance", instanceId: item.id });
         }}
       />
     </>
@@ -137,29 +136,18 @@ function InstanceControls({ item }: { item: AssetInstance }) {
  */
 function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | "expression" }) {
   const doc = useEditorStore((s) => s.doc)!;
-  const openGenerator = useUiStore((s) => s.openGenerator);
+  const [busy, setBusy] = useState(false);
   const asset = doc.assets[item.sourceAssetId];
   const character = characterOfAsset(doc, asset.id)!;
-  const current = asset.metadata?.[slotKey] ?? "";
-  const options = availableSlotValues(doc, character, slotKey);
+  const current = stateFromInstance(doc, item)?.[slotKey] ?? "";
+  const options = availableCharacterStateValues(doc, character, slotKey);
 
-  const onPick = (value: string) => {
-    if (value === GENERATE) {
-      openGenerator({
-        assetType: slotKey === "pose" ? "character-pose" : "character-expression",
-        characterId: character.id,
-        targetInstanceId: item.id,
-      });
-      return;
-    }
-    const match = findSlotAsset(
-      doc,
-      character,
-      { [slotKey]: value },
-      { pose: asset.metadata?.pose, expression: asset.metadata?.expression },
-    );
-    if (match) {
-      useEditorStore.getState().commit((d) => swapInstanceAsset(d, item.id, match.id));
+  const onPick = async (value: string) => {
+    setBusy(true);
+    try {
+      await applyCharacterStateToInstance({ instanceId: item.id, patch: { [slotKey]: value } });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -167,7 +155,8 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
     <select
       className="h-7 max-w-[110px] rounded border border-zinc-700 bg-zinc-800 px-1 text-[11px] text-zinc-200"
       value={options.includes(current) ? current : ""}
-      onChange={(e) => onPick(e.target.value)}
+      disabled={busy}
+      onChange={(e) => void onPick(e.target.value)}
       title={slotKey === "pose" ? "Pose" : "Expression"}
     >
       <option value="" disabled hidden>
@@ -178,7 +167,6 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
           {option}
         </option>
       ))}
-      <option value={GENERATE}>✨ Generate…</option>
     </select>
   );
 }
@@ -186,17 +174,16 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
 // ─── Loose workspace item controls ──────────────────────────────────────────
 
 function LooseControls({ item }: { item: WorkspaceItem }) {
-  const commit = useEditorStore.getState().commit;
   return (
     <>
       <span className="px-1 text-[10px] text-zinc-500">Drag into a panel to use</span>
-      <ToolButton title="Flip horizontally" onClick={() => commit((d) => updateWorkspaceItem(d, item.id, { flipX: !item.flipX }))}>
+      <ToolButton title="Flip horizontally" onClick={() => useEditorStore.getState().dispatch({ type: "update-workspace-instance", itemId: item.id, patch: { flipX: !item.flipX } })}>
         ⇋
       </ToolButton>
       <DeleteButton
         onClick={() => {
           useEditorStore.getState().select({});
-          commit((d) => removeWorkspaceItem(d, item.id));
+          useEditorStore.getState().dispatch({ type: "delete-workspace-instance", itemId: item.id });
         }}
       />
     </>

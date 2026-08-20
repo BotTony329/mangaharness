@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { assertSafeProviderUrl, isAllowedReferenceUrl, redactSecrets } from "./security";
 
-const ENV_KEYS = ["GEMINI_API_KEY", "IMAGE_API_KEY", "AGENT_API_KEY", "ALLOW_PRIVATE_NETWORKS"];
+const ENV_KEYS = ["GEMINI_API_KEY", "IMAGE_API_KEY", "AGENT_API_KEY", "APP_ENCRYPTION_KEY", "ALLOW_PRIVATE_NETWORKS"];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -24,10 +24,16 @@ describe("redactSecrets", () => {
   });
 
   it("redacts bearer tokens and key query params defensively", () => {
-    const message = "Authorization: Bearer sk-abcdef1234567890 url?key=abcdefghijklmnopqrstuv";
+    const message = "Authorization: Bearer sk-abcdef1234567890 x-api-key: abcdefghijklmnop url?key=abcdefghijklmnopqrstuv";
     const redacted = redactSecrets(message);
     expect(redacted).not.toContain("sk-abcdef1234567890");
     expect(redacted).not.toContain("abcdefghijklmnopqrstuv");
+    expect(redacted).not.toContain("abcdefghijklmnop");
+  });
+
+  it("redacts the application encryption key from any server diagnostic", () => {
+    process.env.APP_ENCRYPTION_KEY = "operator-infrastructure-secret";
+    expect(redactSecrets(`failed with operator-infrastructure-secret`)).toBe("failed with [redacted]");
   });
 });
 

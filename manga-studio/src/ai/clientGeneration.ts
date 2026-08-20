@@ -6,22 +6,47 @@
  * library asset with provenance. One implementation — no second write path.
  */
 
-import { addAsset, addGenerationRecord } from "@/domain/libraryOps";
 import type { AssetCategory, AssetGenerationMetadata, ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import type { GeneratedAssetType } from "./types";
 
 export interface GenerateApiResult {
   url: string;
+  sourceUrl: string;
+  processedImageUrl?: string;
   mimeType: string;
+  hasAlpha: boolean;
+  backgroundRemoved: boolean;
+  processingStatus: "ready" | "failed";
   provider: string;
   model: string;
   referenceUsed: boolean;
+  requestId?: string;
+}
+
+export interface GenerationErrorDetails {
+  provider?: string;
+  model?: string;
+  endpoint?: string;
+  httpStatus?: number;
+  stage?: string;
+}
+
+export class GenerationApiError extends Error {
+  readonly requestId?: string;
+  readonly details?: GenerationErrorDetails;
+
+  constructor(message: string, requestId?: string, details?: GenerationErrorDetails) {
+    super(message);
+    this.requestId = requestId;
+    this.details = details;
+  }
 }
 
 export async function callGenerateApi(request: {
   assetType: GeneratedAssetType;
   prompt: string;
+  negativePrompt?: string;
   referenceUrls?: string[];
   size?: "portrait" | "landscape" | "square";
 }): Promise<GenerateApiResult> {
@@ -30,8 +55,12 @@ export async function callGenerateApi(request: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? "Generation failed");
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    requestId?: string;
+    details?: GenerationErrorDetails;
+  };
+  if (!response.ok) throw new GenerationApiError(body.error ?? "Generation failed", body.requestId, body.details);
   return body as GenerateApiResult;
 }
 
@@ -57,15 +86,19 @@ export interface StoreGeneratedAssetInput {
 /** Register a generated image as a source asset + provenance history entry. */
 export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Promise<ID> {
   const dims = await measureImage(input.result.url);
-  let assetId: ID = "";
-  useEditorStore.getState().commit((doc) => {
-    const added = addAsset(doc, {
+  const created = useEditorStore.getState().dispatch({
+    type: "create-asset",
+    input: {
       category: input.category,
       name: input.name,
-      storageUrl: input.result.url,
+      storageUrl: input.result.sourceUrl ?? input.result.url,
+      processedImageUrl: input.result.processedImageUrl,
       width: dims.width,
       height: dims.height,
       mimeType: input.result.mimeType,
+      hasAlpha: input.result.hasAlpha,
+      backgroundRemoved: input.result.backgroundRemoved,
+      processingStatus: input.result.processingStatus,
       metadata: {
         provider: input.result.provider,
         model: input.result.model,
@@ -73,22 +106,22 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
         generatedAt: new Date().toISOString(),
         ...input.metadata,
       },
-    });
-    assetId = added.assetId;
-    return addGenerationRecord(added.doc, {
+    },
+    generation: {
       status: "succeeded",
       assetType: input.assetType,
       prompt: input.prompt,
       provider: input.result.provider,
       model: input.result.model,
-      resultAssetId: added.assetId,
-    });
+    },
   });
-  return assetId;
+  if (!created.createdId) throw new Error("Generated asset could not be registered");
+  return created.createdId;
 }
 
 export function recordFailedGeneration(assetType: GeneratedAssetType, prompt: string, error: string): void {
-  useEditorStore.getState().commit((doc) =>
-    addGenerationRecord(doc, { status: "failed", assetType, prompt, error }),
-  );
+  useEditorStore.getState().dispatch({
+    type: "record-failed-generation",
+    record: { status: "failed", assetType, prompt, error },
+  });
 }

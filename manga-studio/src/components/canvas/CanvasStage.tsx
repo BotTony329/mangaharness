@@ -16,17 +16,11 @@ import { Group, Layer, Line, Rect, Stage, Transformer } from "react-konva";
 import type Konva from "konva";
 import { pageToPanelLocal, panelBoundsPx, panelPolygonPx, workspaceToPage } from "@/domain/coords";
 import { pointInPolygon } from "@/domain/geometry";
-import { placeAsset, updateBubble, updateItemTransform } from "@/domain/itemOps";
-import {
-  addWorkspaceItem,
-  instanceToWorkspaceItem,
-  updateWorkspaceItem,
-  workspaceItemToInstance,
-} from "@/domain/workspaceOps";
 import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { LooseAssetNode } from "@/render/LooseAssetNode";
+import { assetRenderUrl } from "@/assets/renderSource";
 import { PanelGhost, PanelRenderer, type PanelInteraction } from "@/render/PanelRenderer";
 import { PAGE_STAGE_ID } from "@/render/constants";
 import { BubbleTextEditor } from "./BubbleTextEditor";
@@ -39,8 +33,7 @@ export function CanvasStage() {
   const currentPageId = useEditorStore((s) => s.currentPageId);
   const selection = useEditorStore((s) => s.selection);
   const select = useEditorStore((s) => s.select);
-  const commit = useEditorStore((s) => s.commit);
-  const transient = useEditorStore((s) => s.transient);
+  const transientDispatch = useEditorStore((s) => s.transientDispatch);
   const commitTransient = useEditorStore((s) => s.commitTransient);
   const shapeEditPanelId = useUiStore((s) => s.shapeEditPanelId);
   const setShapeEditPanel = useUiStore((s) => s.setShapeEditPanel);
@@ -134,19 +127,19 @@ export function CanvasStage() {
         select({ panelId });
         setShapeEditPanel(panelId);
       },
-      onItemDragMove: (itemId, cx, cy) => transient((d) => updateItemTransform(d, itemId, { cx, cy })),
+      onItemDragMove: (itemId, cx, cy) => transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } }),
       onItemDragEnd: (itemId, cx, cy) => {
         if (cx !== undefined && cy !== undefined) {
-          transient((d) => updateItemTransform(d, itemId, { cx, cy }));
+          transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } });
         }
         commitTransient();
         maybeReleaseFromPanel(itemId);
       },
       onEditBubble: (itemId) => setEditingBubbleId(itemId),
-      onTailMove: (itemId, x, y) => commit((d) => updateBubble(d, itemId, { tail: { x, y } })),
+      onTailMove: (itemId, x, y) => useEditorStore.getState().dispatch({ type: "update-bubble", itemId, patch: { tail: { x, y } } }),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection.itemId, select, transient, commit, commitTransient, setShapeEditPanel],
+    [selection.itemId, select, transientDispatch, commitTransient, setShapeEditPanel],
   );
 
   /** Dragging an instance clearly off the page releases it to the workspace. */
@@ -163,11 +156,8 @@ export function CanvasStage() {
       const margin = 40;
       const offPage = inPageX < -margin || inPageY < -margin || inPageX > pageW + margin || inPageY > pageH + margin;
       if (!offPage) return;
-      state.commit((docNow) => {
-        const result = instanceToWorkspaceItem(docNow, itemId);
-        queueMicrotask(() => state.select({ workspaceItemId: result.itemId }));
-        return result.doc;
-      });
+      const result = state.dispatch({ type: "panel-to-workspace", instanceId: itemId });
+      if (result.createdId) state.select({ workspaceItemId: result.createdId });
     },
     [page, pageW, pageH],
   );
@@ -175,28 +165,25 @@ export function CanvasStage() {
   // ── Loose item interactions ───────────────────────────────────────────────
   const onLooseDragMove = useCallback(
     (itemId: ID, x: number, y: number) => {
-      transient((d) => updateWorkspaceItem(d, itemId, { x, y }));
+      transientDispatch({ type: "update-workspace-instance", itemId, patch: { x, y } });
       setHoveredPanelId(panelAtWorkspacePoint({ x, y }));
     },
-    [transient, panelAtWorkspacePoint],
+    [transientDispatch, panelAtWorkspacePoint],
   );
 
   const onLooseDragEnd = useCallback(
     (itemId: ID, x: number, y: number) => {
-      transient((d) => updateWorkspaceItem(d, itemId, { x, y }));
+      transientDispatch({ type: "update-workspace-instance", itemId, patch: { x, y } });
       commitTransient();
       setHoveredPanelId(null);
       const targetPanel = panelAtWorkspacePoint({ x, y });
       if (!targetPanel) return;
       // Crossing into a panel converts the loose asset into a panel instance.
       const state = useEditorStore.getState();
-      state.commit((d) => {
-        const result = workspaceItemToInstance(d, itemId, targetPanel);
-        queueMicrotask(() => state.select({ itemId: result.instanceId, panelId: targetPanel }));
-        return result.doc;
-      });
+      const result = state.dispatch({ type: "workspace-to-panel", itemId, panelId: targetPanel });
+      if (result.createdId) state.select({ itemId: result.createdId, panelId: targetPanel });
     },
-    [transient, commitTransient, panelAtWorkspacePoint],
+    [transientDispatch, commitTransient, panelAtWorkspacePoint],
   );
 
   // ── Transformer end (panel items + loose items) ───────────────────────────
@@ -213,11 +200,11 @@ export function CanvasStage() {
     node.scaleY(1);
     const patch = { width, height, rotation: node.rotation() };
     if (isLoose) {
-      commit((d) => updateWorkspaceItem(d, sel.workspaceItemId!, { x: node.x(), y: node.y(), ...patch }));
+      useEditorStore.getState().dispatch({ type: "update-workspace-instance", itemId: sel.workspaceItemId!, patch: { x: node.x(), y: node.y(), ...patch } });
     } else if (sel.itemId) {
-      commit((d) => updateItemTransform(d, sel.itemId!, { cx: node.x(), cy: node.y(), ...patch }));
+      useEditorStore.getState().dispatch({ type: "update-instance-transform", instanceId: sel.itemId!, patch: { cx: node.x(), cy: node.y(), ...patch } });
     }
-  }, [commit]);
+  }, []);
 
   // ── Library drag & drop: into a panel, or anywhere on the workspace ───────
   const onDrop = useCallback(
@@ -229,22 +216,16 @@ export function CanvasStage() {
       const panelId = panelAtWorkspacePoint(workspacePoint);
 
       if (!panelId) {
-        commit((d) => {
-          const result = addWorkspaceItem(d, assetId, workspacePoint);
-          queueMicrotask(() => select({ workspaceItemId: result.itemId }));
-          return result.doc;
-        });
+        const result = useEditorStore.getState().dispatch({ type: "add-workspace-instance", assetId, at: workspacePoint });
+        if (result.createdId) select({ workspaceItemId: result.createdId });
         return;
       }
       const isBackground = doc.assets[assetId]?.category === "background";
       const local = pageToPanelLocal(workspaceToPage(workspacePoint, page), panelBoundsPx(doc, doc.panels[panelId]));
-      commit((d) => {
-        const placed = placeAsset(d, panelId, assetId, { at: isBackground ? undefined : local });
-        queueMicrotask(() => select({ itemId: placed.itemId, panelId }));
-        return placed.doc;
-      });
+      const placed = useEditorStore.getState().dispatch({ type: "add-instance", panelId, assetId, at: isBackground ? undefined : local });
+      if (placed.createdId) select({ itemId: placed.createdId, panelId });
     },
-    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, commit, select],
+    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, select],
   );
 
   if (!doc || !page) {
@@ -293,7 +274,7 @@ export function CanvasStage() {
             <LooseAssetNode
               key={item.id}
               item={item}
-              storageUrl={doc.assets[item.sourceAssetId]?.storageUrl}
+              storageUrl={assetRenderUrl(doc.assets[item.sourceAssetId])}
               onSelect={() => select({ workspaceItemId: item.id })}
               onDragMove={(x, y) => onLooseDragMove(item.id, x, y)}
               onDragEnd={(x, y) => onLooseDragEnd(item.id, x, y)}
@@ -335,7 +316,7 @@ export function CanvasStage() {
           scale={view.scale}
           stagePos={{ x: view.x, y: view.y }}
           onCommit={(text) => {
-            commit((d) => updateBubble(d, editingBubble.id, { text }));
+            useEditorStore.getState().dispatch({ type: "update-bubble", itemId: editingBubble.id, patch: { text } });
             setEditingBubbleId(null);
           }}
           onCancel={() => setEditingBubbleId(null)}

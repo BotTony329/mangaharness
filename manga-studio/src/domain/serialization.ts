@@ -7,6 +7,8 @@
 import { defaultPageWorkspacePosition } from "./factory";
 import { rectToPoints } from "./geometry";
 import { SCHEMA_VERSION, type ProjectDocument, type Rect } from "./types";
+import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
+import { rebuildAllScenes } from "./sceneOps";
 
 export function serializeProject(doc: ProjectDocument): string {
   return JSON.stringify(doc);
@@ -47,6 +49,129 @@ const MIGRATIONS: Record<number, Migration> = {
     doc.workspaceOrder ??= [];
     return { ...doc, schemaVersion: 2 };
   },
+  // v2 → v3: character assets and placed instances gain complete semantic
+  // state. Missing legacy fields receive explicit, predictable defaults.
+  2: (doc) => {
+    const characters = (doc.characters ?? {}) as Record<
+      string,
+      { referenceAssetId?: string; canonicalReferenceAssetId?: string; assetIds?: string[] }
+    >;
+    const assets = (doc.assets ?? {}) as Record<
+      string,
+      { id?: string; metadata?: Record<string, unknown> }
+    >;
+    for (const character of Object.values(characters)) {
+      character.canonicalReferenceAssetId ??= character.referenceAssetId;
+      for (const assetId of character.assetIds ?? []) {
+        const asset = assets[assetId];
+        if (!asset?.metadata) continue;
+        asset.metadata.pose ??= "standing";
+        asset.metadata.expression ??= "neutral";
+        asset.metadata.outfit ??= "default outfit";
+        asset.metadata.view ??= "front";
+        asset.metadata.characterAssetRole ??=
+          assetId === character.canonicalReferenceAssetId ? "canonical" : "state";
+        asset.metadata.canonicalReferenceAssetId ??= character.canonicalReferenceAssetId;
+      }
+    }
+    const items = (doc.items ?? {}) as Record<
+      string,
+      { kind?: string; sourceAssetId?: string; characterState?: unknown }
+    >;
+    for (const item of Object.values(items)) {
+      if (item.kind !== "asset" || item.characterState || !item.sourceAssetId) continue;
+      const asset = assets[item.sourceAssetId];
+      const metadata = asset?.metadata;
+      if (!metadata?.characterId) continue;
+      item.characterState = {
+        characterId: metadata.characterId,
+        pose: metadata.pose ?? "standing",
+        expression: metadata.expression ?? "neutral",
+        outfit: metadata.outfit ?? "default outfit",
+        view: metadata.view ?? "front",
+        assetId: item.sourceAssetId,
+      };
+    }
+    return { ...doc, schemaVersion: 3 };
+  },
+  // v3 → v4: art direction becomes persistent project state and legacy
+  // character descriptions are normalized into identity-only appearance.
+  3: (doc) => {
+    const project = doc.project as { settings?: Record<string, unknown> } | undefined;
+    if (project?.settings) {
+      project.settings.artStyle ??= {
+        activeStyleId: DEFAULT_STYLE_PROFILE_ID,
+        customProfiles: {},
+      };
+    }
+    const characters = (doc.characters ?? {}) as Record<
+      string,
+      { description?: string; appearance?: string; personalityNotes?: string }
+    >;
+    for (const character of Object.values(characters)) {
+      character.appearance ??= character.description;
+    }
+    return { ...doc, schemaVersion: 4 };
+  },
+  // v4 → v5: source images remain immutable while optional transparent
+  // derivatives become the preferred compositing surface. Legacy assets stay
+  // raw so users can process them explicitly without losing their originals.
+  4: (doc) => {
+    const assets = (doc.assets ?? {}) as Record<string, { processingStatus?: string }>;
+    for (const asset of Object.values(assets)) asset.processingStatus ??= "raw";
+    return { ...doc, schemaVersion: 5 };
+  },
+  // v5 → v6: assets gain canonical lifecycle/provenance fields while legacy
+  // URL/metadata aliases remain readable; panels gain semantic Scene records.
+  5: (doc) => {
+    const assets = (doc.assets ?? {}) as Record<string, {
+      category?: string;
+      storageUrl?: string;
+      processedImageUrl?: string;
+      processingStatus?: string;
+      type?: string;
+      sourceUrl?: string;
+      status?: string;
+      provenance?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      createdAt?: string;
+      updatedAt?: string;
+    }>;
+    for (const asset of Object.values(assets)) {
+      const metadata = asset.metadata;
+      asset.type ??= asset.category === "character"
+        ? metadata?.characterAssetRole === "canonical" ? "reference" : "character-visual"
+        : asset.category ?? "upload";
+      asset.sourceUrl ??= asset.storageUrl ?? "";
+      asset.status ??= asset.processingStatus === "processing"
+        ? "processing"
+        : asset.processingStatus === "failed" ? "failed" : "ready";
+      asset.updatedAt ??= asset.createdAt ?? new Date(0).toISOString();
+      if (!asset.provenance && metadata) {
+        asset.provenance = {
+          provider: metadata.provider,
+          model: metadata.model,
+          prompt: metadata.prompt,
+          negativePrompt: metadata.negativePrompt,
+          generatedFromAssetIds: metadata.referenceAssetIds,
+          characterId: metadata.characterId,
+          characterState: {
+            pose: metadata.pose,
+            expression: metadata.expression,
+            outfit: metadata.outfit,
+            view: metadata.view,
+          },
+          canonicalReferenceAssetId: metadata.canonicalReferenceAssetId,
+          projectStyleId: metadata.styleProfileId,
+          generatedAt: metadata.generatedAt,
+        };
+      }
+    }
+    doc.scenes ??= {};
+    const migrated = { ...doc, schemaVersion: 6 } as unknown as ProjectDocument;
+    if (doc.panels && doc.items && doc.assets && doc.project) rebuildAllScenes(migrated);
+    return migrated as unknown as Record<string, unknown>;
+  },
 };
 
 function migrate(input: unknown): ProjectDocument {
@@ -75,4 +200,8 @@ function assertDocumentShape(doc: ProjectDocument): void {
   if (!Array.isArray(doc.generationHistory)) doc.generationHistory = [];
   if (typeof doc.workspaceItems !== "object" || doc.workspaceItems === null) doc.workspaceItems = {};
   if (!Array.isArray(doc.workspaceOrder)) doc.workspaceOrder = [];
+  if (typeof doc.scenes !== "object" || doc.scenes === null) {
+    doc.scenes = {};
+    rebuildAllScenes(doc);
+  }
 }

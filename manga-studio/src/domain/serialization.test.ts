@@ -4,6 +4,7 @@ import { addAsset, addCharacter } from "./libraryOps";
 import { addBubble, placeAsset } from "./itemOps";
 import { setPageLayout } from "./pageOps";
 import { deserializeProject, serializeProject } from "./serialization";
+import { SCHEMA_VERSION } from "./types";
 
 function buildRichDoc() {
   let doc = createProjectDocument("Round Trip");
@@ -48,6 +49,41 @@ describe("project serialization", () => {
   it("rejects documents from a newer schema", () => {
     const doc = { ...buildRichDoc(), schemaVersion: 999 };
     expect(() => deserializeProject(JSON.stringify(doc))).toThrow(/newer app version/);
+  });
+
+  it("normalizes v2 character assets and instances into complete v3 state", () => {
+    const legacy = buildRichDoc();
+    const character = Object.values(legacy.characters)[0];
+    const asset = Object.values(legacy.assets)[0];
+    const instance = Object.values(legacy.items).find((item) => item.kind === "asset")!;
+    legacy.schemaVersion = 2;
+    delete character.canonicalReferenceAssetId;
+    delete asset.metadata?.outfit;
+    delete asset.metadata?.view;
+    delete (instance as { characterState?: unknown }).characterState;
+
+    const migrated = deserializeProject(JSON.stringify(legacy));
+    const migratedInstance = migrated.items[instance.id];
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(migrated.assets[asset.id].processingStatus).toBe("raw");
+    expect(migrated.assets[asset.id]).toMatchObject({
+      type: "character-visual",
+      status: "ready",
+      sourceUrl: asset.storageUrl,
+    });
+    expect(migrated.assets[asset.id].updatedAt).toBeTruthy();
+    expect(migrated.characters[character.id].canonicalReferenceAssetId).toBe(character.referenceAssetId);
+    expect(migrated.assets[asset.id].metadata).toMatchObject({ outfit: "default outfit", view: "front" });
+    expect(migratedInstance.kind === "asset" && migratedInstance.characterState).toMatchObject({
+      pose: "standing",
+      expression: "neutral",
+      outfit: "default outfit",
+      view: "front",
+    });
+    expect(migrated.project.settings.artStyle.activeStyleId).toBe("japanese-manga/minimal-line-manga");
+    expect(migrated.scenes[instance.panelId].characters).toEqual([
+      expect.objectContaining({ characterInstanceId: instance.id, characterId: character.id }),
+    ]);
   });
 });
 

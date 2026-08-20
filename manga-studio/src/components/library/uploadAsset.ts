@@ -2,7 +2,7 @@
 
 /** Client-side upload flow: measure the image, ship the binary, register the asset. */
 
-import { addAsset, type NewAssetInput } from "@/domain/libraryOps";
+import type { NewAssetInput } from "@/domain/libraryOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 
@@ -15,26 +15,38 @@ export async function uploadImageFile(
 
   const form = new FormData();
   form.append("file", file);
+  form.append("category", category);
   const response = await fetch("/api/assets/upload", { method: "POST", body: form });
-  const body = (await response.json()) as { url?: string; mimeType?: string; error?: string };
-  if (!response.ok || !body.url) throw new Error(body.error ?? "Upload failed");
+  const body = (await response.json()) as {
+    url?: string;
+    sourceUrl?: string;
+    processedImageUrl?: string;
+    mimeType?: string;
+    hasAlpha?: boolean;
+    backgroundRemoved?: boolean;
+    processingStatus?: "ready" | "failed";
+    error?: string;
+  };
+  if (!response.ok || !body.sourceUrl) throw new Error(body.error ?? "Upload failed");
 
-  let createdAssetId = "";
-  useEditorStore.getState().commit((doc) => {
-    const { doc: next, assetId } = addAsset(doc, {
+  const result = useEditorStore.getState().dispatch({
+    type: "create-asset",
+    input: {
       category,
       name: file.name.replace(/\.[^.]+$/, ""),
-      storageUrl: body.url!,
+      storageUrl: body.sourceUrl!,
+      processedImageUrl: body.processedImageUrl,
       width: dims.width,
       height: dims.height,
       mimeType: body.mimeType,
-      hasAlpha: body.mimeType === "image/png" || body.mimeType === "image/webp",
+      hasAlpha: body.hasAlpha,
+      backgroundRemoved: body.backgroundRemoved,
+      processingStatus: body.processingStatus,
       ...extra,
-    });
-    createdAssetId = assetId;
-    return next;
+    },
   });
-  return createdAssetId;
+  if (!result.createdId) throw new Error("Uploaded asset could not be registered");
+  return result.createdId;
 }
 
 async function readImageDimensions(file: File): Promise<{ width: number; height: number }> {

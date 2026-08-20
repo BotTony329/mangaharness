@@ -4,12 +4,11 @@
 
 import { useState } from "react";
 import { LAYOUT_PRESETS } from "@/domain/layouts";
-import { addBubble, addEffect } from "@/domain/itemOps";
-import { setPageLayout } from "@/domain/pageOps";
 import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { exportCurrentPagePng } from "@/export/exportPage";
+import { getActiveStyleProfile } from "@/styles/profiles";
 
 const BUBBLE_TYPES: { type: BubbleType; label: string }[] = [
   { type: "speech", label: "Speech bubble" },
@@ -33,26 +32,25 @@ export function TopBar() {
   const currentPageId = useEditorStore((s) => s.currentPageId);
   const selection = useEditorStore((s) => s.selection);
   const openSettings = useUiStore((s) => s.openSettings);
+  const openArtStyle = useUiStore((s) => s.openArtStyle);
   const [exporting, setExporting] = useState(false);
 
   if (!doc) return null;
 
   const page = currentPageId ? doc.pages[currentPageId] : null;
+  const activeStyle = getActiveStyleProfile(doc);
   // Toolbar tools target the selected panel, falling back to the first panel.
   const targetPanelId = selection.panelId ?? page?.panelIds[0];
 
   const addBubbleToPanel = (type: BubbleType) => {
     if (!targetPanelId) return;
-    useEditorStore.getState().commit((d) => {
-      const result = addBubble(d, targetPanelId, type);
-      queueMicrotask(() => useEditorStore.getState().select({ itemId: result.itemId, panelId: targetPanelId }));
-      return result.doc;
-    });
+    const result = useEditorStore.getState().dispatch({ type: "add-bubble", panelId: targetPanelId, bubbleType: type, text: "..." });
+    if (result.createdId) useEditorStore.getState().select({ itemId: result.createdId, panelId: targetPanelId });
   };
 
   const addEffectToPanel = (kind: EffectKind) => {
     if (!targetPanelId) return;
-    useEditorStore.getState().commit((d) => addEffect(d, targetPanelId, kind).doc);
+    useEditorStore.getState().dispatch({ type: "add-effect", panelId: targetPanelId, effectKind: kind });
   };
 
   const onExport = async (scale: 1 | 2) => {
@@ -93,7 +91,7 @@ export function TopBar() {
         onChange={(e) => {
           const layout = e.target.value as LayoutPresetId;
           if (layout && page) {
-            useEditorStore.getState().commit((d) => setPageLayout(d, page.id, layout));
+            useEditorStore.getState().dispatch({ type: "set-page-layout", pageId: page.id, layout });
           }
         }}
       >
@@ -111,6 +109,14 @@ export function TopBar() {
       <Dropdown label="+ Effect" items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))} onPick={(k) => addEffectToPanel(k as EffectKind)} />
 
       <div className="flex-1" />
+
+      <button
+        className="max-w-[220px] truncate rounded border border-violet-700/70 bg-violet-950/40 px-3 py-1 text-violet-200 hover:bg-violet-900/50"
+        onClick={openArtStyle}
+        title={`Project Art Style: ${activeStyle.name}`}
+      >
+        Art Style · {activeStyle.name}
+      </button>
 
       <button
         className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1 hover:bg-zinc-700"

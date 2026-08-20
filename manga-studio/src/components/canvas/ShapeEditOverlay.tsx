@@ -9,7 +9,6 @@
 import { Circle, Group, Line } from "react-konva";
 import type Konva from "konva";
 import { panelPolygonPx } from "@/domain/coords";
-import { movePanelPoint } from "@/domain/panelOps";
 import type { Page, Panel, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 
@@ -21,13 +20,17 @@ interface ShapeEditOverlayProps {
 }
 
 export function ShapeEditOverlay({ doc, page, panel, scale }: ShapeEditOverlayProps) {
-  const transient = useEditorStore((s) => s.transient);
+  const transientDispatch = useEditorStore((s) => s.transientDispatch);
   const commitTransient = useEditorStore((s) => s.commitTransient);
   const { pageWidth, pageHeight } = doc.project.settings;
   const polygon = panelPolygonPx(doc, panel);
 
   const moveVertex = (index: number, pagePxX: number, pagePxY: number) => {
-    transient((d) => movePanelPoint(d, panel.id, index, { x: pagePxX / pageWidth, y: pagePxY / pageHeight }));
+    const current = useEditorStore.getState().doc?.panels[panel.id]?.points ?? panel.points;
+    const points = current.map((point, pointIndex) => pointIndex === index
+      ? { x: pagePxX / pageWidth, y: pagePxY / pageHeight }
+      : point);
+    transientDispatch({ type: "reshape-panel", panelId: panel.id, points });
   };
 
   return (

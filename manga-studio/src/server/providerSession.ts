@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { NextRequest, NextResponse } from "next/server";
 import { assertSafeProviderUrl } from "@/ai/security";
 import { customApiSchema, validateCustomApi, type CustomApiConfig } from "./customApi/config";
-import { openSecret, sealSecret } from "./secretBox";
+import { isEncryptionConfigured, openSecret, sealSecret } from "./secretBox";
 
 export const AGENT_COOKIE = "ms_agent_provider";
 export const IMAGE_COOKIE = "ms_image_provider";
@@ -48,6 +48,11 @@ export interface ResolvedProvider {
   config: ProviderConfig;
   source: "session" | "deployment";
 }
+
+export type ProviderResolutionTrace = (
+  stage: string,
+  details?: Record<string, string | number | boolean | undefined>,
+) => void;
 
 /** Base URLs users usually don't need to type. */
 export const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -118,16 +123,35 @@ export function cookieNameFor(kind: ProviderKind): string {
   return kind === "agent" ? AGENT_COOKIE : IMAGE_COOKIE;
 }
 
-export function readSessionConfig(request: NextRequest, kind: ProviderKind): ProviderConfig | null {
+export function readSessionConfig(
+  request: NextRequest,
+  kind: ProviderKind,
+  trace?: ProviderResolutionTrace,
+): ProviderConfig | null {
   const sealed = request.cookies.get(cookieNameFor(kind))?.value;
-  if (!sealed) return null;
+  trace?.("credential_lookup", { kind, cookiePresent: Boolean(sealed) });
+  if (!sealed) {
+    trace?.("credential_not_found", { kind });
+    return null;
+  }
+  trace?.("encryption_key_checked", { configured: isEncryptionConfigured() });
   const opened = openSecret(sealed);
-  if (!opened) return null;
+  if (!opened) {
+    trace?.("credential_decryption_failed", { kind });
+    return null;
+  }
+  trace?.("credential_decrypted", { kind });
   try {
     const parsed = JSON.parse(opened) as ProviderConfig;
     const hasCredential = Boolean(parsed.apiKey) || parsed.custom?.auth.mode === "none";
-    return parsed.kind === kind && hasCredential && parsed.baseUrl && parsed.model ? parsed : null;
+    const valid = Boolean(parsed.kind === kind && hasCredential && parsed.baseUrl && parsed.model);
+    trace?.(valid ? "credential_deserialized" : "credential_validation_failed", {
+      kind,
+      providerType: valid ? parsed.providerType : undefined,
+    });
+    return valid ? parsed : null;
   } catch {
+    trace?.("credential_deserialization_failed", { kind });
     return null;
   }
 }
@@ -148,11 +172,24 @@ export function clearSessionConfig(response: NextResponse, kind: ProviderKind): 
 
 // ─── Resolution: session first, deployment env second ───────────────────────
 
-export function resolveProvider(request: NextRequest, kind: ProviderKind): ResolvedProvider | null {
-  const session = readSessionConfig(request, kind);
-  if (session) return { config: session, source: "session" };
+export function resolveProvider(
+  request: NextRequest,
+  kind: ProviderKind,
+  trace?: ProviderResolutionTrace,
+): ResolvedProvider | null {
+  trace?.("provider_resolution_start", { kind });
+  const session = readSessionConfig(request, kind, trace);
+  if (session) {
+    trace?.("provider_config_loaded", { kind, source: "session", providerType: session.providerType });
+    return { config: session, source: "session" };
+  }
   const env = kind === "agent" ? envAgentConfig() : envImageConfig();
-  return env ? { config: env, source: "deployment" } : null;
+  if (env) {
+    trace?.("provider_config_loaded", { kind, source: "deployment", providerType: env.providerType });
+    return { config: env, source: "deployment" };
+  }
+  trace?.("provider_config_missing", { kind });
+  return null;
 }
 
 export function envAgentConfig(): ProviderConfig | null {

@@ -9,6 +9,7 @@
 
 import { create } from "zustand";
 import type { ID, ProjectDocument } from "@/domain/types";
+import { applyDomainCommand, type CommandResult, type DomainCommand } from "@/domain/commands";
 
 const HISTORY_LIMIT = 50;
 
@@ -36,6 +37,8 @@ interface EditorState {
   loadDocument(doc: ProjectDocument): void;
   setCurrentPage(pageId: ID): void;
   select(selection: Selection): void;
+  dispatch(command: DomainCommand): CommandResult;
+  transientDispatch(command: DomainCommand): void;
 
   /** Apply a mutation and push one undo entry. */
   commit(mutation: DocMutation): void;
@@ -82,6 +85,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   select(selection) {
     set({ selection });
+  },
+
+  dispatch(command) {
+    let result: CommandResult | undefined;
+    get().commit((doc) => {
+      result = applyDomainCommand(doc, command);
+      return result.doc;
+    });
+    if (!result) throw new Error("No open project");
+    return result;
+  },
+
+  transientDispatch(command) {
+    get().transient((doc) => applyDomainCommand(doc, command).doc);
   },
 
   commit(mutation) {

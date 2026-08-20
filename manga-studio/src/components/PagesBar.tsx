@@ -2,7 +2,6 @@
 
 /** Bottom dock: page navigation — add, switch, delete. */
 
-import { addPage, removePage } from "@/domain/pageOps";
 import { useEditorStore } from "@/editor/store";
 
 export function PagesBar() {
@@ -35,9 +34,9 @@ export function PagesBar() {
               onClick={() => {
                 if (!confirm(`Delete ${page.name} and its contents?`)) return;
                 const store = useEditorStore.getState();
-                store.commit((d) => removePage(d, page.id));
+                store.dispatch({ type: "remove-page", pageId: page.id });
                 if (page.id === currentPageId) {
-                  const remaining = Object.values(store.doc!.pages).sort((a, b) => a.index - b.index)[0];
+                  const remaining = Object.values(useEditorStore.getState().doc!.pages).sort((a, b) => a.index - b.index)[0];
                   if (remaining) store.setCurrentPage(remaining.id);
                 }
               }}
@@ -52,11 +51,8 @@ export function PagesBar() {
         title="Add page"
         onClick={() => {
           const store = useEditorStore.getState();
-          store.commit((d) => {
-            const result = addPage(d);
-            queueMicrotask(() => store.setCurrentPage(result.pageId));
-            return result.doc;
-          });
+          const result = store.dispatch({ type: "add-page" });
+          if (result.createdId) store.setCurrentPage(result.createdId);
         }}
       >
         +

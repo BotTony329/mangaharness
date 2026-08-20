@@ -9,19 +9,23 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   callGenerateApi,
+  GenerationApiError,
   recordFailedGeneration,
   storeGeneratedAsset,
   type GenerateApiResult,
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
-import { swapInstanceAsset } from "@/domain/itemOps";
+import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
+import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
+import { assetRenderUrl } from "@/assets/renderSource";
 
 interface ProviderInfo {
   configured: boolean;
   capabilities?: { referenceImage?: boolean };
+  storage?: { configured?: boolean; backend?: string };
 }
 
 const TYPE_LABEL: Record<GeneratorRequest["assetType"], string> = {
@@ -42,11 +46,12 @@ export function GeneratorDialog() {
 function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest; onClose: () => void }) {
   const doc = useEditorStore((s) => s.doc);
   const [provider, setProvider] = useState<ProviderInfo | null>(null);
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(request.prefill?.description ?? "");
   const [pose, setPose] = useState(request.prefill?.pose ?? "");
   const [expression, setExpression] = useState(request.prefill?.expression ?? "");
   const [phase, setPhase] = useState<"idle" | "generating" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<GenerationApiError | null>(null);
   const [result, setResult] = useState<GenerateApiResult | null>(null);
 
   useEffect(() => {
@@ -57,7 +62,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   }, []);
 
   const character = request.characterId && doc ? doc.characters[request.characterId] : undefined;
-  const referenceAsset = character?.referenceAssetId && doc ? doc.assets[character.referenceAssetId] : undefined;
+  const referenceId = character ? characterReferenceId(character) : undefined;
+  const referenceAsset = referenceId && doc ? doc.assets[referenceId] : undefined;
+  const style = doc ? getStyleGenerationContext(doc) : undefined;
   const isCharacterType = request.assetType.startsWith("character");
   const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
 
@@ -67,29 +74,38 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         assetType: request.assetType,
         description: description || undefined,
         characterName: character?.name,
-        characterDescription: character?.description,
+        characterDescription: character ? characterIdentityDescription(character) : undefined,
         pose: pose || undefined,
         expression: expression || undefined,
         hasReference: canUseReference,
+        style: style?.profile,
       }),
-    [request.assetType, description, character, pose, expression, canUseReference],
+    [request.assetType, description, character, pose, expression, canUseReference, style?.profile],
   );
 
   const generate = async () => {
     setPhase("generating");
     setError(null);
+    setErrorDetails(null);
     try {
+      const referenceAssets = provider?.capabilities?.referenceImage
+        ? [isCharacterType ? referenceAsset : undefined, style?.referenceAsset].filter(
+            (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
+          )
+        : [];
       const output = await callGenerateApi({
         assetType: request.assetType,
         prompt,
+        negativePrompt: style?.profile.negativePrompt,
         size: defaultAspect(request.assetType),
-        referenceUrls: canUseReference && referenceAsset ? [referenceAsset.storageUrl] : undefined,
+        referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
       });
       setResult(output);
       setPhase("done");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Generation failed";
       setError(message);
+      setErrorDetails(e instanceof GenerationApiError ? e : null);
       setPhase("idle");
       recordFailedGeneration(request.assetType, prompt, message);
     }
@@ -108,9 +124,18 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
       prompt,
       metadata: {
         characterId: request.characterId,
-        pose: pose || undefined,
-        expression: expression || undefined,
-        referenceAssetIds: result.referenceUsed && referenceAsset ? [referenceAsset.id] : undefined,
+        pose: pose || DEFAULT_CHARACTER_STATE.pose,
+        expression: expression || DEFAULT_CHARACTER_STATE.expression,
+        outfit: DEFAULT_CHARACTER_STATE.outfit,
+        view: DEFAULT_CHARACTER_STATE.view,
+        characterAssetRole: request.assetType === "character" ? "canonical" : "state",
+        canonicalReferenceAssetId: request.assetType === "character" ? undefined : referenceId,
+        referenceAssetIds: result.referenceUsed
+          ? [isCharacterType ? referenceAsset?.id : undefined, style?.referenceAsset?.id].filter(
+              (id): id is string => Boolean(id),
+            )
+          : undefined,
+        ...(style ? styleMetadata(style) : {}),
       },
     });
     // "Generate missing slot" flows started from a selected instance also
@@ -118,8 +143,11 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     if (request.targetInstanceId) {
       const store = useEditorStore.getState();
       if (store.doc?.items[request.targetInstanceId]) {
-        store.commit((d) => swapInstanceAsset(d, request.targetInstanceId!, assetId));
+        store.dispatch({ type: "swap-instance-asset", instanceId: request.targetInstanceId, assetId });
       }
+    }
+    if (request.replaceAssetId && useEditorStore.getState().doc?.assets[request.replaceAssetId]) {
+      useEditorStore.getState().dispatch({ type: "replace-asset", oldAssetId: request.replaceAssetId, newAssetId: assetId });
     }
     onClose();
   };
@@ -148,6 +176,12 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
             >
               Connect Image Model
             </button>
+          </div>
+        )}
+
+        {provider?.storage?.configured === false && (
+          <div className="mb-3 rounded border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-300">
+            Persistent asset storage is not connected. The Manga Studio operator must connect storage before generated images can be saved.
           </div>
         )}
 
@@ -193,17 +227,39 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               <p className="mt-1 rounded bg-zinc-950 p-2 leading-4">{prompt}</p>
             </details>
 
-            {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+            {error && (
+              <div className="mb-2 rounded border border-red-900/60 bg-red-950/30 p-2 text-xs text-red-300">
+                <p className="font-medium">Generation failed</p>
+                <p className="mt-1 text-red-400">{error}</p>
+                {(errorDetails?.requestId || errorDetails?.details) && (
+                  <details className="mt-2 text-[11px] text-zinc-400">
+                    <summary className="cursor-pointer">Show safe details</summary>
+                    <dl className="mt-1 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 rounded bg-zinc-950 p-2">
+                      {errorDetails.details?.provider && <><dt>Provider</dt><dd>{errorDetails.details.provider}</dd></>}
+                      {errorDetails.details?.model && <><dt>Model</dt><dd>{errorDetails.details.model}</dd></>}
+                      {errorDetails.details?.endpoint && <><dt>Endpoint</dt><dd>{errorDetails.details.endpoint}</dd></>}
+                      {errorDetails.details?.httpStatus && <><dt>HTTP</dt><dd>{errorDetails.details.httpStatus}</dd></>}
+                      {errorDetails.details?.stage && <><dt>Stage</dt><dd>{errorDetails.details.stage}</dd></>}
+                      {errorDetails.requestId && <><dt>Request ID</dt><dd className="break-all">{errorDetails.requestId}</dd></>}
+                    </dl>
+                  </details>
+                )}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button className="rounded px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200" onClick={onClose}>
                 Cancel
               </button>
               <button
                 className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
-                disabled={phase === "generating" || provider?.configured === false}
+                disabled={
+                  phase === "generating" ||
+                  provider?.configured === false ||
+                  provider?.storage?.configured === false
+                }
                 onClick={generate}
               >
-                {phase === "generating" ? "Generating asset…" : "Generate"}
+                {phase === "generating" ? `Generating${character ? ` ${character.name}` : " asset"}…` : "Generate"}
               </button>
             </div>
           </>
@@ -216,6 +272,15 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={result.url} alt="Generated asset" className="max-h-[360px] rounded" />
             </div>
+            {isCharacterType || request.assetType === "prop" ? (
+              <p className={`mb-2 text-[11px] ${result.hasAlpha ? "text-emerald-400" : "text-amber-400"}`}>
+                {result.backgroundRemoved
+                  ? "Transparent derivative ready — the checkerboard is UI-only."
+                  : result.hasAlpha
+                    ? "Provider returned useful alpha transparency."
+                    : "Automatic extraction was not reliable; the original was preserved and can be retried from the library."}
+              </p>
+            ) : null}
             {result.referenceUsed && (
               <p className="mb-2 text-[11px] text-zinc-500">Generated with the character reference image.</p>
             )}

@@ -12,7 +12,7 @@ export function createAnthropicCompatibleAgent(config: ProviderConfig): AgentMod
     "Content-Type": "application/json",
   };
 
-  const complete = (system: string, user: string, maxTokens: number) =>
+  const complete = (system: string, user: string, maxTokens: number, options?: Parameters<AgentModelProvider["completeJson"]>[2]) =>
     boundedFetch(`${base}/v1/messages`, {
       method: "POST",
       headers,
@@ -23,7 +23,7 @@ export function createAnthropicCompatibleAgent(config: ProviderConfig): AgentMod
         messages: [{ role: "user", content: user }],
         temperature: 0.2,
       }),
-    });
+    }, options);
 
   return {
     label: config.name || `anthropic @ ${hostOf(base)}`,
@@ -37,11 +37,12 @@ export function createAnthropicCompatibleAgent(config: ProviderConfig): AgentMod
       return { ok: false, message: (await agentErrorFrom(response)).safeMessage };
     },
 
-    async completeJson(systemPrompt, userPrompt) {
+    async completeJson(systemPrompt, userPrompt, options) {
       // No native JSON mode: the planner's prompt demands a JSON object and
       // parseModelJson strips any code fences the model adds.
-      const response = await complete(systemPrompt, userPrompt, 8192);
+      const response = await complete(systemPrompt, userPrompt, 2048, options);
       if (!response.ok) throw await agentErrorFrom(response);
+      options?.onEvent?.({ stage: "first_response_byte", responseMode: "buffered", providerStatus: response.status });
       const body = (await response.json().catch(() => null)) as {
         content?: { type?: string; text?: string }[];
       } | null;
@@ -50,7 +51,8 @@ export function createAnthropicCompatibleAgent(config: ProviderConfig): AgentMod
         .map((block) => block.text ?? "")
         .join("");
       if (!text) throw new AgentModelError("Agent model returned an empty response");
-      return text;
+      options?.onEvent?.({ stage: "provider_response_complete", responseMode: "buffered", providerStatus: response.status });
+      return { text, responseMode: "buffered" };
     },
   };
 }

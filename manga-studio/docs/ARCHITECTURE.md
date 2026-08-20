@@ -9,7 +9,7 @@ Next.js 15 (App Router) + React 19 + TypeScript strict. The editor is a client a
 ```
 Browser
 ├── Domain document (single source of truth, plain JSON)
-│     src/domain — types, geometry, pure mutation functions
+│     src/domain — schema-v6 entities, scenes, lifecycle, commands, validation
 ├── Editor state (Zustand)
 │     src/editor — store, history (undo/redo), selection, UI state
 ├── Canvas projection (react-konva)
@@ -36,10 +36,19 @@ External
 
 ## Module rules
 
-- `src/domain` imports nothing from other modules. All mutations are pure `doc → doc` functions (`libraryOps`, `pageOps`, `itemOps`) — the **command layer** shared by manual UI and agent executor. There is no second write path.
+- `src/domain/commands.ts` is the canonical mutation facade. UI actions and Agent tools dispatch typed `DomainCommand` values; domain modules remain pure `doc → doc` transformations. Live canvas gestures use `transientDispatch`, which applies the same commands without adding history until the gesture ends.
 - `src/render` renders domain state; it never mutates it and never imports `src/export`.
 - `src/ai` (server) knows providers; the editor only sees `/api/generate` responses. Library ingestion of generation results happens client-side in `src/ai/clientGeneration.ts` (composition-root pattern) — providers never write to the library.
-- `src/agent` validates every model-planned tool call against zod schemas before anything executes; execution happens client-side through the domain command layer inside one history transaction.
+- `src/agent` validates every model-planned tool call against zod schemas before anything executes; execution happens client-side through the command layer inside one history transaction. The scope is checked both at plan validation and immediately before execution, then audited against the before/after documents.
+
+## Core domain boundaries
+
+- `SourceAsset` is a first-class reusable resource with semantic type, lifecycle status, immutable source URL, optional processed derivative, provenance, and timestamps.
+- `Character` is an identity that owns canonical and state visuals. Pose, expression, outfit, and view are independent `CharacterState` dimensions resolved to an exact cached visual or a newly generated reusable asset.
+- `AssetInstance` is presentation state only. It references a source asset and never owns or mutates the source.
+- Every `Panel` has a `PanelScene` projection containing background identity, semantic Character placement, relationships, dialogue, location, and continuity metadata.
+- `assetLifecycle.ts` is the reference-aware delete/archive/replace boundary. Unsafe deletion is refused unless the caller chooses an explicit archive or cascade mode.
+- `compositionValidation.ts` audits required content, visibility, scale, background presence, occlusion, and scope integrity; safe geometry defects are corrected before the Agent run completes.
 
 ## Key data-flow decisions
 
@@ -53,4 +62,4 @@ Konva.js via react-konva. Rationale: per-group clipping (`clipX/Y/Width/Height`)
 
 ## Testing
 
-Vitest suites guard the four safety nets: geometry math, source-vs-instance invariants, serialization round-trips, and AI-layer security (registry, redaction, SSRF, plan validation). `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.
+Vitest suites guard geometry, source-vs-instance invariants, lifecycle references, Character state merging and resolution, scene continuity, command behavior, scope enforcement/auditing, serialization migrations, and AI security. `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.

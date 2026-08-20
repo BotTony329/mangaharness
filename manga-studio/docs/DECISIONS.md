@@ -62,3 +62,24 @@ Generated assets land in the library immediately (with provenance) AND appear as
 
 ## D12 — Deterministic keyword skill selection
 An LLM selector would add latency, cost, and nondeterminism for marginal gain at 6 skills. Keyword triggers are testable and transparent (the UI shows the selection). Revisit when the skill library grows.
+
+## D21 — Secret-safe generation trace spans the complete server path
+`/api/generate` assigns a request ID and emits structured stage logs from JSON parsing through BYOK lookup/decryption, adapter construction, reference processing, the exact provider-fetch boundary, provider HTTP response, normalized image parsing, and Blob persistence. Trace callbacks carry only an allow-listed set of non-secret fields; keys, cookies, authorization headers, encrypted credentials, and complete provider configs are never logged. Safe request IDs and normalized provider diagnostics may reach the browser so an operator can correlate a user-visible failure with Vercel logs.
+
+## D22 — Character reference input is source-based, not `File`-based domain state
+The creation dialog currently implements the `upload` source with drag/drop, preview, validation, replace, and remove controls. Its transient selection is a discriminated `{ kind: "upload" }` value; accepted images are persisted as normal Character assets and the domain document stores only asset IDs/URLs. This leaves room for future `asset-library` and `canvas-selection` sources without coupling Character entities to browser `File` objects.
+
+## D23 — Schema v6 makes lifecycle and panel semantics durable
+Assets now carry canonical `type`, `sourceUrl`, `status`, `provenance`, and `updatedAt` fields while legacy `category`, `storageUrl`, and metadata remain compatibility aliases. Every panel has a serializable `PanelScene`. The v5→v6 migration derives these fields and rebuilds scenes from existing panel contents, so older projects remain loadable.
+
+## D24 — One typed Command Layer is the only persistent editor write facade
+`applyDomainCommand` coordinates lifecycle, library, panel, scene, style, workspace, and validation modules. Manual UI and Agent execution both call `dispatch`; canvas previews call `transientDispatch`. Pure lower-level operations remain implementation details and test seams, not alternate product write paths.
+
+## D25 — Deletion is reference-aware and mode-explicit
+The lifecycle module indexes Character references/states, panel instances, workspace instances, scene backgrounds, style references, and generation history. `if-unused` refuses unsafe removal. `archive` hides an asset from new resolution while keeping existing renders valid. `cascade` removes or clears all indexed references. Instance deletion never removes a source asset.
+
+## D26 — Semantic Agent composition is validated, not trusted
+The preferred `compose_character` tool resolves Character state before applying framing, position, facing, depth, and role. `reuse_scene_background` preserves exact continuity, and `add_scene_relationship` records intent. Plan-time and execution-time scope guards are followed by a structural before/after audit and composition validation. Correctable out-of-frame/tiny placements are repaired; unresolved warnings remain visible in the activity log.
+
+## D27 — Agent planning owns a 25-second deadline and streams inside provider adapters
+`/api/agent` remains a planning-only Node route; tool and image execution stays in the browser runtime after the validated plan returns. The planner owns one 25-second `AbortController` covering fetch and response-body consumption, so the application returns a controlled 504 before Vercel's 120-second route limit. OpenAI-compatible and recognized Custom Chat Completions adapters request SSE and normalize content, reasoning fields, finish reasons, and incremental tool-call arguments behind the provider interface. Routine hybrid Qwen models receive `enable_thinking: false`; explicitly thinking-oriented Qwen/QwQ models are not overridden. The route emits request-scoped, secret-safe stage timings, and the UI exposes only allow-listed diagnostics.

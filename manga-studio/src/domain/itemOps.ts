@@ -7,6 +7,8 @@
 import { cloneDoc, insertIndexForBand, itemBand, panelPxRect, touch } from "./docHelpers";
 import { newId } from "./factory";
 import { cropModeTransform, fitTransform } from "./geometry";
+import { stateFromAsset } from "@/characters/state";
+import { syncPanelScene } from "./sceneOps";
 import type {
   AssetInstance,
   BubbleType,
@@ -62,8 +64,10 @@ export function placeAsset(
     opacity: 1,
     flipX: false,
     cropMode,
+    characterState: stateFromAsset(asset) ?? undefined,
   };
   insertItem(next, item);
+  syncPanelScene(next, panelId);
   touch(next);
   return { doc: next, itemId: item.id };
 }
@@ -99,6 +103,7 @@ export function addBubble(
     tail: bubbleType === "narration" ? undefined : { x: cx, y: cy + height },
   };
   insertItem(next, item);
+  syncPanelScene(next, panelId);
   touch(next);
   return { doc: next, itemId: item.id };
 }
@@ -187,13 +192,13 @@ export function swapInstanceAsset(doc: ProjectDocument, itemId: ID, newSourceAss
   if (!asset) throw new Error(`Unknown asset: ${newSourceAssetId}`);
 
   item.sourceAssetId = newSourceAssetId;
-  const panelRect = panelPxRect(next, item.panelId);
-  const transform = cropModeTransform(item.cropMode, asset, panelRect.width, panelRect.height);
-  if (transform) {
-    Object.assign(item, transform);
-  } else {
-    item.width = item.height * (asset.width / asset.height);
-  }
+  const nextState = stateFromAsset(asset);
+  if (nextState) item.characterState = nextState;
+  else delete item.characterState;
+  syncPanelScene(next, item.panelId);
+  // Semantic changes replace only the visual source. Composition belongs to
+  // the instance and stays untouched: panel, center, size, crop, rotation,
+  // flip, opacity, and z-order all survive the swap.
   touch(next);
   return next;
 }
@@ -234,6 +239,7 @@ export function removeItem(doc: ProjectDocument, itemId: ID): ProjectDocument {
   delete next.items[itemId];
   const panel = next.panels[item.panelId];
   if (panel) panel.itemIds = panel.itemIds.filter((id) => id !== itemId);
+  if (panel) syncPanelScene(next, item.panelId);
   touch(next);
   return next;
 }

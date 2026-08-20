@@ -42,14 +42,14 @@ const characterCreation: MangaSkill = {
 
 1. A character needs a reference asset before pose/expression variations:
    create_character, then generate_character_asset kind:"reference".
-2. Reference prompts should describe: age range, hair, eyes, outfit, build,
-   and personality hints. Keep the art style consistent with a black-and-white
-   manga look.
+2. Character identity should describe age range, hair, eyes, outfit, build,
+   and personality hints. Never mix rendering style into identity: the active
+   project Art Style is injected automatically into every visual generation.
 3. When the user asks for several expressions or poses, generate each as its
    own asset (one generate_character_asset step per slot) so each becomes an
    independently reusable library asset.
 4. Use short, canonical slot names: pose "running", "sitting", "standing";
-   expression "happy", "crying", "angry", "shocked". These names are how
+   expression "smile", "crying", "angry", "shocked". These names are how
    assets are found later.
 5. Do not generate more than the user asked for.
 `.trim(),

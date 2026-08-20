@@ -6,6 +6,7 @@
  */
 
 import type { GeneratedAssetType } from "./types";
+import type { StyleProfile } from "@/domain/types";
 
 export interface AssetPromptInput {
   assetType: GeneratedAssetType;
@@ -20,20 +21,22 @@ export interface AssetPromptInput {
   /** True when a character reference image accompanies the request. */
   hasReference?: boolean;
   aspect?: "portrait" | "landscape" | "square";
+  /** Provider-neutral project art direction. */
+  style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
 }
 
-const MANGA_STYLE = "black-and-white manga line art style, clean ink lines, screentone shading";
+const LEGACY_STYLE = "black-and-white manga line art style, clean ink lines, screentone shading";
 
 export function buildAssetPrompt(input: AssetPromptInput): string {
   const lines: string[] = [];
   switch (input.assetType) {
     case "character":
       lines.push(
-        `Full-body manga character design${input.characterName ? ` of ${input.characterName}` : ""}.`,
+        `Full-body sequential-art character design${input.characterName ? ` of ${input.characterName}` : ""}.`,
         input.characterDescription ?? "",
         input.description ?? "",
         "Standing neutral pose, front view, whole body visible head to feet.",
-        "Isolated single character on a plain white background, no scenery, no text, no speech bubbles.",
+        characterIsolationInstruction(),
       );
       break;
     case "character-pose":
@@ -45,7 +48,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
       lines.push(
         input.hasReference
           ? `Redraw the exact same manga character from the reference image with a new ${slot}.`
-          : `Full-body manga character${input.characterName ? ` ${input.characterName}` : ""}${
+          : `Full-body sequential-art character${input.characterName ? ` ${input.characterName}` : ""}${
               input.characterDescription ? ` (${input.characterDescription})` : ""
             } with ${slot}.`,
         input.hasReference
@@ -54,25 +57,63 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.outfit ? `Outfit: ${input.outfit}.` : "",
         input.view ? `Camera angle: ${input.view}.` : "",
         input.description ?? "",
-        "Whole body visible, isolated single character on a plain white background, no scenery, no text.",
+        `Whole body visible head to feet. ${characterIsolationInstruction()}`,
       );
       break;
     }
     case "background":
       lines.push(
-        `Manga background scene: ${input.description ?? "a scene"}.`,
+        `Sequential-art background scene: ${input.description ?? "a scene"}.`,
         "Detailed environment, no people, no characters, no text.",
       );
       break;
     case "prop":
       lines.push(
-        `Manga prop illustration: ${input.description ?? "an object"}.`,
-        "Single isolated object on a plain white background, no scenery, no text.",
+        `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
+        "Single isolated object with a full visible silhouette and clean separation from the background. Prefer real alpha transparency. No scenery, floor texture, frame, text, or fake checkerboard.",
       );
       break;
   }
-  lines.push(MANGA_STYLE, aspectHint(input.aspect ?? defaultAspect(input.assetType)));
+  lines.push(styleInstruction(input.style), aspectHint(input.aspect ?? defaultAspect(input.assetType)));
   return lines.filter(Boolean).join(" ");
+}
+
+/** Complete prompt for one semantic character render, always identity anchored. */
+export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetType">): string {
+  return [
+    input.hasReference
+      ? `Redraw the exact same manga character from the canonical identity reference: ${input.characterName ?? "character"}.`
+      : `Full-body sequential-art character${input.characterName ? ` ${input.characterName}` : ""}.`,
+    input.characterDescription ?? "",
+    `Pose: ${input.pose ?? "standing"}.`,
+    `Expression: ${input.expression ?? "neutral"}.`,
+    `Outfit: ${input.outfit ?? "default outfit"}.`,
+    `View: ${input.view ?? "front"}.`,
+    input.hasReference
+      ? "Preserve identity exactly: same face, facial structure, hairstyle, body proportions, and line-art style. Follow the requested outfit while keeping the character recognizable. Do not redesign the character."
+      : "Keep the design distinctive and internally consistent.",
+    input.description ?? "",
+    `Whole body visible head to feet. ${characterIsolationInstruction()}`,
+    styleInstruction(input.style),
+    aspectHint(input.aspect ?? "portrait"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function styleInstruction(style: AssetPromptInput["style"]): string {
+  if (!style) return LEGACY_STYLE;
+  const properties = style.visualProperties
+    ? Object.entries(style.visualProperties)
+        .filter((entry): entry is [string, string] => Boolean(entry[1]))
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(", ")
+    : "";
+  return `Project art style — ${style.name}: ${style.positivePrompt}.${properties ? ` Visual properties: ${properties}.` : ""} Keep this visual language consistent across the project.`;
+}
+
+function characterIsolationInstruction(): string {
+  return "Isolated single character with a full visible silhouette and clean separation from the background. Prefer a real transparent alpha background. No scenery, environmental background, floor texture, frame, text, speech bubbles, or fake checkerboard.";
 }
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {

@@ -42,8 +42,25 @@ const CRY_PLAN = {
   steps: [{ tool: "set_character_slot", args: { expression: "crying" } }],
 };
 
+const SMILE_PANEL_2_PLAN = {
+  summary: "Compose Mio smiling in the selected Panel 2.",
+  steps: [
+    {
+      tool: "compose_character",
+      args: {
+        panel: 2,
+        characterName: "Mio",
+        expression: "smiling",
+        framing: "close-up",
+        generateIfMissing: true,
+      },
+    },
+  ],
+};
+
 function planFor(body) {
   const userText = body?.messages?.find((m) => m.role === "user")?.content ?? "";
+  if (/besty|smile face|smell face/i.test(userText)) return SMILE_PANEL_2_PLAN;
   return /cry/i.test(userText) ? CRY_PLAN : SCENE_PLAN;
 }
 
@@ -107,8 +124,20 @@ const server = http.createServer((req, res) => {
       try {
         parsed = JSON.parse(body);
       } catch {}
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(planFor(parsed)) } }] }));
+      const plan = JSON.stringify(planFor(parsed));
+      if (parsed?.stream) {
+        const split = Math.max(1, Math.floor(plan.length / 2));
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "brief hidden reasoning" } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: plan.slice(0, split) } }] })}\n\n`);
+        setTimeout(() => {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: plan.slice(split) }, finish_reason: "stop" }] })}\n\n`);
+          res.end("data: [DONE]\n\n");
+        }, 40);
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ choices: [{ message: { content: plan }, finish_reason: "stop" }] }));
+      }
     } else if (req.url?.includes(":generateContent")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
