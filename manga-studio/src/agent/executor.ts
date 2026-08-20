@@ -10,7 +10,8 @@
 
 import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
-import { findSlotAsset } from "@/characters/slotSwitch";
+import { DEFAULT_CHARACTER_STATE, stateFromInstance } from "@/characters/state";
+import { applyCharacterStateToInstance, generateCharacterAssetForState } from "@/characters/stateRuntime";
 import { addCharacter } from "@/domain/libraryOps";
 import {
   addBubble,
@@ -18,7 +19,6 @@ import {
   placeAsset,
   removeItem,
   setCropMode,
-  swapInstanceAsset,
   updateItemProps,
 } from "@/domain/itemOps";
 import { setPageLayout } from "@/domain/pageOps";
@@ -28,7 +28,6 @@ import { panelPxRect } from "@/domain/docHelpers";
 import type {
   AssetInstance,
   BubbleType,
-  Character,
   CropMode,
   EffectKind,
   ID,
@@ -51,10 +50,6 @@ export interface StepProgress {
 export interface ExecutionSummary {
   completed: number;
   failed: number;
-}
-
-interface ProviderCaps {
-  referenceImage: boolean;
 }
 
 export function describeStep(step: AgentPlan["steps"][number]): string {
@@ -98,7 +93,6 @@ export async function executePlan(
   onProgress: (index: number, status: StepStatus, detail?: string) => void,
 ): Promise<ExecutionSummary> {
   const store = useEditorStore.getState();
-  const caps = await fetchProviderCaps();
   let completed = 0;
   let failed = 0;
 
@@ -107,7 +101,7 @@ export async function executePlan(
     for (let i = 0; i < plan.steps.length; i++) {
       onProgress(i, "running");
       try {
-        await executeStep(plan.steps[i], caps);
+        await executeStep(plan.steps[i]);
         completed += 1;
         onProgress(i, "done");
       } catch (error) {
@@ -121,24 +115,15 @@ export async function executePlan(
   return { completed, failed };
 }
 
-async function fetchProviderCaps(): Promise<ProviderCaps> {
-  try {
-    const status = await fetch("/api/provider/status").then((r) => r.json());
-    return { referenceImage: Boolean(status?.capabilities?.referenceImage) };
-  } catch {
-    return { referenceImage: false };
-  }
-}
-
 // ─── Step dispatch ──────────────────────────────────────────────────────────
 
-async function executeStep(step: AgentPlan["steps"][number], caps: ProviderCaps): Promise<void> {
+async function executeStep(step: AgentPlan["steps"][number]): Promise<void> {
   const args = step.args as never;
   switch (step.tool) {
     case "create_character":
       return doCreateCharacter(args);
     case "generate_character_asset":
-      return doGenerateCharacterAsset(args, caps);
+      return doGenerateCharacterAsset(args);
     case "generate_background":
       return doGenerateScenery(args, "background");
     case "generate_prop":
@@ -148,7 +133,7 @@ async function executeStep(step: AgentPlan["steps"][number], caps: ProviderCaps)
     case "place_asset":
       return doPlaceAsset(args);
     case "set_character_slot":
-      return doSetCharacterSlot(args, caps);
+      return doSetCharacterSlot(args);
     case "reshape_panel":
       return doReshapePanel(args);
     case "set_crop_mode":
@@ -185,58 +170,23 @@ function doCreateCharacter(args: { name: string; description?: string }): void {
 }
 
 async function doGenerateCharacterAsset(
-  args: { characterName: string; kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; instruction?: string },
-  caps: ProviderCaps,
+  args: { characterName: string; kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; outfit?: string; view?: string; instruction?: string },
 ): Promise<void> {
   const character = findCharacter(currentDoc(), args.characterName);
   if (!character) throw new Error(`Character "${args.characterName}" not found`);
-  const assetId = await generateCharacterSlotAsset(character, args, caps);
-  stageOnWorkspace(assetId);
-}
-
-/**
- * Generate one character slot asset and register it in the library.
- * Shared by explicit generation steps and set_character_slot's
- * generate-on-miss path — one implementation of the generation flow.
- */
-async function generateCharacterSlotAsset(
-  character: Character,
-  args: { kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; instruction?: string },
-  caps: ProviderCaps,
-): Promise<ID> {
-  const reference = character.referenceAssetId ? currentDoc().assets[character.referenceAssetId] : undefined;
-  const useReference = caps.referenceImage && Boolean(reference) && args.kind !== "reference";
-
-  const assetType = args.kind === "expression" ? "character-expression" : args.kind === "pose" ? "character-pose" : "character";
-  const prompt = buildAssetPrompt({
-    assetType,
-    characterName: character.name,
-    characterDescription: character.description,
-    pose: args.pose,
-    expression: args.expression,
-    description: args.instruction,
-    hasReference: useReference,
-  });
-
-  const result = await callGenerateApi({
-    assetType,
-    prompt,
-    size: defaultAspect(assetType),
-    referenceUrls: useReference && reference ? [reference.storageUrl] : undefined,
-  });
-  return storeGeneratedAsset({
-    result,
-    assetType,
-    category: "character",
-    name: `${character.name} ${args.pose ?? args.expression ?? "reference"}`.trim(),
-    prompt,
-    metadata: {
+  const assetId = await generateCharacterAssetForState({
+    characterId: character.id,
+    role: args.kind === "reference" ? "canonical" : "state",
+    instruction: args.instruction,
+    state: {
       characterId: character.id,
-      pose: args.pose,
-      expression: args.expression,
-      referenceAssetIds: useReference && reference ? [reference.id] : undefined,
+      pose: args.pose?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.pose,
+      expression: args.expression?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.expression,
+      outfit: args.outfit?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.outfit,
+      view: args.view?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.view,
     },
   });
+  stageOnWorkspace(assetId);
 }
 
 async function doGenerateScenery(
@@ -285,6 +235,8 @@ function doPlaceAsset(args: {
   characterName?: string;
   pose?: string;
   expression?: string;
+  outfit?: string;
+  view?: string;
   assetName?: string;
   category?: "character" | "background" | "prop" | "upload";
   cropMode?: CropMode;
@@ -319,33 +271,19 @@ function doPlaceAsset(args: {
  * the composition stays put.
  */
 async function doSetCharacterSlot(
-  args: { panel?: number; characterName?: string; pose?: string; expression?: string; generateIfMissing?: boolean },
-  caps: ProviderCaps,
+  args: { panel?: number; characterName?: string; pose?: string; expression?: string; outfit?: string; view?: string; generateIfMissing?: boolean },
 ): Promise<void> {
-  if (!args.pose && !args.expression) throw new Error("set_character_slot needs a pose or an expression");
+  if (!args.pose && !args.expression && !args.outfit && !args.view) {
+    throw new Error("set_character_slot needs a pose, expression, outfit, or view");
+  }
   const doc = currentDoc();
   const instance = findTargetInstance(doc, args);
-  const asset = doc.assets[instance.sourceAssetId];
-  const characterId = asset?.metadata?.characterId;
-  const character = characterId ? doc.characters[characterId] : null;
-  if (!character) throw new Error("The targeted instance is not a character");
-
-  const current = { pose: asset?.metadata?.pose, expression: asset?.metadata?.expression };
-  const existing = findSlotAsset(doc, character, { pose: args.pose, expression: args.expression }, current);
-
-  let replacementId = existing?.id;
-  if (!replacementId) {
-    if (args.generateIfMissing === false) {
-      throw new Error(`${character.name} has no ${[args.pose, args.expression].filter(Boolean).join("/")} asset`);
-    }
-    replacementId = await generateCharacterSlotAsset(
-      character,
-      { kind: args.pose ? "pose" : "expression", pose: args.pose, expression: args.expression },
-      caps,
-    );
-  }
-  const swapId = replacementId;
-  useEditorStore.getState().commit((d) => swapInstanceAsset(d, instance.id, swapId));
+  if (!stateFromInstance(doc, instance)) throw new Error("The targeted instance is not a character");
+  await applyCharacterStateToInstance({
+    instanceId: instance.id,
+    patch: { pose: args.pose, expression: args.expression, outfit: args.outfit, view: args.view },
+    generateIfMissing: args.generateIfMissing,
+  });
 }
 
 /** Resolve which character instance a slot change targets: explicit panel/name, else the user's selection. */
@@ -391,11 +329,16 @@ function doReshapePanel(args: { panel: number; points: Point[] }): void {
 
 function resolveFromCharacter(
   doc: ProjectDocument,
-  args: { characterName?: string; pose?: string; expression?: string },
+  args: { characterName?: string; pose?: string; expression?: string; outfit?: string; view?: string },
 ) {
   const character = findCharacter(doc, args.characterName!);
   if (!character) throw new Error(`Character "${args.characterName}" not found`);
-  return resolveCharacterAsset(doc, character, { pose: args.pose, expression: args.expression });
+  return resolveCharacterAsset(doc, character, {
+    pose: args.pose,
+    expression: args.expression,
+    outfit: args.outfit,
+    view: args.view,
+  });
 }
 
 function doSetCropMode(args: {

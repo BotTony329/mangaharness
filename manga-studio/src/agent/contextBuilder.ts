@@ -4,6 +4,7 @@
  * depends on the model seeing what already exists), not a state dump.
  */
 
+import { stateFromAsset, stateFromInstance } from "@/characters/state";
 import type { ID, ProjectDocument } from "@/domain/types";
 
 export interface AgentContextInput {
@@ -22,11 +23,10 @@ export function buildAgentContext({ doc, currentPageId, selection }: AgentContex
   for (const character of characters) {
     const assets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean);
     const slots = assets.map((asset) => {
-      const meta = asset!.metadata;
-      const slot = [meta?.pose && `pose:${meta.pose}`, meta?.expression && `expression:${meta.expression}`]
-        .filter(Boolean)
-        .join(" ");
-      return slot || "reference";
+      const state = stateFromAsset(asset!, character.id);
+      return asset!.metadata?.characterAssetRole === "canonical" || !state
+        ? "canonical-reference"
+        : `pose:${state.pose} expression:${state.expression} outfit:${state.outfit} view:${state.view}`;
     });
     lines.push(
       `- ${character.name}${character.description ? ` — ${character.description.slice(0, 100)}` : ""}`,
@@ -102,9 +102,10 @@ function describeSelection(
       const asset = doc.assets[item.sourceAssetId];
       const characterId = asset?.metadata?.characterId;
       const character = characterId ? doc.characters[characterId] : null;
-      const slot = [asset?.metadata?.pose && `pose:${asset.metadata.pose}`, asset?.metadata?.expression && `expression:${asset.metadata.expression}`]
-        .filter(Boolean)
-        .join(" ");
+      const state = stateFromInstance(doc, item);
+      const slot = state
+        ? `pose:${state.pose} expression:${state.expression} outfit:${state.outfit} view:${state.view}`
+        : "";
       return character
         ? `character instance — ${character.name}${slot ? ` (${slot})` : ""} in Panel ${panel}`
         : `${asset?.category ?? "asset"} instance "${asset?.name}" in Panel ${panel}`;

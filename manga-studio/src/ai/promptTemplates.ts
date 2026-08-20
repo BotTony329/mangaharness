@@ -75,6 +75,29 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
   return lines.filter(Boolean).join(" ");
 }
 
+/** Complete prompt for one semantic character render, always identity anchored. */
+export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetType">): string {
+  return [
+    input.hasReference
+      ? `Redraw the exact same manga character from the canonical identity reference: ${input.characterName ?? "character"}.`
+      : `Full-body manga character${input.characterName ? ` ${input.characterName}` : ""}.`,
+    input.characterDescription ?? "",
+    `Pose: ${input.pose ?? "standing"}.`,
+    `Expression: ${input.expression ?? "neutral"}.`,
+    `Outfit: ${input.outfit ?? "default outfit"}.`,
+    `View: ${input.view ?? "front"}.`,
+    input.hasReference
+      ? "Preserve identity exactly: same face, facial structure, hairstyle, body proportions, and line-art style. Follow the requested outfit while keeping the character recognizable. Do not redesign the character."
+      : "Keep the design distinctive and internally consistent.",
+    input.description ?? "",
+    "Whole body visible head to feet, isolated single character on a plain white background, no scenery, no text, no speech bubbles.",
+    MANGA_STYLE,
+    aspectHint(input.aspect ?? "portrait"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {
   if (assetType === "background") return "landscape";
   if (assetType === "prop") return "square";

@@ -25,6 +25,8 @@ export const toolSchemas = {
     kind: z.enum(["reference", "pose", "expression"]),
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
+    outfit: z.string().max(120).optional(),
+    view: z.string().max(80).optional(),
     instruction: z.string().max(500).optional(),
   }),
 
@@ -48,6 +50,8 @@ export const toolSchemas = {
     characterName: z.string().max(80).optional(),
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
+    outfit: z.string().max(120).optional(),
+    view: z.string().max(80).optional(),
     assetName: z.string().max(120).optional().describe("For backgrounds/props: name or description fragment"),
     category: z.enum(["character", "background", "prop", "upload"]).optional(),
     cropMode: z.enum(cropModes).optional(),
@@ -59,6 +63,8 @@ export const toolSchemas = {
     characterName: z.string().max(80).optional(),
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
+    outfit: z.string().max(120).optional(),
+    view: z.string().max(80).optional(),
     /** Missing slots generate a new asset by default; set false to only reuse. */
     generateIfMissing: z.boolean().optional(),
   }),
@@ -162,12 +168,12 @@ export const TOOL_DOCS = `
 Available tools (call only these, with exactly these argument shapes):
 
 - create_character {name, description?} — add a new character to the library.
-- generate_character_asset {characterName, kind: "reference"|"pose"|"expression", pose?, expression?, instruction?} — AI-generate a reusable character asset. "reference" creates the identity image (required before poses/expressions if the character has no assets).
+- generate_character_asset {characterName, kind: "reference"|"pose"|"expression", pose?, expression?, outfit?, view?, instruction?} — AI-generate a reusable full-state character asset. "reference" creates the canonical identity image.
 - generate_background {description, name?} — AI-generate a reusable background.
 - generate_prop {description, name?} — AI-generate a reusable prop.
 - set_page_layout {layout: "single"|"two-vertical"|"two-horizontal"|"three-vertical"|"four-grid"|"yonkoma"} — replace the current page's panel arrangement (existing content is preserved).
-- place_asset {panel?, target?, characterName?, pose?, expression?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead (reference sheets, comparisons).
-- set_character_slot {panel?, characterName?, pose?, expression?, generateIfMissing?} — change WHICH asset an already-placed character instance shows ("make her cry" → expression:"crying"). Targets the user's selected character when panel/characterName are omitted. Reuses a matching library asset when one exists; otherwise generates the missing slot and swaps it in. Composition (position, panel, size) is preserved — never re-place the character for this.
+- place_asset {panel?, target?, characterName?, pose?, expression?, outfit?, view?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead.
+- set_character_slot {panel?, characterName?, pose?, expression?, outfit?, view?, generateIfMissing?} — change the selected character's semantic state. Unspecified fields MUST remain unchanged ("make her cry" changes expression only; "run angrily" changes pose and expression). The shared resolver reuses an exact full-state cache hit or generates the missing combination, then swaps it without changing composition.
 - set_crop_mode {panel, characterName?, category?, mode: "fit"|"fill"|"upper-body"|"face"|"custom"} — reframe an already-placed instance. "upper-body" = medium shot, "fill" = full-bleed. Close-ups come from crop modes, never from regenerating.
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.
 - add_speech_bubble {panel, bubbleType: "speech"|"thought"|"shout"|"narration", text, position?} — add dialogue.

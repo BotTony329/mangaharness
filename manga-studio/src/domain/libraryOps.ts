@@ -36,8 +36,9 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
   const characterId = input.metadata?.characterId;
   if (characterId && next.characters[characterId]) {
     next.characters[characterId].assetIds.push(asset.id);
-    if (!next.characters[characterId].referenceAssetId) {
+    if (input.metadata?.characterAssetRole === "canonical" || !next.characters[characterId].referenceAssetId) {
       next.characters[characterId].referenceAssetId = asset.id;
+      next.characters[characterId].canonicalReferenceAssetId = asset.id;
     }
   }
   touch(next);
@@ -54,6 +55,9 @@ export function removeAsset(doc: ProjectDocument, assetId: ID): ProjectDocument 
   for (const character of Object.values(next.characters)) {
     character.assetIds = character.assetIds.filter((id) => id !== assetId);
     if (character.referenceAssetId === assetId) character.referenceAssetId = character.assetIds[0];
+    if (character.canonicalReferenceAssetId === assetId) {
+      character.canonicalReferenceAssetId = character.assetIds[0];
+    }
   }
   const orphaned = Object.values(next.items).filter(
     (item) => item.kind === "asset" && item.sourceAssetId === assetId,
@@ -102,6 +106,13 @@ export function setCharacterReference(doc: ProjectDocument, characterId: ID, ass
   if (!character) throw new Error(`Unknown character: ${characterId}`);
   if (!next.assets[assetId]) throw new Error(`Unknown asset: ${assetId}`);
   character.referenceAssetId = assetId;
+  character.canonicalReferenceAssetId = assetId;
+  next.assets[assetId].metadata = {
+    ...next.assets[assetId].metadata,
+    characterId,
+    characterAssetRole: "canonical",
+    canonicalReferenceAssetId: assetId,
+  };
   touch(next);
   return next;
 }

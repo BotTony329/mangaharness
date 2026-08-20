@@ -7,17 +7,25 @@
 
 import { supportsFaceFocus } from "@/domain/geometry";
 import {
+  availableCharacterStateValues,
+  stateFromInstance,
+  type CharacterStatePatch,
+} from "@/characters/state";
+import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
+import {
   duplicateItem,
   removeItem,
   reorderItem,
   setCropMode,
+  swapInstanceAsset,
   updateBubble,
   updateItemProps,
   updateItemTransform,
   type ReorderDirection,
 } from "@/domain/itemOps";
-import type { BubbleType, CropMode, PanelItem, SourceAsset } from "@/domain/types";
+import type { AssetInstance, BubbleType, CharacterState, CropMode, PanelItem, SourceAsset } from "@/domain/types";
 import { useEditorStore, type DocMutation } from "@/editor/store";
+import { useState } from "react";
 
 const CROP_MODES: { mode: CropMode; label: string }[] = [
   { mode: "fit", label: "Fit" },
@@ -63,6 +71,8 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
       </SectionTitle>
 
       {item.kind === "asset" && asset && (
+        <>
+          {asset.metadata?.characterId && <CharacterStateControls item={item} />}
         <div>
           <Label>Framing</Label>
           <div className="grid grid-cols-2 gap-1">
@@ -87,6 +97,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           </div>
           {item.cropMode === "custom" && <p className="mt-1 text-[10px] text-zinc-500">Custom framing (manually adjusted)</p>}
         </div>
+        </>
       )}
 
       {item.kind === "bubble" && (
@@ -202,6 +213,121 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
       </div>
     </div>
   );
+}
+
+function CharacterStateControls({ item }: { item: AssetInstance }) {
+  const doc = useEditorStore((state) => state.doc);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [review, setReview] = useState<{
+    previousAssetId: string;
+    previousState: CharacterState;
+    generatedState: CharacterState;
+  }>();
+  if (!doc) return null;
+  const current = stateFromInstance(doc, item);
+  const character = current ? doc.characters[current.characterId] : undefined;
+  if (!current || !character) return null;
+
+  const change = async (patch: CharacterStatePatch, forceRegenerate = false) => {
+    setBusy(true);
+    setError(undefined);
+    setStatus("Checking character library…");
+    try {
+      const result = await applyCharacterStateToInstance({
+        instanceId: item.id,
+        patch,
+        forceRegenerate,
+        onProgress: ({ stage, state }) => {
+          if (stage === "generating") setStatus(`Generating ${title(state.expression)} + ${title(state.pose)}…`);
+          if (stage === "saving") setStatus("Saving reusable character state…");
+          if (stage === "complete") setStatus(undefined);
+        },
+      });
+      if (result.source === "generated") {
+        setReview({
+          previousAssetId: result.previousAssetId,
+          previousState: result.previousState,
+          generatedState: result.state,
+        });
+      } else {
+        setReview(undefined);
+      }
+    } catch (caught) {
+      setStatus(undefined);
+      setError(caught instanceof Error ? caught.message : "Character generation failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const controls: { key: keyof CharacterStatePatch; label: string }[] = [
+    { key: "pose", label: "Pose" },
+    { key: "expression", label: "Expression" },
+    { key: "outfit", label: "Outfit" },
+    { key: "view", label: "View" },
+  ];
+
+  return (
+    <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-2.5">
+      <div className="mb-2 flex items-center justify-between">
+        <Label>Character state</Label>
+        <span className="text-[10px] text-indigo-300">{character.name}</span>
+      </div>
+      <div className="space-y-2">
+        {controls.map(({ key, label }) => (
+          <div key={key}>
+            <label className="mb-1 block text-[10px] text-zinc-400">{label}</label>
+            <select
+              aria-label={label}
+              disabled={busy}
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 disabled:opacity-50"
+              value={current[key]}
+              onChange={(event) => void change({ [key]: event.target.value })}
+            >
+              {availableCharacterStateValues(doc, character, key).map((value) => (
+                <option key={value} value={value}>{title(value)}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
+      {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}
+      {review && (
+        <div className="mt-2 border-t border-zinc-700 pt-2">
+          <p className="mb-1.5 text-[10px] text-zinc-400">Review generated variation</p>
+          <div className="grid grid-cols-3 gap-1">
+            <button className="rounded bg-indigo-600 py-1 hover:bg-indigo-500" onClick={() => setReview(undefined)}>
+              Keep
+            </button>
+            <button
+              disabled={busy}
+              className="rounded border border-zinc-700 py-1 hover:bg-zinc-800 disabled:opacity-50"
+              onClick={() => void change(review.generatedState, true)}
+            >
+              Regenerate
+            </button>
+            <button
+              disabled={busy}
+              className="rounded border border-zinc-700 py-1 hover:bg-zinc-800 disabled:opacity-50"
+              onClick={() => {
+                useEditorStore.getState().commit((next) => swapInstanceAsset(next, item.id, review.previousAssetId));
+                setReview(undefined);
+              }}
+            >
+              Previous
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function title(value: string): string {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {

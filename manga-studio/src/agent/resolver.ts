@@ -6,7 +6,8 @@
  * a running-crying request rather than forcing a regeneration).
  */
 
-import type { AssetCategory, Character, ProjectDocument, SourceAsset } from "@/domain/types";
+import { DEFAULT_CHARACTER_STATE, findExactCharacterAsset } from "@/characters/state";
+import type { AssetCategory, Character, CharacterState, ProjectDocument, SourceAsset } from "@/domain/types";
 
 export function findCharacter(doc: ProjectDocument, name: string): Character | null {
   const wanted = name.trim().toLowerCase();
@@ -21,6 +22,8 @@ export function findCharacter(doc: ProjectDocument, name: string): Character | n
 export interface CharacterAssetQuery {
   pose?: string;
   expression?: string;
+  outfit?: string;
+  view?: string;
 }
 
 export function resolveCharacterAsset(
@@ -31,34 +34,23 @@ export function resolveCharacterAsset(
   const assets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean) as SourceAsset[];
   if (assets.length === 0) return null;
 
-  const scored = assets
-    .map((asset) => ({ asset, score: slotScore(asset, query) }))
-    .sort((a, b) => b.score - a.score);
-  if (scored[0].score > 0) return scored[0].asset;
+  if (query.pose || query.expression || query.outfit || query.view) {
+    const desired: CharacterState = {
+      characterId: character.id,
+      pose: query.pose?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.pose,
+      expression: query.expression?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.expression,
+      outfit: query.outfit?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.outfit,
+      view: query.view?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.view,
+    };
+    const exact = findExactCharacterAsset(doc, character, desired);
+    if (exact) return exact;
+    return null;
+  }
 
   // No slot matched — fall back to the identity reference, then anything.
-  const reference = character.referenceAssetId ? doc.assets[character.referenceAssetId] : undefined;
+  const referenceId = character.canonicalReferenceAssetId ?? character.referenceAssetId;
+  const reference = referenceId ? doc.assets[referenceId] : undefined;
   return reference ?? assets[assets.length - 1];
-}
-
-function slotScore(asset: SourceAsset, query: CharacterAssetQuery): number {
-  let score = 0;
-  // Expression outweighs pose: when only one can match, the emotional read
-  // of a panel depends on the face more than the body (crop can hide a pose,
-  // it can't change an expression).
-  score += fieldScore(asset.metadata?.pose, query.pose) * 2;
-  score += fieldScore(asset.metadata?.expression, query.expression) * 3;
-  return score;
-}
-
-function fieldScore(actual: string | undefined, wanted: string | undefined): number {
-  if (!wanted) return 0;
-  if (!actual) return 0;
-  const a = actual.toLowerCase();
-  const w = wanted.toLowerCase();
-  if (a === w) return 2;
-  if (a.includes(w) || w.includes(a)) return 1;
-  return 0;
 }
 
 export interface LibraryAssetQuery {

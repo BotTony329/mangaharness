@@ -49,6 +49,30 @@ describe("project serialization", () => {
     const doc = { ...buildRichDoc(), schemaVersion: 999 };
     expect(() => deserializeProject(JSON.stringify(doc))).toThrow(/newer app version/);
   });
+
+  it("normalizes v2 character assets and instances into complete v3 state", () => {
+    const legacy = buildRichDoc();
+    const character = Object.values(legacy.characters)[0];
+    const asset = Object.values(legacy.assets)[0];
+    const instance = Object.values(legacy.items).find((item) => item.kind === "asset")!;
+    legacy.schemaVersion = 2;
+    delete character.canonicalReferenceAssetId;
+    delete asset.metadata?.outfit;
+    delete asset.metadata?.view;
+    delete (instance as { characterState?: unknown }).characterState;
+
+    const migrated = deserializeProject(JSON.stringify(legacy));
+    const migratedInstance = migrated.items[instance.id];
+    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.characters[character.id].canonicalReferenceAssetId).toBe(character.referenceAssetId);
+    expect(migrated.assets[asset.id].metadata).toMatchObject({ outfit: "default outfit", view: "front" });
+    expect(migratedInstance.kind === "asset" && migratedInstance.characterState).toMatchObject({
+      pose: "standing",
+      expression: "neutral",
+      outfit: "default outfit",
+      view: "front",
+    });
+  });
 });
 
 describe("layout content preservation", () => {

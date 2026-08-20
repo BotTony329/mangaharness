@@ -24,7 +24,7 @@ function seedStore() {
     storageUrl: "https://example.com/run.png",
     width: 800,
     height: 1600,
-    metadata: { characterId: akari.characterId, pose: "running", expression: "happy" },
+    metadata: { characterId: akari.characterId, pose: "running", expression: "neutral", outfit: "default outfit", view: "front", characterAssetRole: "state" },
   });
   doc = asset.doc;
   const crying = addAsset(doc, {
@@ -33,7 +33,7 @@ function seedStore() {
     storageUrl: "https://example.com/cry.png",
     width: 800,
     height: 1600,
-    metadata: { characterId: akari.characterId, pose: "standing", expression: "crying" },
+    metadata: { characterId: akari.characterId, pose: "running", expression: "crying", outfit: "default outfit", view: "front", characterAssetRole: "state" },
   });
   doc = crying.doc;
   seedIds.crying = crying.assetId;
@@ -110,7 +110,7 @@ describe("executePlan", () => {
   });
 
   it("set_character_slot reuses an existing slot asset on the SELECTED instance (no generation)", async () => {
-    // Place Akari (running/happy) in panel 1 and select her.
+    // Place Akari (running/neutral) in panel 1 and select her.
     const place = validatePlan({
       summary: "place",
       steps: [{ tool: "place_asset", args: { panel: 1, characterName: "Akari", pose: "running" } }],
@@ -132,6 +132,7 @@ describe("executePlan", () => {
 
     const after = useEditorStore.getState().doc!.items[instanceId] as AssetInstance;
     expect(after.sourceAssetId).toBe(seedIds.crying);
+    expect(after.characterState).toMatchObject({ pose: "running", expression: "crying" });
     // Composition preserved: same panel, same slot in the stack.
     expect(after.panelId).toBe(before.panelId);
     // Reuse, not regeneration: no generation history entries were added.

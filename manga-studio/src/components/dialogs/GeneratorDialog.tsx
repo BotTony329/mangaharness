@@ -15,6 +15,7 @@ import {
   type GenerateApiResult,
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
+import { DEFAULT_CHARACTER_STATE, characterReferenceId } from "@/characters/state";
 import { swapInstanceAsset } from "@/domain/itemOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -60,7 +61,8 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   }, []);
 
   const character = request.characterId && doc ? doc.characters[request.characterId] : undefined;
-  const referenceAsset = character?.referenceAssetId && doc ? doc.assets[character.referenceAssetId] : undefined;
+  const referenceId = character ? characterReferenceId(character) : undefined;
+  const referenceAsset = referenceId && doc ? doc.assets[referenceId] : undefined;
   const isCharacterType = request.assetType.startsWith("character");
   const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
 
@@ -113,8 +115,12 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
       prompt,
       metadata: {
         characterId: request.characterId,
-        pose: pose || undefined,
-        expression: expression || undefined,
+        pose: pose || DEFAULT_CHARACTER_STATE.pose,
+        expression: expression || DEFAULT_CHARACTER_STATE.expression,
+        outfit: DEFAULT_CHARACTER_STATE.outfit,
+        view: DEFAULT_CHARACTER_STATE.view,
+        characterAssetRole: request.assetType === "character" ? "canonical" : "state",
+        canonicalReferenceAssetId: request.assetType === "character" ? undefined : referenceId,
         referenceAssetIds: result.referenceUsed && referenceAsset ? [referenceAsset.id] : undefined,
       },
     });

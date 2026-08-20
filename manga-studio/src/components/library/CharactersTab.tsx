@@ -6,6 +6,13 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import {
+  DEFAULT_CHARACTER_STATE,
+  characterReferenceId,
+  findExactCharacterAsset,
+  stateFromAsset,
+} from "@/characters/state";
+import { generateCharacterAssetForState, starterPackStates } from "@/characters/stateRuntime";
 import { addCharacter, removeCharacter, setCharacterReference } from "@/domain/libraryOps";
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -45,23 +52,16 @@ export function CharactersTab() {
   );
 }
 
-/** Slot sections: how the browser groups a character's assets. */
-const SECTIONS = [
-  { key: "pose", label: "Poses", generator: "character-pose" as const },
-  { key: "expression", label: "Expressions", generator: "character-expression" as const },
-] as const;
-
 function CharacterCard({ character }: { character: Character }) {
   const doc = useEditorStore((s) => s.doc)!;
   const openGenerator = useUiStore((s) => s.openGenerator);
   const [open, setOpen] = useState(true);
 
   const assets = character.assetIds.map((id) => doc.assets[id]).filter(Boolean) as SourceAsset[];
-  const reference = character.referenceAssetId ? doc.assets[character.referenceAssetId] : undefined;
-  const bySection = (key: "pose" | "expression") => assets.filter((a) => a.metadata?.[key]);
-  const other = assets.filter(
-    (a) => !a.metadata?.pose && !a.metadata?.expression && a.id !== character.referenceAssetId,
-  );
+  const referenceId = characterReferenceId(character);
+  const reference = referenceId ? doc.assets[referenceId] : undefined;
+  const stateAssets = assets.filter((asset) => asset.metadata?.characterAssetRole !== "canonical");
+  const stateGroups = groupCharacterStates(stateAssets, character.id);
 
   return (
     <section className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
@@ -83,51 +83,44 @@ function CharacterCard({ character }: { character: Character }) {
               Generate character reference
             </button>
           )}
-          {SECTIONS.map(({ key, label, generator }) => (
-            <div key={key}>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
-              <div className="flex flex-wrap gap-2">
-                {groupVariations(bySection(key), key).map(({ slot, variants }) => (
-                  <AssetThumb
-                    key={variants[0].id}
-                    asset={variants[variants.length - 1]}
-                    subtitle={variants.length > 1 ? `${slot} · ${variants.length} variants` : slot}
-                  />
-                ))}
-                <button
-                  className="h-[104px] w-[104px] rounded-md border border-dashed border-zinc-700 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-300"
-                  onClick={() => openGenerator({ assetType: generator, characterId: character.id })}
-                >
-                  + Generate
-                </button>
-              </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Character states</p>
+            <div className="flex flex-wrap gap-2">
+              {stateGroups.map(({ label, variants }) => (
+                <AssetThumb
+                  key={label}
+                  asset={variants[variants.length - 1]}
+                  subtitle={variants.length > 1 ? `${label} · ${variants.length} variations` : label}
+                />
+              ))}
+              <button
+                className="h-[104px] w-[104px] rounded-md border border-dashed border-zinc-700 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-300"
+                onClick={() => openGenerator({ assetType: "character-pose", characterId: character.id })}
+              >
+                + Variation
+              </button>
             </div>
-          ))}
-          {other.length > 0 && (
-            <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Other</p>
-              <div className="flex flex-wrap gap-2">
-                {other.map((asset) => (
-                  <AssetThumb key={asset.id} asset={asset} />
-                ))}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </section>
   );
 }
 
-/** Regenerations of the same slot stack as variations instead of clutter. */
-function groupVariations(assets: SourceAsset[], key: "pose" | "expression") {
+/** Regenerations of one complete state stack instead of becoming duplicates. */
+function groupCharacterStates(assets: SourceAsset[], characterId: string) {
   const groups = new Map<string, SourceAsset[]>();
   for (const asset of assets) {
-    const slot = String(asset.metadata?.[key] ?? "unnamed");
-    groups.set(slot, [...(groups.get(slot) ?? []), asset]);
+    const state = stateFromAsset(asset, characterId);
+    if (!state) continue;
+    const label = [state.pose, state.expression, state.outfit, state.view].map(title).join(" · ");
+    groups.set(label, [...(groups.get(label) ?? []), asset]);
   }
-  return Array.from(groups.entries()).map(([slot, variants]) => ({ slot, variants }));
+  return Array.from(groups.entries()).map(([label, variants]) => ({ label, variants }));
 }
+
+type PackMode = "starter" | "reference";
+type PackItem = { label: string; status: "pending" | "running" | "done" | "failed"; error?: string };
 
 function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
@@ -135,12 +128,14 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [reference, setReference] = useState<ReferenceImageSelection | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [mode, setMode] = useState<PackMode>("starter");
+  const [packItems, setPackItems] = useState<PackItem[]>([]);
+  const cancelRequested = useRef(false);
   const [providerStatus, setProviderStatus] = useState<{
     configured: boolean;
     storage?: { configured?: boolean };
   } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const openGenerator = useUiStore((s) => s.openGenerator);
 
   useEffect(() => {
     fetch("/api/provider/status")
@@ -203,7 +198,11 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
       try {
         const assetId = await uploadImageFile(referenceFile, "character", {
           name: `${name} reference`,
-          metadata: { characterId },
+          metadata: {
+            characterId,
+            ...DEFAULT_CHARACTER_STATE,
+            characterAssetRole: "canonical",
+          },
         });
         useEditorStore.getState().commit((d) => setCharacterReference(d, characterId, assetId));
       } catch (e) {
@@ -213,8 +212,70 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         return;
       }
     }
-    onClose();
-    if (generateAfter) openGenerator({ assetType: "character", characterId });
+    if (!generateAfter) {
+      onClose();
+      return;
+    }
+
+    cancelRequested.current = false;
+    try {
+      await generatePack(characterId, mode, referenceFile !== undefined);
+      if (!cancelRequested.current) onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Starter pack generation failed");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const generatePack = async (characterId: string, selectedMode: PackMode, hasUploadedReference: boolean) => {
+    const character = useEditorStore.getState().doc?.characters[characterId];
+    if (!character) throw new Error("Character creation failed");
+    const states = selectedMode === "starter" ? starterPackStates(character) : [];
+    const initial: PackItem[] = [
+      { label: hasUploadedReference ? "Canonical reference (uploaded)" : "Canonical reference", status: hasUploadedReference ? "done" : "pending" },
+      ...states.map((state) => ({
+        label: `${title(state.pose)} · ${title(state.expression)}`,
+        status: "pending" as const,
+      })),
+    ];
+    setPackItems(initial);
+
+    const run = async (index: number, action: () => Promise<unknown>) => {
+      if (cancelRequested.current) return false;
+      setPackItems((items) => items.map((item, i) => i === index ? { ...item, status: "running" } : item));
+      try {
+        await action();
+        setPackItems((items) => items.map((item, i) => i === index ? { ...item, status: "done" } : item));
+        return true;
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Generation failed";
+        setPackItems((items) => items.map((item, i) => i === index ? { ...item, status: "failed", error: message } : item));
+        throw cause;
+      }
+    };
+
+    const offset = 1;
+    if (!hasUploadedReference) {
+      const canonicalState = { characterId, ...DEFAULT_CHARACTER_STATE };
+      const continued = await run(0, () => generateCharacterAssetForState({ characterId, state: canonicalState, role: "canonical" }));
+      if (!continued) return;
+    }
+    if (selectedMode === "reference") return;
+
+    for (let index = 0; index < states.length; index++) {
+      if (cancelRequested.current) return;
+      const state = states[index];
+      const latestDoc = useEditorStore.getState().doc;
+      const latestCharacter = latestDoc?.characters[characterId];
+      if (!latestDoc || !latestCharacter) throw new Error("Character no longer exists");
+      const cached = findExactCharacterAsset(latestDoc, latestCharacter, state);
+      if (cached) {
+        setPackItems((items) => items.map((item, i) => i === index + offset ? { ...item, status: "done" } : item));
+        continue;
+      }
+      await run(index + offset, () => generateCharacterAssetForState({ characterId, state, role: "state" }));
+    }
   };
 
   const generationUnavailable = providerStatus?.configured === false || providerStatus?.storage?.configured === false;
@@ -222,7 +283,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="w-[380px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
+        className="max-h-[92vh] w-[380px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">New Character</h2>
@@ -285,9 +346,40 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
           </button>
         )}
         {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+        <div className="mb-3 rounded-md border border-zinc-700 bg-zinc-950/60 p-2.5">
+          <p className="mb-2 text-xs font-medium text-zinc-300">Character generation</p>
+          <label className="mb-2 flex cursor-pointer gap-2 text-xs">
+            <input type="radio" checked={mode === "starter"} disabled={isBusy} onChange={() => setMode("starter")} />
+            <span><strong className="text-zinc-200">Starter Pack</strong><br /><span className="text-zinc-500">1 canonical reference + 4 poses + 4 expressions (9 images without an upload)</span></span>
+          </label>
+          <label className="flex cursor-pointer gap-2 text-xs">
+            <input type="radio" checked={mode === "reference"} disabled={isBusy} onChange={() => setMode("reference")} />
+            <span><strong className="text-zinc-200">Reference Only</strong><br /><span className="text-zinc-500">Create identity now and add states later</span></span>
+          </label>
+        </div>
+        {packItems.length > 0 && (
+          <div className="mb-3 max-h-44 space-y-1 overflow-y-auto rounded border border-zinc-700 p-2 text-[11px]">
+            {packItems.map((item, index) => (
+              <div key={`${item.label}-${index}`} className="flex items-start gap-2">
+                <span className={item.status === "failed" ? "text-red-400" : item.status === "done" ? "text-emerald-400" : item.status === "running" ? "text-indigo-300" : "text-zinc-600"}>
+                  {item.status === "done" ? "✓" : item.status === "failed" ? "!" : item.status === "running" ? "●" : "○"}
+                </span>
+                <span>{item.label}{item.error ? ` — ${item.error}` : ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex justify-end gap-2 text-xs">
-          <button disabled={isBusy} className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-40" onClick={onClose}>
-            Cancel
+          <button
+            className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200"
+            onClick={() => {
+              if (isBusy) {
+                cancelRequested.current = true;
+                setError("Remaining generations cancelled. Completed assets were kept.");
+              } else onClose();
+            }}
+          >
+            {isBusy ? "Cancel remaining" : "Cancel"}
           </button>
           <button
             className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 hover:bg-zinc-700"
@@ -316,11 +408,15 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
               disabled={isBusy || providerStatus === null}
               onClick={() => create(true)}
             >
-              Create &amp; Generate
+              Create {mode === "starter" ? "Starter Pack" : "Reference"}
             </button>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function title(value: string): string {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

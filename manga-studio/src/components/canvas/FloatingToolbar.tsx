@@ -9,15 +9,16 @@
 
 import { panelBoundsPx } from "@/domain/coords";
 import { supportsFaceFocus } from "@/domain/geometry";
-import { removeItem, setCropMode, swapInstanceAsset, updateItemProps } from "@/domain/itemOps";
+import { removeItem, setCropMode, updateItemProps } from "@/domain/itemOps";
 import { removeWorkspaceItem, updateWorkspaceItem } from "@/domain/workspaceOps";
 import type { AssetInstance, CropMode, ID, WorkspaceItem } from "@/domain/types";
-import { availableSlotValues, characterOfAsset, findSlotAsset } from "@/characters/slotSwitch";
+import { availableCharacterStateValues, stateFromInstance } from "@/characters/state";
+import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
+import { characterOfAsset } from "@/characters/slotSwitch";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import type { Viewport } from "./useViewport";
-
-const GENERATE = "__generate__";
+import { useState } from "react";
 
 interface FloatingToolbarProps {
   view: Viewport;
@@ -137,29 +138,18 @@ function InstanceControls({ item }: { item: AssetInstance }) {
  */
 function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | "expression" }) {
   const doc = useEditorStore((s) => s.doc)!;
-  const openGenerator = useUiStore((s) => s.openGenerator);
+  const [busy, setBusy] = useState(false);
   const asset = doc.assets[item.sourceAssetId];
   const character = characterOfAsset(doc, asset.id)!;
-  const current = asset.metadata?.[slotKey] ?? "";
-  const options = availableSlotValues(doc, character, slotKey);
+  const current = stateFromInstance(doc, item)?.[slotKey] ?? "";
+  const options = availableCharacterStateValues(doc, character, slotKey);
 
-  const onPick = (value: string) => {
-    if (value === GENERATE) {
-      openGenerator({
-        assetType: slotKey === "pose" ? "character-pose" : "character-expression",
-        characterId: character.id,
-        targetInstanceId: item.id,
-      });
-      return;
-    }
-    const match = findSlotAsset(
-      doc,
-      character,
-      { [slotKey]: value },
-      { pose: asset.metadata?.pose, expression: asset.metadata?.expression },
-    );
-    if (match) {
-      useEditorStore.getState().commit((d) => swapInstanceAsset(d, item.id, match.id));
+  const onPick = async (value: string) => {
+    setBusy(true);
+    try {
+      await applyCharacterStateToInstance({ instanceId: item.id, patch: { [slotKey]: value } });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -167,7 +157,8 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
     <select
       className="h-7 max-w-[110px] rounded border border-zinc-700 bg-zinc-800 px-1 text-[11px] text-zinc-200"
       value={options.includes(current) ? current : ""}
-      onChange={(e) => onPick(e.target.value)}
+      disabled={busy}
+      onChange={(e) => void onPick(e.target.value)}
       title={slotKey === "pose" ? "Pose" : "Expression"}
     >
       <option value="" disabled hidden>
@@ -178,7 +169,6 @@ function SlotSelect({ item, slotKey }: { item: AssetInstance; slotKey: "pose" | 
           {option}
         </option>
       ))}
-      <option value={GENERATE}>✨ Generate…</option>
     </select>
   );
 }

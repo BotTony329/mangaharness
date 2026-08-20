@@ -130,17 +130,17 @@ describe("asset resolver", () => {
     expect(resolveCharacterAsset(doc, character, { expression: "crying" })?.id).toBe(crying);
   });
 
-  it("falls back to a compatible asset instead of failing (reuse over regeneration)", () => {
-    const { doc, crying } = libraryDoc();
+  it("does not mislabel a compatible asset as an exact full-state match", () => {
+    const { doc } = libraryDoc();
     const character = findCharacter(doc, "Akari")!;
-    // "crying + running" doesn't exist; the crying-standing asset is compatible.
-    expect(resolveCharacterAsset(doc, character, { pose: "running", expression: "crying" })?.id).toBe(crying);
+    // A missing combination must generate instead of silently resetting pose.
+    expect(resolveCharacterAsset(doc, character, { pose: "running", expression: "crying" })).toBeNull();
   });
 
-  it("falls back to the reference for unknown slots", () => {
-    const { doc, reference } = libraryDoc();
+  it("returns no match for unknown slots so the state resolver can generate them", () => {
+    const { doc } = libraryDoc();
     const character = findCharacter(doc, "Akari")!;
-    expect(resolveCharacterAsset(doc, character, { pose: "backflip" })?.id).toBe(reference);
+    expect(resolveCharacterAsset(doc, character, { pose: "backflip" })).toBeNull();
   });
 
   it("resolves backgrounds by name fragment and category", () => {

@@ -47,6 +47,51 @@ const MIGRATIONS: Record<number, Migration> = {
     doc.workspaceOrder ??= [];
     return { ...doc, schemaVersion: 2 };
   },
+  // v2 → v3: character assets and placed instances gain complete semantic
+  // state. Missing legacy fields receive explicit, predictable defaults.
+  2: (doc) => {
+    const characters = (doc.characters ?? {}) as Record<
+      string,
+      { referenceAssetId?: string; canonicalReferenceAssetId?: string; assetIds?: string[] }
+    >;
+    const assets = (doc.assets ?? {}) as Record<
+      string,
+      { id?: string; metadata?: Record<string, unknown> }
+    >;
+    for (const character of Object.values(characters)) {
+      character.canonicalReferenceAssetId ??= character.referenceAssetId;
+      for (const assetId of character.assetIds ?? []) {
+        const asset = assets[assetId];
+        if (!asset?.metadata) continue;
+        asset.metadata.pose ??= "standing";
+        asset.metadata.expression ??= "neutral";
+        asset.metadata.outfit ??= "default outfit";
+        asset.metadata.view ??= "front";
+        asset.metadata.characterAssetRole ??=
+          assetId === character.canonicalReferenceAssetId ? "canonical" : "state";
+        asset.metadata.canonicalReferenceAssetId ??= character.canonicalReferenceAssetId;
+      }
+    }
+    const items = (doc.items ?? {}) as Record<
+      string,
+      { kind?: string; sourceAssetId?: string; characterState?: unknown }
+    >;
+    for (const item of Object.values(items)) {
+      if (item.kind !== "asset" || item.characterState || !item.sourceAssetId) continue;
+      const asset = assets[item.sourceAssetId];
+      const metadata = asset?.metadata;
+      if (!metadata?.characterId) continue;
+      item.characterState = {
+        characterId: metadata.characterId,
+        pose: metadata.pose ?? "standing",
+        expression: metadata.expression ?? "neutral",
+        outfit: metadata.outfit ?? "default outfit",
+        view: metadata.view ?? "front",
+        assetId: item.sourceAssetId,
+      };
+    }
+    return { ...doc, schemaVersion: 3 };
+  },
 };
 
 function migrate(input: unknown): ProjectDocument {

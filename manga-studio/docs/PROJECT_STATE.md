@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-20 (MVP integration and UX stabilization pass)
+Last updated: 2026-08-20 (virtual character rig and starter asset pack)
 
 ## Current status
 
@@ -13,6 +13,9 @@ Last updated: 2026-08-20 (MVP integration and UX stabilization pass)
 | Production asset storage | CONFIGURED | Public Vercel Blob store `manga-studio-assets` is connected to the existing `personal-b90d/mangaharness` project in `iad1`; the Blob credential is injected into Development, Preview, and Production. |
 | Character upload UX | WORKING LOCALLY | Browser verification confirmed the native input is hidden; click-to-browse shows a real PNG preview and dimensions; Replace/Remove render; Remove restores the drop zone; provider absence shows `Connect Image Model`; no console error or Next.js overlay was present. Drag/drop uses the same selection path. |
 | Provider diagnostics | WORKING LOCALLY | Safe structured logs cover request parsing, validation, credential lookup/decryption, provider routing, adapter creation, normalized request construction, outbound start/response status, parsing, and persistence. The UI can show safe provider/model/HTTP/stage/request-ID details. |
+| Virtual character state | WORKING LOCALLY | Placed characters carry independent pose, expression, outfit, and view fields. The shared resolver reuses only exact full-state matches, uses a compatible render as optional generation guidance, generates missing combinations against the canonical identity reference, and swaps the source without changing composition. |
+| Character starter pack | WORKING LOCALLY | New characters default to Starter Pack (1 canonical reference, 4 neutral-expression poses, 4 additional expressions = 9 generations without an uploaded reference) with Reference Only, itemized progress, cache skipping, and cancel-remaining behavior. Completed assets are retained. |
+| Agent character editing | WORKING LOCALLY | `set_character_slot` uses the same resolver as the Inspector and preserves all unspecified state fields. Pose, expression, outfit, and view are supported. |
 
 ## Root cause record
 
@@ -31,14 +34,15 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Gemini character consistency remains provider-dependent. Flash Lite accepts image input but is not optimized for multiple reference inputs; Manga Studio currently sends at most three storage references.
 - The generator uses the `generateContent` adapter surface. Google currently promotes the newer Interactions API for image workflows, but the existing surface is retained until production evidence requires a migration.
 - Production Character creation, refresh persistence, and derived pose/expression generation must be recorded here only after the new deployment is exercised with the user’s BYOK session.
+- Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 17 files, 129 tests passed.
+- Tests: 18 files, 131 tests passed, including Yuri walking/neutral → walking/angry → running/angry → cached walking/angry reuse.
 - Production build: passed with Next.js 15.5.23.
-- Local browser: passed (page render, no error overlay/console errors, provider gate, reference preview/replace/remove).
+- Local browser: passed (meaningful page render, no error overlay/console errors, Starter Pack and Reference Only controls, 9-image estimate).
 - GitHub code commit: `2293d1a` on `agent/stabilize-generation-and-character-ux`.
 - Production deployment: READY, `dpl_6xzUenPNC6f8VkNY3un3eLPZLzwH` (`https://mangaharness.vercel.app`).
 - Production status: HTTP 200; `storage.configured: true`; backend `vercel-blob`; no new serverless errors in the post-deploy scan.

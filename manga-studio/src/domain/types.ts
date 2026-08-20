@@ -51,6 +51,10 @@ export interface AssetGenerationMetadata {
   expression?: string;
   outfit?: string;
   view?: string;
+  /** Canonical identity image that anchored this full-state render. */
+  canonicalReferenceAssetId?: ID;
+  /** Canonical images establish identity; state images are selectable renders. */
+  characterAssetRole?: "canonical" | "state";
   generatedAt?: ISODate;
 }
 
@@ -85,8 +89,20 @@ export interface Character {
   description?: string;
   /** Canonical identity reference sent with every generation for this character. */
   referenceAssetId?: ID;
+  /** Stable v3 name. referenceAssetId remains as a legacy compatibility alias. */
+  canonicalReferenceAssetId?: ID;
   assetIds: ID[];
   createdAt: ISODate;
+}
+
+/** The semantic state of one placed character. Every field is independent. */
+export interface CharacterState {
+  characterId: ID;
+  pose: string;
+  expression: string;
+  outfit: string;
+  view: string;
+  assetId?: ID;
 }
 
 // ─── Pages and panels ───────────────────────────────────────────────────────
@@ -167,6 +183,8 @@ export interface AssetInstance extends PanelItemBase {
   sourceAssetId: ID;
   flipX: boolean;
   cropMode: CropMode;
+  /** Present for character instances so state survives asset swaps and migration. */
+  characterState?: CharacterState;
 }
 
 export type BubbleType = "speech" | "thought" | "shout" | "narration";
@@ -262,4 +280,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
