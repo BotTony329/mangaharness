@@ -15,7 +15,7 @@ import {
   type CharacterStatePatch,
 } from "./state";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
-import { assetRenderUrl } from "@/assets/renderSource";
+import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 
 export type CharacterGenerationRole = "canonical" | "state";
 
@@ -49,7 +49,7 @@ export async function generateCharacterAssetForState(input: {
   const style = getStyleGenerationContext(doc);
   const canonicalId = characterReferenceId(character);
   const canonicalCandidate = canonicalId ? doc.assets[canonicalId] : undefined;
-  const canonical = canonicalCandidate?.status !== "archived" ? canonicalCandidate : undefined;
+  const canonical = isAssetReadyForComposition(canonicalCandidate) ? canonicalCandidate : undefined;
   const compatible = role === "state" ? findCompatibleCharacterAsset(doc, character, input.state) : undefined;
   const supportsReference = await providerSupportsReference();
   const useIdentityReference = role === "state" && Boolean(canonical) && supportsReference;

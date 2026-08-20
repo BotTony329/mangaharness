@@ -24,6 +24,7 @@ export interface NewAssetInput {
   hasAlpha?: boolean;
   backgroundRemoved?: boolean;
   processingStatus?: SourceAsset["processingStatus"];
+  processingReason?: string;
   metadata?: AssetGenerationMetadata;
   type?: SourceAsset["type"];
   provenance?: SourceAsset["provenance"];
@@ -33,7 +34,7 @@ export interface NewAssetInput {
 export function setAssetProcessedImage(
   doc: ProjectDocument,
   assetId: ID,
-  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus">,
+  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus" | "processingReason">,
 ): ProjectDocument {
   const next = cloneDoc(doc);
   const asset = next.assets[assetId];

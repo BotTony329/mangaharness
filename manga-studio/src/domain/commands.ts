@@ -34,7 +34,7 @@ export type SemanticFraming = "full-body" | "medium-full" | "medium" | "upper-bo
 export type DomainCommand =
   | { type: "create-character"; name: string; appearance?: string; personalityNotes?: string }
   | { type: "create-asset"; input: NewAssetInput; generation?: Omit<GenerationRecord, "id" | "createdAt" | "resultAssetId"> }
-  | { type: "set-asset-processed"; assetId: ID; update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus"> }
+  | { type: "set-asset-processed"; assetId: ID; update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus" | "processingReason"> }
   | { type: "set-character-reference"; characterId: ID; assetId: ID }
   | { type: "record-failed-generation"; record: Omit<GenerationRecord, "id" | "createdAt" | "resultAssetId"> }
   | { type: "delete-character"; characterId: ID; mode: DeleteCharacterMode }

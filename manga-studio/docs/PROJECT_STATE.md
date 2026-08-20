@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
+Last updated: 2026-08-21 (baked-checkerboard extraction and Character readiness)
 
 ## Current status
 
@@ -28,9 +28,10 @@ Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
 | Visual style selection | DEPLOYED | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
 | Style propagation | DEPLOYED | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
 | Character identity UX | DEPLOYED | Character creation separates Name, Appearance, and Personality / visual identity from Project Art Style. The progressive Asset Pack contains eight poses and eight expressions without a Cartesian-product explosion. |
-| Transparent character assets | DEPLOYED | Generated and uploaded characters, poses, expressions, and Asset Pack states pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque edge-connected backgrounds produce non-destructive transparent PNG derivatives. |
-| Background removal | DEPLOYED | The MVP processor estimates the dominant perimeter background, flood-fills only connected background pixels, feathers antialiased edges, rejects opaque checkerboards, and preserves enclosed white artwork. Character and prop thumbnails expose a manual Remove/Reprocess Background action. |
-| Canvas compositing | DEPLOYED | Library previews, generation references, loose objects, panel instances, ghosts, and export all use the processed derivative when present and fall back to the immutable source for legacy/failed assets. Background images remain rectangular. |
+| Transparent character assets | WORKING LOCALLY | Generated and uploaded characters, poses, expressions, Asset Pack states, and Agent-created Characters pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque sources create non-destructive transparent PNG derivatives. Deployment acceptance is pending below. |
+| Background removal | WORKING LOCALLY | The built-in Vercel-compatible provider handles solid edge-connected backgrounds and baked checkerboards with spatial segmentation. It preserves enclosed white/dark artwork, validates alpha and bounds, keeps the raw source on failure, and powers both automatic ingestion and manual Remove/Reprocess Background. |
+| Agent Character readiness | WORKING LOCALLY | Planner context, semantic resolution, slot switching, placement, and composition exclude raw/processing/failed Character derivatives. Generation stores a failed raw source for retry but fails the step; a following composition step reports that reprocessing is required. Activity exposes generation, removal, validation, and ready/composed phases. |
+| Canvas compositing | WORKING LOCALLY | Library previews, generation references, loose objects, panel instances, ghosts, and export share `assetRenderUrl`; only a `ready` derivative with validated alpha supersedes the immutable source. Background images remain rectangular. Deployment acceptance is pending below. |
 
 ## Root cause record
 
@@ -50,6 +51,15 @@ Agent planning failed: Timed out
 
 Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIMEOUT_MS = 90_000` timer for the user-configured Custom API call. The external POST began, but no response headers/body reached Manga Studio before that application timer aborted fetch. `CustomApiError("Timed out", 504)` escaped the adapter's conversion boundary and the route collapsed it to a generic 500. The route is Node with `maxDuration = 120`; Vercel did not terminate it at 90 seconds. There is no evidence that Qwen returned a response, so response parsing and post-processing did not begin.
 
+Production evidence for the observed Cute Girl checkerboard:
+
+```text
+[generate] provider_response_received 200
+[generate] asset_post_processing_complete status=failed hasAlpha=false backgroundRemoved=false
+```
+
+The exact failure was intentional in `src/assets/postProcessor.ts`: after `estimateEdgeBackground()` classified the opaque two-colour pattern, the old code immediately returned `failed("The image contains an opaque checkerboard, not real transparency")`. No extraction was attempted. Generation, Gemini response parsing, Sharp decoding, and source persistence were working. The manual route invoked that same detector-only path, so retrying could never repair the asset. The replacement routes the detected model through `BackgroundRemovalProvider`, validates the returned alpha matte, stores a separate PNG, and updates the same browser asset.
+
 ## Known limitations
 
 - Project documents are browser-local IndexedDB data; there is no authenticated cross-device project sync in the MVP.
@@ -60,7 +70,7 @@ Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIM
 - Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
 - Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
-- The bundled foreground extractor is optimized for plain or near-uniform edge-connected backgrounds. Complex scenery or an opaque fake checkerboard fails safely and preserves the source; the `AssetPostProcessor` boundary is ready for a future dedicated segmentation service.
+- The bundled extractor is deterministic rather than semantic ML. It handles plain edge-connected backgrounds and the observed isolated-subject checkerboard class, but complex scenery, multiple disconnected foreground subjects, low-contrast monochrome subjects, hair-level matte quality, and checkerboards visible through true interior holes can still require a future dedicated segmentation provider. Every uncertain result fails safely and preserves the source.
 - Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
 - Archived sources remain visible in panels that already use them, by design, but are excluded from new library/Agent/Character-state resolution until restored.
 - A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.
@@ -70,8 +80,10 @@ Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIM
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 30 files, 177 tests passed. New coverage includes provider timeout/cancellation, slow SSE, content JSON, tool-call-only/null-content responses, malformed/invalid/missing-action output, provider 429/500, Custom API timeout normalization, Qwen planning flags, and selected-Panel-2 scope rejection. Existing lifecycle, provider/security, compositing, scene, and command coverage remains intact.
+- Tests: 32 files, 188 tests passed. Transparency coverage includes real alpha, opaque/white sources, fake checkerboards, mixed white and dark artwork, thin line art, provider failure, fully transparent/opaque invalid output, processed URL preference, manual reprocessing, and Agent wait-for-ready behavior. Existing lifecycle, provider/security, compositing, scene, scope, and command coverage remains intact.
 - Production build: passed with Next.js 15.5.23.
+- Recovered-production-fixture verification: passed locally against the exact stored 848×1264 Cute Girl canonical and jumping JPEG sources. Both changed from opaque checkerboard sources to validated `ready` PNG derivatives with real alpha. A colored-background composite remained visible around hair, arms, legs, and body while interior black/white artwork remained opaque.
+- Checkerboard-removal deployment: pending push/deploy and live route/browser/export acceptance.
 - Local exact-prompt route acceptance: passed. With Panel 2 authoritative scope and `Suddenly, her besty's smile face jumped into the panel`, `/api/agent` returned HTTP 200; first streamed event was 16 ms after outbound start, provider completion was 57 ms, route work was 77 ms, finish reason was `stop`, and the only accepted action was `compose_character` for Mio smiling in Panel 2. No other-panel action was present.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - Local controlled-core browser acceptance: passed. The app loaded with meaningful editor controls and no framework/page errors; Character creation exposed the lifecycle controls; explicit Character deletion removed the entity; after autosave and a full reload it remained deleted. The Manga Agent rendered its authoritative scope control (`Auto · Current Page · Page 1`).

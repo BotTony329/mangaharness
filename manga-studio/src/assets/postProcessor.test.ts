@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
+import type { BackgroundRemovalProvider } from "./backgroundRemoval";
 import { processAssetImage } from "./postProcessor";
 
 describe("asset post processor", () => {
@@ -62,7 +63,86 @@ describe("asset post processor", () => {
     expect(result.hasAlpha).toBe(false);
     expect(result.reason).toContain("checkerboard");
   });
+
+  it("extracts a connected subject from a baked checkerboard and preserves internal black and white art", async () => {
+    const width = 80;
+    const pixels = checkerboard(width, 96);
+    paintRect(pixels, width, 20, 12, 40, 70, [245, 220, 205, 255]);
+    paintRect(pixels, width, 25, 30, 30, 40, [252, 252, 252, 255]);
+    paintRect(pixels, width, 28, 42, 24, 8, [15, 15, 20, 255]);
+    const source = await sharp(pixels, { raw: { width, height: 96, channels: 4 } }).jpeg({ quality: 90 }).toBuffer();
+
+    const result = await processAssetImage(source, "character");
+    expect(result).toMatchObject({ hasAlpha: true, backgroundRemoved: true, processingStatus: "ready" });
+    expect(result.processingMethod).toContain("checkerboard-matte");
+    const decoded = await sharp(result.processedData!).ensureAlpha().raw().toBuffer();
+    expect(alphaAt(decoded, width, 2, 2)).toBe(0);
+    expect(alphaAt(decoded, width, 30, 35)).toBe(255);
+    expect(alphaAt(decoded, width, 35, 45)).toBe(255);
+  });
+
+  it("keeps thin dark line art enclosing white artwork on a white background", async () => {
+    const width = 64;
+    const pixels = solid(width, 64, [255, 255, 255, 255]);
+    paintRect(pixels, width, 15, 10, 34, 2, [10, 10, 10, 255]);
+    paintRect(pixels, width, 15, 50, 34, 2, [10, 10, 10, 255]);
+    paintRect(pixels, width, 15, 10, 2, 42, [10, 10, 10, 255]);
+    paintRect(pixels, width, 47, 10, 2, 42, [10, 10, 10, 255]);
+    const source = await sharp(pixels, { raw: { width, height: 64, channels: 4 } }).png().toBuffer();
+
+    const result = await processAssetImage(source, "character");
+    expect(result.processingStatus).toBe("ready");
+    const decoded = await sharp(result.processedData!).ensureAlpha().raw().toBuffer();
+    expect(alphaAt(decoded, width, 0, 0)).toBe(0);
+    expect(alphaAt(decoded, width, 16, 10)).toBeGreaterThan(200);
+    expect(alphaAt(decoded, width, 30, 30)).toBe(255);
+  });
+
+  it("preserves the source when a removal provider throws", async () => {
+    const provider: BackgroundRemovalProvider = {
+      id: "throwing-test-provider",
+      async removeBackground() { throw new Error("provider unavailable"); },
+    };
+    const source = await opaqueSubject();
+    const result = await processAssetImage(source, "character", { backgroundRemovalProvider: provider });
+    expect(result).toMatchObject({ processingStatus: "failed", hasAlpha: false });
+    expect(result.processedData).toBeUndefined();
+    expect(result.reason).toContain("original source was preserved");
+  });
+
+  it.each([
+    ["fully transparent", 0, 64 * 64],
+    ["fully opaque", 255, 0],
+  ])("rejects a %s provider output", async (_label, alpha, removedPixels) => {
+    const provider: BackgroundRemovalProvider = {
+      id: "invalid-test-provider",
+      async removeBackground({ rgba }) {
+        const output = Buffer.from(rgba);
+        for (let index = 3; index < output.length; index += 4) output[index] = alpha;
+        return { rgba: output, method: "edge-flood", removedPixels };
+      },
+    };
+    const result = await processAssetImage(await opaqueSubject(), "character", { backgroundRemovalProvider: provider });
+    expect(result.processingStatus).toBe("failed");
+    expect(result.processedData).toBeUndefined();
+  });
 });
+
+function checkerboard(width: number, height: number): Buffer {
+  const pixels = solid(width, height, [42, 42, 42, 255]);
+  for (let y = 0; y < height; y += 8) {
+    for (let x = 0; x < width; x += 8) {
+      if ((x / 8 + y / 8) % 2 === 0) paintRect(pixels, width, x, y, 8, 8, [188, 188, 188, 255]);
+    }
+  }
+  return pixels;
+}
+
+async function opaqueSubject(): Promise<Buffer> {
+  const pixels = solid(64, 64, [255, 255, 255, 255]);
+  paintRect(pixels, 64, 16, 10, 32, 44, [25, 80, 160, 255]);
+  return sharp(pixels, { raw: { width: 64, height: 64, channels: 4 } }).png().toBuffer();
+}
 
 function solid(width: number, height: number, rgba: [number, number, number, number]): Buffer {
   const result = Buffer.alloc(width * height * 4);

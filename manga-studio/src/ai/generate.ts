@@ -32,6 +32,7 @@ export interface GenerateResult {
   hasAlpha: boolean;
   backgroundRemoved: boolean;
   processingStatus: "ready" | "failed";
+  processingReason?: string;
   provider: string;
   model: string;
   referenceUsed: boolean;
@@ -127,6 +128,7 @@ export async function generateAssetImage(
     hasAlpha: stored.hasAlpha,
     backgroundRemoved: stored.backgroundRemoved,
     processingStatus: stored.processingStatus,
+    processingReason: stored.processingReason,
     provider: provider.id,
     model: provider.model,
     referenceUsed: referenceImages.length > 0,

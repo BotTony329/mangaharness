@@ -25,6 +25,7 @@ Server (Next.js API routes)
 ├── /api/generate          → src/ai — provider registry, adapters, prompt templates
 ├── /api/agent             → src/agent — planner, skills, tool schemas
 ├── /api/assets/upload     → src/storage — validation + object storage
+├── /api/assets/remove-background → src/assets — inspect, extract, validate, persist derivative
 ├── /api/provider/status   → safe configuration status (no secrets)
 └── /api/files/[...path]   → dev-only local storage fallback
 
@@ -34,11 +35,28 @@ External
 └── DeepSeek (OpenAI-compatible) → agent planning
 ```
 
+## Character and prop processing
+
+Character and prop images are compositing layers, while backgrounds are rectangular scene surfaces. Generation and foreground extraction are separate capabilities:
+
+```text
+ImageGenerationProvider → immutable source image
+                        → AssetPostProcessor inspection
+                        → BackgroundRemovalProvider (when opaque)
+                        → alpha/bounds validation
+                        → transparent PNG derivative
+                        → SourceAsset ready for canvas/Agent composition
+```
+
+`src/assets/backgroundRemoval.ts` is the provider boundary. Its built-in Vercel-compatible implementation uses bounded pixel operations: an edge-connected flood for solid backgrounds and a connectivity-based matte for baked two-colour checkerboards. The checkerboard path identifies interior foreground evidence, closes narrow line-art gaps, fills enclosed artwork, and removes the spatially exterior pattern; it never deletes white, grey, or black colours globally. A hosted or ML segmentation adapter can replace it without changing generation providers, library ingestion, or canvas rendering.
+
+Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the original bytes; `processedImageUrl` identifies a separately stored PNG derivative. A character/prop with an explicit processing state is composable only when the state is `ready`, real alpha was validated, and a derivative URL exists. Failed sources stay in the library with a safe reason and can be retried through the same server pipeline. `assetRenderUrl` is the single thumbnail, reference, canvas, and export selection rule and only promotes a validated derivative.
+
 ## Module rules
 
 - `src/domain/commands.ts` is the canonical mutation facade. UI actions and Agent tools dispatch typed `DomainCommand` values; domain modules remain pure `doc → doc` transformations. Live canvas gestures use `transientDispatch`, which applies the same commands without adding history until the gesture ends.
 - `src/render` renders domain state; it never mutates it and never imports `src/export`.
-- `src/ai` (server) knows providers; the editor only sees `/api/generate` responses. Library ingestion of generation results happens client-side in `src/ai/clientGeneration.ts` (composition-root pattern) — providers never write to the library.
+- `src/ai` (server) knows generation providers; `src/assets` owns the independent post-processing/removal capability. The editor only sees normalized API responses. Library ingestion of generation results happens client-side in `src/ai/clientGeneration.ts` (composition-root pattern) — providers never write to the library.
 - `src/agent` validates every model-planned tool call against zod schemas before anything executes; execution happens client-side through the command layer inside one history transaction. The scope is checked both at plan validation and immediately before execution, then audited against the before/after documents.
 
 ## Core domain boundaries
@@ -62,4 +80,4 @@ Konva.js via react-konva. Rationale: per-group clipping (`clipX/Y/Width/Height`)
 
 ## Testing
 
-Vitest suites guard geometry, source-vs-instance invariants, lifecycle references, Character state merging and resolution, scene continuity, command behavior, scope enforcement/auditing, serialization migrations, and AI security. `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.
+Vitest suites guard geometry, source-vs-instance invariants, lifecycle references, Character state merging and resolution, scene continuity, command behavior, scope enforcement/auditing, serialization migrations, AI security, transparency inspection, solid/checkerboard extraction, invalid-alpha rejection, derivative preference, reprocessing, and Agent readiness. `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.

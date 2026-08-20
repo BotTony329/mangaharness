@@ -44,7 +44,7 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       <div className="h-[104px] w-[104px] overflow-hidden rounded-md border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={asset.processedImageUrl ?? asset.thumbnailUrl ?? assetRenderUrl(asset)}
+          src={asset.thumbnailUrl ?? assetRenderUrl(asset)}
           alt={asset.name}
           className="h-full w-full object-contain pointer-events-none"
           draggable={false}
@@ -70,7 +70,11 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
           {busy ? "Removing…" : asset.hasAlpha ? "Reprocess Background" : "Remove Background"}
         </button>
       )}
-      {asset.processingStatus === "failed" && <p className="mt-0.5 text-[9px] text-amber-400">Source preserved · retry available</p>}
+      {asset.processingStatus === "failed" && (
+        <p className="mt-0.5 text-[9px] text-amber-400" title={asset.processingReason}>
+          Background removal failed · source preserved
+        </p>
+      )}
       {error && <p className="mt-0.5 line-clamp-2 text-[9px] text-red-400" title={error}>{error}</p>}
       {onDelete && (
         <button

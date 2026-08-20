@@ -49,6 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       hasAlpha: stored.hasAlpha,
       backgroundRemoved: stored.backgroundRemoved,
       processingStatus: stored.processingStatus,
+      processingReason: stored.processingReason,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upload failed";

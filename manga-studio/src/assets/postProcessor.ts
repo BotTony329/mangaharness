@@ -8,6 +8,13 @@
 
 import sharp from "sharp";
 import type { AssetCategory } from "@/domain/types";
+import {
+  builtInBackgroundRemovalProvider,
+  colorDistance,
+  type BackgroundModel,
+  type BackgroundRemovalProvider,
+  type Rgb,
+} from "./backgroundRemoval";
 
 export interface AssetProcessingResult {
   sourceHasAlpha: boolean;
@@ -16,17 +23,20 @@ export interface AssetProcessingResult {
   processingStatus: "ready" | "failed";
   processedData?: Buffer;
   processedMimeType?: "image/png";
+  processingMethod?: string;
   reason?: string;
 }
 
 export interface AssetPostProcessor {
-  process(data: Buffer, category: AssetCategory, options?: { forceBackgroundRemoval?: boolean }): Promise<AssetProcessingResult>;
+  process(data: Buffer, category: AssetCategory, options?: AssetProcessingOptions): Promise<AssetProcessingResult>;
+}
+
+export interface AssetProcessingOptions {
+  forceBackgroundRemoval?: boolean;
+  backgroundRemovalProvider?: BackgroundRemovalProvider;
 }
 
 const MAX_DECODED_PIXELS = 25_000_000;
-const STRONG_BACKGROUND_DISTANCE = 32;
-const MAX_BACKGROUND_DISTANCE = 88;
-
 export const defaultAssetPostProcessor: AssetPostProcessor = {
   process: processAssetImage,
 };
@@ -34,7 +44,7 @@ export const defaultAssetPostProcessor: AssetPostProcessor = {
 export async function processAssetImage(
   data: Buffer,
   category: AssetCategory,
-  options: { forceBackgroundRemoval?: boolean } = {},
+  options: AssetProcessingOptions = {},
 ): Promise<AssetProcessingResult> {
   let decoded: { data: Buffer; info: sharp.OutputInfo };
   try {
@@ -71,19 +81,29 @@ export async function processAssetImage(
 
   const background = estimateEdgeBackground(decoded.data, width, height);
   if (!background) return failed("No stable edge-connected background was detected");
-  if (background.checkerboard) return failed("The image contains an opaque checkerboard, not real transparency");
-
-  const output = Buffer.from(decoded.data);
-  const visited = floodBackground(output, width, height, background.color);
-  const removedRatio = visited / (width * height);
+  let extraction;
+  try {
+    extraction = await (options.backgroundRemovalProvider ?? builtInBackgroundRemovalProvider).removeBackground({
+      rgba: decoded.data,
+      width,
+      height,
+      background,
+    });
+  } catch {
+    return failed("Foreground extraction failed; the original source was preserved");
+  }
+  const output = extraction.rgba;
+  const removedRatio = extraction.removedPixels / (width * height);
   if (removedRatio < 0.01 || removedRatio > 0.97) {
-    return failed("Foreground separation was not reliable enough to replace the source");
+    return failed(background.kind === "checkerboard"
+      ? "Opaque checkerboard detected, but no reliable foreground could be extracted"
+      : "Foreground separation was not reliable enough to replace the source");
   }
 
   try {
     const processedData = await sharp(output, { raw: { width, height, channels: 4 } }).png().toBuffer();
-    const processedAlpha = inspectUsefulAlpha(output, width, height);
-    if (!processedAlpha.useful) return failed("The processed image did not contain useful transparency");
+    const validation = validateProcessedAlpha(output, width, height);
+    if (!validation.valid) return failed(validation.reason);
     return {
       sourceHasAlpha: false,
       hasAlpha: true,
@@ -91,6 +111,7 @@ export async function processAssetImage(
       processingStatus: "ready",
       processedData,
       processedMimeType: "image/png",
+      processingMethod: `${(options.backgroundRemovalProvider ?? builtInBackgroundRemovalProvider).id}:${extraction.method}`,
     };
   } catch {
     return failed("The transparent derivative could not be encoded");
@@ -111,17 +132,12 @@ function inspectUsefulAlpha(data: Buffer, width: number, height: number): { usef
   return { useful: transparent >= minimum && opaque >= minimum };
 }
 
-interface EdgeBackground {
-  color: [number, number, number];
-  checkerboard: boolean;
-}
-
-function estimateEdgeBackground(data: Buffer, width: number, height: number): EdgeBackground | null {
-  const samples: [number, number, number][] = [];
-  const bins = new Map<string, { count: number; values: [number, number, number][] }>();
+function estimateEdgeBackground(data: Buffer, width: number, height: number): BackgroundModel | null {
+  const samples: Rgb[] = [];
+  const bins = new Map<string, { count: number; values: Rgb[] }>();
   const add = (x: number, y: number) => {
     const offset = (y * width + x) * 4;
-    const value: [number, number, number] = [data[offset], data[offset + 1], data[offset + 2]];
+    const value: Rgb = [data[offset], data[offset + 1], data[offset + 2]];
     samples.push(value);
     const key = `${value[0] >> 4}:${value[1] >> 4}:${value[2] >> 4}`;
     const bin = bins.get(key) ?? { count: 0, values: [] };
@@ -149,64 +165,52 @@ function estimateEdgeBackground(data: Buffer, width: number, height: number): Ed
       colorDistance(color, medianColor(second.values)) > 40 &&
       countEdgeTransitions(samples) > samples.length * 0.18,
   );
-  return { color, checkerboard: binaryEdge };
+  return binaryEdge && second
+    ? { kind: "checkerboard", colors: [color, medianColor(second.values)] }
+    : { kind: "solid", colors: [color] };
 }
 
-function floodBackground(data: Buffer, width: number, height: number, background: [number, number, number]): number {
-  const pixelCount = width * height;
-  const visited = new Uint8Array(pixelCount);
-  const queue = new Int32Array(pixelCount);
-  let head = 0;
-  let tail = 0;
-  const enqueue = (pixel: number) => {
-    if (visited[pixel]) return;
-    const offset = pixel * 4;
-    const distance = colorDistance([data[offset], data[offset + 1], data[offset + 2]], background);
-    if (distance > MAX_BACKGROUND_DISTANCE) return;
-    visited[pixel] = 1;
-    queue[tail++] = pixel;
-    const feather = Math.max(0, Math.min(1, (distance - STRONG_BACKGROUND_DISTANCE) / (MAX_BACKGROUND_DISTANCE - STRONG_BACKGROUND_DISTANCE)));
-    data[offset + 3] = Math.round(255 * feather);
-  };
-
-  for (let x = 0; x < width; x += 1) {
-    enqueue(x);
-    enqueue((height - 1) * width + x);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    enqueue(y * width);
-    enqueue(y * width + width - 1);
-  }
-  while (head < tail) {
-    const pixel = queue[head++];
-    const x = pixel % width;
-    const y = Math.floor(pixel / width);
-    if (x > 0) enqueue(pixel - 1);
-    if (x + 1 < width) enqueue(pixel + 1);
-    if (y > 0) enqueue(pixel - width);
-    if (y + 1 < height) enqueue(pixel + width);
-  }
-  return tail;
-}
-
-function medianColor(values: [number, number, number][]): [number, number, number] {
+function medianColor(values: Rgb[]): Rgb {
   const channel = (index: number) => values.map((value) => value[index]).sort((a, b) => a - b)[Math.floor(values.length / 2)];
   return [channel(0), channel(1), channel(2)];
 }
 
-function colorDistance(a: [number, number, number], b: [number, number, number]): number {
-  const red = a[0] - b[0];
-  const green = a[1] - b[1];
-  const blue = a[2] - b[2];
-  return Math.sqrt(red * red + green * green + blue * blue);
-}
-
-function countEdgeTransitions(samples: [number, number, number][]): number {
+function countEdgeTransitions(samples: Rgb[]): number {
   let transitions = 0;
   for (let index = 1; index < samples.length; index += 1) {
     if (colorDistance(samples[index - 1], samples[index]) > 32) transitions += 1;
   }
   return transitions;
+}
+
+function validateProcessedAlpha(data: Buffer, width: number, height: number): { valid: true } | { valid: false; reason: string } {
+  const pixels = width * height;
+  let transparent = 0;
+  let visible = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let pixel = 0; pixel < pixels; pixel += 1) {
+    const alpha = data[pixel * 4 + 3];
+    if (alpha < 16) transparent += 1;
+    if (alpha > 16) {
+      visible += 1;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (visible < Math.max(16, pixels * 0.005)) return { valid: false, reason: "Foreground extraction produced an empty result" };
+  if (transparent < Math.max(16, pixels * 0.01)) return { valid: false, reason: "Foreground extraction remained fully opaque" };
+  if (visible > pixels * 0.97) return { valid: false, reason: "Foreground extraction retained the full image background" };
+  const boxWidth = maxX - minX + 1;
+  const boxHeight = maxY - minY + 1;
+  if (boxWidth < 2 || boxHeight < 2) return { valid: false, reason: "Foreground bounding box was not usable" };
+  return { valid: true };
 }
 
 function failed(reason: string): AssetProcessingResult {

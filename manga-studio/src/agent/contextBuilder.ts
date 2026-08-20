@@ -5,6 +5,7 @@
  */
 
 import { stateFromAsset, stateFromInstance } from "@/characters/state";
+import { isAssetReadyForComposition } from "@/assets/renderSource";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
@@ -32,7 +33,7 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
   lines.push("", `CHARACTERS (${characters.length}):`);
   if (characters.length === 0) lines.push("- none yet");
   for (const character of characters) {
-    const assets = character.assetIds.map((id) => doc.assets[id]).filter((asset) => asset && asset.status !== "archived");
+    const assets = character.assetIds.map((id) => doc.assets[id]).filter(isAssetReadyForComposition);
     const slots = assets.map((asset) => {
       const state = stateFromAsset(asset!, character.id);
       return asset!.metadata?.characterAssetRole === "canonical" || !state
@@ -47,7 +48,7 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
 
   // ── Backgrounds and props ──
   for (const category of ["background", "prop"] as const) {
-    const assets = Object.values(doc.assets).filter((a) => a.category === category && a.status !== "archived");
+    const assets = Object.values(doc.assets).filter((a) => a.category === category && isAssetReadyForComposition(a));
     lines.push("", `${category.toUpperCase()}S (${assets.length}):`);
     lines.push(...(assets.length > 0 ? assets.map((a) => `- ${a.name}`) : ["- none yet"]));
   }

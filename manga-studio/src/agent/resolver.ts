@@ -7,6 +7,7 @@
  */
 
 import { DEFAULT_CHARACTER_STATE, stateFromAsset } from "@/characters/state";
+import { isAssetReadyForComposition } from "@/assets/renderSource";
 import type { AssetCategory, Character, CharacterState, ProjectDocument, SourceAsset } from "@/domain/types";
 
 export function findCharacter(doc: ProjectDocument, name: string): Character | null {
@@ -58,11 +59,11 @@ export function resolveCharacterAsset(
   // No slot matched — fall back to the identity reference, then anything.
   const referenceId = character.canonicalReferenceAssetId ?? character.referenceAssetId;
   const candidateReference = referenceId ? doc.assets[referenceId] : undefined;
-  const reference = candidateReference?.status !== "archived" ? candidateReference : undefined;
+  const reference = isAssetReadyForComposition(candidateReference) ? candidateReference : undefined;
   return reference ?? assets[assets.length - 1];
 }
 
-function characterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
+function linkedCharacterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
   const ids = new Set(character.assetIds);
   for (const asset of Object.values(doc.assets)) {
     if (asset.metadata?.characterId === character.id) ids.add(asset.id);
@@ -70,6 +71,24 @@ function characterAssets(doc: ProjectDocument, character: Character): SourceAsse
   return [...ids]
     .map((id) => doc.assets[id])
     .filter((asset): asset is SourceAsset => Boolean(asset) && asset.status !== "archived");
+}
+
+function characterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
+  return linkedCharacterAssets(doc, character).filter(isAssetReadyForComposition);
+}
+
+export function findUnreadyCharacterAsset(
+  doc: ProjectDocument,
+  character: Character,
+  desired: CharacterState,
+): SourceAsset | undefined {
+  return linkedCharacterAssets(doc, character)
+    .filter((asset) => !isAssetReadyForComposition(asset))
+    .find((asset) => {
+      const state = stateFromAsset(asset, character.id);
+      return Boolean(state && state.pose === desired.pose && state.expression === desired.expression &&
+        state.outfit === desired.outfit && state.view === desired.view);
+    });
 }
 
 export function requestedCharacterState(characterId: string, query: CharacterAssetQuery): CharacterState {
@@ -109,7 +128,7 @@ export interface LibraryAssetQuery {
 }
 
 export function resolveLibraryAsset(doc: ProjectDocument, query: LibraryAssetQuery): SourceAsset | null {
-  let candidates = Object.values(doc.assets).filter((asset) => asset.status !== "archived");
+  let candidates = Object.values(doc.assets).filter(isAssetReadyForComposition);
   if (query.category) candidates = candidates.filter((a) => a.category === query.category);
   if (candidates.length === 0) return null;
 

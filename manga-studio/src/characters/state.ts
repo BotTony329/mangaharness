@@ -7,6 +7,7 @@ import type {
   SourceAsset,
 } from "@/domain/types";
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
+import { isAssetReadyForComposition } from "@/assets/renderSource";
 
 export const DEFAULT_CHARACTER_STATE = {
   pose: "standing",
@@ -87,7 +88,7 @@ export function characterIdentityDescription(character: Character): string | und
 function selectableCharacterAssets(doc: ProjectDocument, character: Character): SourceAsset[] {
   return character.assetIds
     .map((id) => doc.assets[id])
-    .filter((asset): asset is SourceAsset => Boolean(asset) && asset.status !== "archived")
+    .filter((asset): asset is SourceAsset => Boolean(asset) && isAssetReadyForComposition(asset))
     .filter((asset) => asset.metadata?.characterAssetRole !== "canonical");
 }
 

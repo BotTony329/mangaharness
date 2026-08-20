@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SourceAsset } from "@/domain/types";
-import { assetRenderUrl } from "./renderSource";
+import { assetRenderUrl, isAssetReadyForComposition } from "./renderSource";
 
 const legacyAsset = {
   id: "asset-1",
@@ -23,8 +23,28 @@ describe("asset render source", () => {
   });
 
   it("makes canvas and export consumers prefer the transparent derivative", () => {
-    expect(assetRenderUrl({ ...legacyAsset, processedImageUrl: "https://example.com/yuri-alpha.png" })).toBe(
+    const ready = {
+      ...legacyAsset,
+      processedImageUrl: "https://example.com/yuri-alpha.png",
+      processingStatus: "ready" as const,
+      hasAlpha: true,
+    };
+    expect(assetRenderUrl(ready)).toBe(
       "https://example.com/yuri-alpha.png",
     );
+    expect(isAssetReadyForComposition(ready)).toBe(true);
+  });
+
+  it("never promotes raw, processing, or failed character derivatives to composition", () => {
+    for (const processingStatus of ["raw", "processing", "failed"] as const) {
+      const asset = {
+        ...legacyAsset,
+        processedImageUrl: "https://example.com/yuri-alpha.png",
+        processingStatus,
+        hasAlpha: processingStatus === "failed" ? false : undefined,
+      };
+      expect(assetRenderUrl(asset)).toBe(legacyAsset.storageUrl);
+      expect(isAssetReadyForComposition(asset)).toBe(false);
+    }
   });
 });
