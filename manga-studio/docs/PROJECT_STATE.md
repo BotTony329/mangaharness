@@ -13,9 +13,9 @@ Last updated: 2026-08-20 (virtual character rig and starter asset pack)
 | Production asset storage | CONFIGURED | Public Vercel Blob store `manga-studio-assets` is connected to the existing `personal-b90d/mangaharness` project in `iad1`; the Blob credential is injected into Development, Preview, and Production. |
 | Character upload UX | WORKING LOCALLY | Browser verification confirmed the native input is hidden; click-to-browse shows a real PNG preview and dimensions; Replace/Remove render; Remove restores the drop zone; provider absence shows `Connect Image Model`; no console error or Next.js overlay was present. Drag/drop uses the same selection path. |
 | Provider diagnostics | WORKING LOCALLY | Safe structured logs cover request parsing, validation, credential lookup/decryption, provider routing, adapter creation, normalized request construction, outbound start/response status, parsing, and persistence. The UI can show safe provider/model/HTTP/stage/request-ID details. |
-| Virtual character state | WORKING LOCALLY | Placed characters carry independent pose, expression, outfit, and view fields. The shared resolver reuses only exact full-state matches, uses a compatible render as optional generation guidance, generates missing combinations against the canonical identity reference, and swaps the source without changing composition. |
-| Character starter pack | WORKING LOCALLY | New characters default to Starter Pack (1 canonical reference, 4 neutral-expression poses, 4 additional expressions = 9 generations without an uploaded reference) with Reference Only, itemized progress, cache skipping, and cancel-remaining behavior. Completed assets are retained. |
-| Agent character editing | WORKING LOCALLY | `set_character_slot` uses the same resolver as the Inspector and preserves all unspecified state fields. Pose, expression, outfit, and view are supported. |
+| Virtual character state | DEPLOYED | Placed characters carry independent pose, expression, outfit, and view fields. The shared resolver reuses only exact full-state matches, uses a compatible render as optional generation guidance, generates missing combinations against the canonical identity reference, and swaps the source without changing composition. |
+| Character starter pack | DEPLOYED | New characters default to Starter Pack (1 canonical reference, 4 neutral-expression poses, 4 additional expressions = 9 generations without an uploaded reference) with Reference Only, itemized progress, cache skipping, and cancel-remaining behavior. Completed assets are retained. |
+| Agent character editing | DEPLOYED | `set_character_slot` uses the same resolver as the Inspector and preserves all unspecified state fields. Pose, expression, outfit, and view are supported. |
 
 ## Root cause record
 
@@ -43,8 +43,10 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Tests: 18 files, 131 tests passed, including Yuri walking/neutral → walking/angry → running/angry → cached walking/angry reuse.
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (meaningful page render, no error overlay/console errors, Starter Pack and Reference Only controls, 9-image estimate).
-- GitHub code commit: `2293d1a` on `agent/stabilize-generation-and-character-ux`.
-- Production deployment: READY, `dpl_6xzUenPNC6f8VkNY3un3eLPZLzwH` (`https://mangaharness.vercel.app`).
+- GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.
+- Production deployment: READY, `dpl_AjFEj33GqoL7dwpo1nB1xbyur3cu` (`https://mangaharness.vercel.app`).
+- Production browser verification: passed (Starter Pack, Reference Only, 9-image estimate, no overlay, no console/page errors).
+- Post-deploy error scan: clean; no error logs found for the new deployment.
 - Production status: HTTP 200; `storage.configured: true`; backend `vercel-blob`; no new serverless errors in the post-deploy scan.
 - Production trace smoke test: request `77e6fab5-da18-4fe0-b4a4-526b4a8d9bd1` logged request parsing/validation and credential lookup safely, then returned the expected 503 because the CLI request intentionally had no BYOK cookie.
 - Real production generation/persistence/derived-asset test: pending a run from the user's browser session with an Image Provider connected in AI Settings.
