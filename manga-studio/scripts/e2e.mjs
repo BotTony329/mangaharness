@@ -65,34 +65,48 @@ await page.waitForSelector("text=AI Providers");
 
 const settingsCard = (title) => page.locator(`section:has(h3:has-text('${title}'))`);
 
-async function configureCard(title, { type, name, baseUrl, key, model }) {
+// Configure through the CUSTOM API form — the provider shape ("weird API")
+// was never implemented in Manga Studio source; only described here as data.
+async function configureCustom(title, { name, endpoint, key, model, template, advanced }) {
   const card = settingsCard(title);
-  if (type) await card.locator("select").selectOption(type);
-  const textInputs = card.locator("input:not([type=password])");
-  await textInputs.nth(0).fill(name);
-  await textInputs.nth(1).fill(baseUrl);
+  await card.locator("button:has-text('Custom API')").click();
+  await card.locator("input[placeholder='My AI Provider']").fill(name);
+  await card.locator("input[placeholder='model-id']").fill(model);
+  await card.locator("input[placeholder*='api.example.com']").first().fill(endpoint);
+  // API key header authentication with a custom header name.
+  await card.locator("select").first().selectOption("header");
+  await card.locator("input[placeholder='x-api-key']").fill("X-Weird-Key");
   if (key) await card.locator("input[type=password]").fill(key);
-  await textInputs.nth(2).fill(model);
+  await card.locator("summary").click(); // open Advanced API mapping
+  await card.locator("textarea").fill(template);
+  await advanced(card);
   await card.locator("button:has-text('Save')").click();
   await card.locator("text=/Saved/").waitFor({ timeout: 10000 });
   await card.locator("button:has-text('Test Connection')").click();
-  await card.locator("text=/Connected/").first().waitFor({ timeout: 15000 });
+  await card.locator("text=/Connected/").first().waitFor({ timeout: 20000 });
 }
 
-await configureCard("Manga Agent", {
-  name: "FakeLLM",
-  baseUrl: "http://localhost:4545",
-  key: "sk-fake-e2e-agent-key-000",
-  model: "fake-chat",
+await configureCustom("Manga Agent", {
+  name: "WeirdLLM",
+  endpoint: "http://localhost:4545/weird/chat",
+  key: "sk-weird-e2e-key-000",
+  model: "weird-chat-1",
+  template: '{"engine":"{{model}}","conversation":"{{messages}}"}',
+  advanced: async (card) => {
+    await card.locator("input[placeholder='choices[0].message.content']").fill("reply.body");
+  },
 });
-await configureCard("Image Generation", {
-  type: "gemini",
-  name: "FakeImages",
-  baseUrl: "http://localhost:4545",
-  key: "sk-fake-e2e-image-key-000",
-  model: "gemini-2.5-flash-image",
+await configureCustom("Image Generation", {
+  name: "WeirdImages",
+  endpoint: "http://localhost:4545/weird/generate",
+  key: "sk-weird-e2e-key-000",
+  model: "weird-img-1",
+  template: '{"engine":"{{model}}","description":"{{prompt}}","canvas":{"w":"{{width}}","h":"{{height}}"}}',
+  advanced: async (card) => {
+    await card.locator("input[placeholder='data.images[0].url']").fill("result.files[0].link");
+  },
 });
-console.log("ok: byok: both providers configured and tested through the UI");
+console.log("ok: byok: two never-implemented custom APIs configured + tested through the UI");
 await page.screenshot({ path: "/tmp/e2e-settings.png" });
 await page.click("button[aria-label='Close settings']");
 await page.waitForTimeout(500);
@@ -107,7 +121,7 @@ const security = await page.evaluate(async () => {
   };
 });
 for (const [where, blob] of Object.entries(security)) {
-  assert(!blob.includes("sk-fake-e2e"), `security: no API key in ${where}`);
+  assert(!blob.includes("sk-weird-e2e"), `security: no API key in ${where}`);
 }
 assert(!security.statusBody.includes("apiKey"), "security: status response has no apiKey field");
 assert(security.statusBody.includes('"configured":true'), "byok: status reports configured via session");
@@ -139,7 +153,7 @@ await page.screenshot({ path: "/tmp/e2e-workspace.png" });
 await page.click("button:has-text('AI Settings')");
 await page.waitForSelector("text=AI Providers");
 const agentCard = settingsCard("Manga Agent");
-await agentCard.locator("input:not([type=password])").nth(2).fill("fake-chat-2");
+await agentCard.locator("input[placeholder='model-id']").fill("weird-chat-2");
 await agentCard.locator("button:has-text('Save')").click();
 await agentCard.locator("text=/Saved/").waitFor({ timeout: 10000 });
 await page.click("button[aria-label='Close settings']");
@@ -242,7 +256,7 @@ assert(statSync(path).size > 5000, `export PNG has content (${statSync(path).siz
 
 // ── Security: project data and export contain no provider secrets ───────────
 const projectJson = await page.evaluate(() => JSON.stringify(window.__editorStore.getState().doc));
-assert(!projectJson.includes("sk-fake-e2e"), "security: project document contains no API keys");
+assert(!projectJson.includes("sk-weird-e2e"), "security: project document contains no API keys");
 assert(!projectJson.includes("localhost:4545") || true, "info: project may reference generated asset urls only");
 
 await page.screenshot({ path: "/tmp/e2e-final.png" });

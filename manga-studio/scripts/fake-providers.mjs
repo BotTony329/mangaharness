@@ -52,6 +52,52 @@ const server = http.createServer((req, res) => {
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
     console.log(`${req.method} ${req.url}`);
+
+    // ── "Weird API": a provider shape Manga Studio has never implemented. ──
+    // Validates the universal Custom API engine: custom auth header, custom
+    // request template fields, custom response mapping paths.
+    if (req.url?.startsWith("/weird/")) {
+      if (req.url === "/weird/image.png") {
+        res.writeHead(200, { "Content-Type": "image/png" });
+        res.end(Buffer.from(TINY_PNG_B64, "base64"));
+        return;
+      }
+      if (req.headers["x-weird-key"] !== "sk-weird-e2e-key-000") {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "bad weird key" }));
+        return;
+      }
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body || "{}");
+      } catch {}
+      if (req.url === "/weird/generate") {
+        if (!parsed.engine || !parsed.description || !parsed.canvas?.w) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "template fields missing" }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ result: { files: [{ link: "http://localhost:4545/weird/image.png" }] } }));
+        return;
+      }
+      if (req.url === "/weird/chat") {
+        if (!parsed.engine || !Array.isArray(parsed.conversation)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "template fields missing" }));
+          return;
+        }
+        const userText = parsed.conversation.find((m) => m.role === "user")?.content ?? "";
+        const plan = /cry/i.test(userText) ? CRY_PLAN : SCENE_PLAN;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ reply: { body: JSON.stringify(plan) } }));
+        return;
+      }
+      res.writeHead(404);
+      res.end("{}");
+      return;
+    }
+
     if (req.url === "/models") {
       // OpenAI-compatible model listing (used by Test Connection + discovery).
       res.writeHead(200, { "Content-Type": "application/json" });
