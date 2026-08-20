@@ -15,20 +15,33 @@ export async function uploadImageFile(
 
   const form = new FormData();
   form.append("file", file);
+  form.append("category", category);
   const response = await fetch("/api/assets/upload", { method: "POST", body: form });
-  const body = (await response.json()) as { url?: string; mimeType?: string; error?: string };
-  if (!response.ok || !body.url) throw new Error(body.error ?? "Upload failed");
+  const body = (await response.json()) as {
+    url?: string;
+    sourceUrl?: string;
+    processedImageUrl?: string;
+    mimeType?: string;
+    hasAlpha?: boolean;
+    backgroundRemoved?: boolean;
+    processingStatus?: "ready" | "failed";
+    error?: string;
+  };
+  if (!response.ok || !body.sourceUrl) throw new Error(body.error ?? "Upload failed");
 
   let createdAssetId = "";
   useEditorStore.getState().commit((doc) => {
     const { doc: next, assetId } = addAsset(doc, {
       category,
       name: file.name.replace(/\.[^.]+$/, ""),
-      storageUrl: body.url!,
+      storageUrl: body.sourceUrl!,
+      processedImageUrl: body.processedImageUrl,
       width: dims.width,
       height: dims.height,
       mimeType: body.mimeType,
-      hasAlpha: body.mimeType === "image/png" || body.mimeType === "image/webp",
+      hasAlpha: body.hasAlpha,
+      backgroundRemoved: body.backgroundRemoved,
+      processingStatus: body.processingStatus,
       ...extra,
     });
     createdAssetId = assetId;

@@ -71,11 +71,15 @@ export interface SourceAsset {
   name: string;
   /** Public URL in object storage (or same-origin dev path). Never a filesystem path. */
   storageUrl: string;
+  /** Optional non-destructive derivative used for compositing and export. */
+  processedImageUrl?: string;
   thumbnailUrl?: string;
   width: number;
   height: number;
   mimeType?: string;
   hasAlpha?: boolean;
+  backgroundRemoved?: boolean;
+  processingStatus?: "raw" | "processing" | "ready" | "failed";
   focusRegions?: FocusRegion[];
   metadata?: AssetGenerationMetadata;
   createdAt: ISODate;
@@ -325,4 +329,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;

@@ -16,6 +16,7 @@ import {
   type CharacterStatePatch,
 } from "./state";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
+import { assetRenderUrl } from "@/assets/renderSource";
 
 export type CharacterGenerationRole = "canonical" | "state";
 
@@ -82,7 +83,7 @@ export async function generateCharacterAssetForState(input: {
     prompt,
     negativePrompt: style.profile.negativePrompt,
     size: "portrait",
-    referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.storageUrl) : undefined,
+    referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
   });
   return storeGeneratedAsset({
     result,

@@ -66,6 +66,7 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
           prompt: request.prompt,
           n: 1,
           size,
+          ...(request.transparentBackground ? { background: "transparent", output_format: "png" } : {}),
           response_format: "b64_json",
         }),
       });

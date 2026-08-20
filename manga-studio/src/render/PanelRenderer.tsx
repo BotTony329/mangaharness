@@ -3,6 +3,7 @@
 import { Group, Line } from "react-konva";
 import { panelBoundsPx, panelPolygonPx } from "@/domain/coords";
 import type { ID, Panel, PanelItem, Point, ProjectDocument } from "@/domain/types";
+import { assetRenderUrl } from "@/assets/renderSource";
 import { AssetNode } from "./AssetNode";
 import { BubbleNode } from "./BubbleNode";
 import { EffectNode } from "./EffectNode";
@@ -89,7 +90,7 @@ function renderItem(
         <AssetNode
           key={item.id}
           item={item}
-          storageUrl={doc.assets[item.sourceAssetId]?.storageUrl}
+          storageUrl={assetRenderUrl(doc.assets[item.sourceAssetId])}
           interactive={interactive}
           onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
           onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
@@ -132,7 +133,7 @@ export function PanelGhost({ doc, panel, itemId }: { doc: ProjectDocument; panel
   const bounds = panelBoundsPx(doc, panel);
   return (
     <Group x={bounds.x} y={bounds.y} listening={false}>
-      <AssetNode item={item} storageUrl={doc.assets[item.sourceAssetId]?.storageUrl} interactive={false} ghost />
+      <AssetNode item={item} storageUrl={assetRenderUrl(doc.assets[item.sourceAssetId])} interactive={false} ghost />
     </Group>
   );
 }

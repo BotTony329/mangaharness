@@ -27,6 +27,7 @@ import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { LooseAssetNode } from "@/render/LooseAssetNode";
+import { assetRenderUrl } from "@/assets/renderSource";
 import { PanelGhost, PanelRenderer, type PanelInteraction } from "@/render/PanelRenderer";
 import { PAGE_STAGE_ID } from "@/render/constants";
 import { BubbleTextEditor } from "./BubbleTextEditor";
@@ -293,7 +294,7 @@ export function CanvasStage() {
             <LooseAssetNode
               key={item.id}
               item={item}
-              storageUrl={doc.assets[item.sourceAssetId]?.storageUrl}
+              storageUrl={assetRenderUrl(doc.assets[item.sourceAssetId])}
               onSelect={() => select({ workspaceItemId: item.id })}
               onDragMove={(x, y) => onLooseDragMove(item.id, x, y)}
               onDragEnd={(x, y) => onLooseDragEnd(item.id, x, y)}

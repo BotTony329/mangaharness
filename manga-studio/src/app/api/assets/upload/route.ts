@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { putObject } from "@/storage/objectStore";
 import { detectImageType, MAX_UPLOAD_BYTES } from "@/storage/imageValidation";
+import { processAndStoreAsset } from "@/assets/processAndStore";
+import type { AssetCategory } from "@/domain/types";
 
 export const runtime = "nodejs";
 
@@ -32,14 +33,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const stored = await putObject(
-      `uploads/${crypto.randomUUID()}.${detected.extension}`,
-      Buffer.from(bytes),
-      detected.mimeType,
-    );
-    return NextResponse.json({ url: stored.url, mimeType: detected.mimeType });
+    const category = parseCategory(form.get("category"));
+    const stored = await processAndStoreAsset({
+      data: Buffer.from(bytes),
+      mimeType: detected.mimeType,
+      extension: detected.extension,
+      category,
+      keyPrefix: "uploads",
+    });
+    return NextResponse.json({
+      url: stored.processedImageUrl ?? stored.sourceUrl,
+      sourceUrl: stored.sourceUrl,
+      processedImageUrl: stored.processedImageUrl,
+      mimeType: detected.mimeType,
+      hasAlpha: stored.hasAlpha,
+      backgroundRemoved: stored.backgroundRemoved,
+      processingStatus: stored.processingStatus,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upload failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function parseCategory(value: FormDataEntryValue | null): AssetCategory {
+  return value === "character" || value === "background" || value === "prop" ? value : "upload";
 }

@@ -37,6 +37,7 @@ import type {
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
+import { assetRenderUrl } from "@/assets/renderSource";
 import { findCharacter, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
 import type { AgentPlan, ToolName } from "./tools/schemas";
 
@@ -204,7 +205,7 @@ async function doGenerateScenery(
     prompt,
     negativePrompt: style.profile.negativePrompt,
     size: defaultAspect(category),
-    referenceUrls: style.referenceAsset ? [style.referenceAsset.storageUrl] : undefined,
+    referenceUrls: style.referenceAsset ? [assetRenderUrl(style.referenceAsset)!] : undefined,
   });
   const assetId = await storeGeneratedAsset({
     result,

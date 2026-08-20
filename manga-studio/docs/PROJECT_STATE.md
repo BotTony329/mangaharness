@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-20 (project-level art style system)
+Last updated: 2026-08-20 (transparent asset compositing)
 
 ## Current status
 
@@ -20,6 +20,9 @@ Last updated: 2026-08-20 (project-level art style system)
 | Visual style selection | DEPLOYED | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
 | Style propagation | DEPLOYED | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
 | Character identity UX | DEPLOYED | Character creation separates Name, Appearance, and Personality / visual identity from Project Art Style. The progressive Asset Pack contains eight poses and eight expressions without a Cartesian-product explosion. |
+| Transparent character assets | WORKING LOCALLY | Generated and uploaded characters, poses, expressions, and Asset Pack states pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque edge-connected backgrounds produce non-destructive transparent PNG derivatives. |
+| Background removal | WORKING LOCALLY | The MVP processor estimates the dominant perimeter background, flood-fills only connected background pixels, feathers antialiased edges, rejects opaque checkerboards, and preserves enclosed white artwork. Character and prop thumbnails expose a manual Remove/Reprocess Background action. |
+| Canvas compositing | WORKING LOCALLY | Library previews, generation references, loose objects, panel instances, ghosts, and export all use the processed derivative when present and fall back to the immutable source for legacy/failed assets. Background images remain rectangular. |
 
 ## Root cause record
 
@@ -41,14 +44,16 @@ Exact throw site: `src/storage/objectStore.ts`, `putLocal()`, called by `putObje
 - Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
 - Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
+- The bundled foreground extractor is optimized for plain or near-uniform edge-connected backgrounds. Complex scenery or an opaque fake checkerboard fails safely and preserves the source; the `AssetPostProcessor` boundary is ready for a future dedicated segmentation service.
 
 ## Verification ledger
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 19 files, 136 tests passed, covering built-in profile completeness, custom profile persistence, style-aware prompts/provenance, style-aware cache isolation, schema-v4 migration, and the progressive 15-state character pack.
+- Tests: 22 files, 144 tests passed. Transparency coverage includes useful alpha, opaque white-background characters, enclosed-white preservation, fake checkerboards, uploaded characters, rectangular backgrounds, processed render preference, failure safety, and schema-v5 legacy migration.
 - Production build: passed with Next.js 15.5.23.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
+- Local transparent-compositing acceptance: passed with a real opaque white-background Yuri upload over a colored street, panel placement, scaling, clipping, and page export. Export pixels beside Yuri remained street blue (`118,181,212,255`) while the enclosed white shirt remained opaque (`255,255,255,255`); no white rectangle or browser errors.
 - GitHub art-style-system code commit: `ec0b221` on `agent/project-art-style-system` (pushed to `origin`; not merged to `main`).
 - GitHub character-rig code commit: `62d01cb` on `agent/virtual-character-rig`.
 - Production deployment: READY, `dpl_65DXLj9qZKKmKnmkrmx4DMuKpS2i` (`https://mangaharness.vercel.app`), deployed from the tested `ec0b221` feature commit.

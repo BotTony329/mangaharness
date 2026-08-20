@@ -21,6 +21,7 @@ import { swapInstanceAsset } from "@/domain/itemOps";
 import type { AssetCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
+import { assetRenderUrl } from "@/assets/renderSource";
 
 interface ProviderInfo {
   configured: boolean;
@@ -98,7 +99,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         prompt,
         negativePrompt: style?.profile.negativePrompt,
         size: defaultAspect(request.assetType),
-        referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.storageUrl) : undefined,
+        referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
       });
       setResult(output);
       setPhase("done");
@@ -269,6 +270,15 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={result.url} alt="Generated asset" className="max-h-[360px] rounded" />
             </div>
+            {isCharacterType || request.assetType === "prop" ? (
+              <p className={`mb-2 text-[11px] ${result.hasAlpha ? "text-emerald-400" : "text-amber-400"}`}>
+                {result.backgroundRemoved
+                  ? "Transparent derivative ready — the checkerboard is UI-only."
+                  : result.hasAlpha
+                    ? "Provider returned useful alpha transparency."
+                    : "Automatic extraction was not reliable; the original was preserved and can be retried from the library."}
+              </p>
+            ) : null}
             {result.referenceUsed && (
               <p className="mb-2 text-[11px] text-zinc-500">Generated with the character reference image.</p>
             )}

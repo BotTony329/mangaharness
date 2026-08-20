@@ -63,7 +63,8 @@ describe("project serialization", () => {
 
     const migrated = deserializeProject(JSON.stringify(legacy));
     const migratedInstance = migrated.items[instance.id];
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.assets[asset.id].processingStatus).toBe("raw");
     expect(migrated.characters[character.id].canonicalReferenceAssetId).toBe(character.referenceAssetId);
     expect(migrated.assets[asset.id].metadata).toMatchObject({ outfit: "default outfit", view: "front" });
     expect(migratedInstance.kind === "asset" && migratedInstance.characterState).toMatchObject({

@@ -16,11 +16,28 @@ export interface NewAssetInput {
   category: AssetCategory;
   name: string;
   storageUrl: string;
+  processedImageUrl?: string;
   width: number;
   height: number;
   mimeType?: string;
   hasAlpha?: boolean;
+  backgroundRemoved?: boolean;
+  processingStatus?: SourceAsset["processingStatus"];
   metadata?: AssetGenerationMetadata;
+}
+
+/** Record a processed derivative without overwriting the immutable source. */
+export function setAssetProcessedImage(
+  doc: ProjectDocument,
+  assetId: ID,
+  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus">,
+): ProjectDocument {
+  const next = cloneDoc(doc);
+  const asset = next.assets[assetId];
+  if (!asset) throw new Error(`Unknown asset: ${assetId}`);
+  Object.assign(asset, update);
+  touch(next);
+  return next;
 }
 
 export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: ProjectDocument; assetId: ID } {

@@ -7,10 +7,12 @@
 
 import { z } from "zod";
 import type { ProviderConfig } from "@/server/providerSession";
-import { readLocalObject, putObject } from "@/storage/objectStore";
+import { readLocalObject } from "@/storage/objectStore";
 import { createImageProvider } from "./providerRegistry";
 import { isAllowedReferenceUrl } from "./security";
 import { ProviderError, type GeneratedAssetType, type GenerationTrace } from "./types";
+import { processAndStoreAsset } from "@/assets/processAndStore";
+import type { AssetCategory } from "@/domain/types";
 
 export const generateRequestSchema = z.object({
   assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop"]),
@@ -24,7 +26,12 @@ export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
 
 export interface GenerateResult {
   url: string;
+  sourceUrl: string;
+  processedImageUrl?: string;
   mimeType: string;
+  hasAlpha: boolean;
+  backgroundRemoved: boolean;
+  processingStatus: "ready" | "failed";
   provider: string;
   model: string;
   referenceUsed: boolean;
@@ -59,11 +66,15 @@ export async function generateAssetImage(
   trace?.("reference_processing_complete", { loaded: referenceImages.length });
 
   const size = SIZE_MAP[input.size ?? "portrait"];
+  const category = categoryFor(input.assetType);
+  const transparentBackground =
+    provider.capabilities.transparentOutput && (category === "character" || category === "prop");
   trace?.("normalized_request_constructed", {
     assetType: input.assetType,
     references: referenceImages.length,
     width: size.width,
     height: size.height,
+    transparentBackground,
   });
   const result = await provider.generateImage({
     prompt: input.prompt,
@@ -71,6 +82,7 @@ export async function generateAssetImage(
     assetType: input.assetType as GeneratedAssetType,
     width: size.width,
     height: size.height,
+    transparentBackground,
     referenceImages,
     referenceUrls: validatedUrls,
     trace,
@@ -80,10 +92,16 @@ export async function generateAssetImage(
   trace?.("provider_result_normalized", { mimeType: result.mimeType, bytes: result.data.length });
 
   const extension = result.mimeType === "image/jpeg" ? "jpg" : result.mimeType === "image/webp" ? "webp" : "png";
-  trace?.("asset_persistence_start", { backend: process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local" });
+  trace?.("asset_post_processing_start", { assetType: input.assetType });
   let stored;
   try {
-    stored = await putObject(`generated/${crypto.randomUUID()}.${extension}`, result.data, result.mimeType);
+    stored = await processAndStoreAsset({
+      data: result.data,
+      mimeType: result.mimeType,
+      extension,
+      category,
+      keyPrefix: "generated",
+    });
   } catch (error) {
     if (error instanceof Error && error.message.includes("Persistent storage is not configured")) {
       throw new ProviderError(
@@ -94,15 +112,31 @@ export async function generateAssetImage(
     }
     throw error;
   }
+  trace?.("asset_post_processing_complete", {
+    status: stored.processingStatus,
+    hasAlpha: stored.hasAlpha,
+    backgroundRemoved: stored.backgroundRemoved,
+  });
   trace?.("asset_persisted", { backend: process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local" });
 
   return {
-    url: stored.url,
+    url: stored.processedImageUrl ?? stored.sourceUrl,
+    sourceUrl: stored.sourceUrl,
+    processedImageUrl: stored.processedImageUrl,
     mimeType: result.mimeType,
+    hasAlpha: stored.hasAlpha,
+    backgroundRemoved: stored.backgroundRemoved,
+    processingStatus: stored.processingStatus,
     provider: provider.id,
     model: provider.model,
     referenceUsed: referenceImages.length > 0,
   };
+}
+
+function categoryFor(assetType: GeneratedAssetType): AssetCategory {
+  if (assetType === "background") return "background";
+  if (assetType === "prop") return "prop";
+  return "character";
 }
 
 async function loadReferences(urls: string[]): Promise<{ mimeType: string; data: Buffer }[]> {

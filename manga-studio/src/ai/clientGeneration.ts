@@ -13,7 +13,12 @@ import type { GeneratedAssetType } from "./types";
 
 export interface GenerateApiResult {
   url: string;
+  sourceUrl: string;
+  processedImageUrl?: string;
   mimeType: string;
+  hasAlpha: boolean;
+  backgroundRemoved: boolean;
+  processingStatus: "ready" | "failed";
   provider: string;
   model: string;
   referenceUsed: boolean;
@@ -87,10 +92,14 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
     const added = addAsset(doc, {
       category: input.category,
       name: input.name,
-      storageUrl: input.result.url,
+      storageUrl: input.result.sourceUrl ?? input.result.url,
+      processedImageUrl: input.result.processedImageUrl,
       width: dims.width,
       height: dims.height,
       mimeType: input.result.mimeType,
+      hasAlpha: input.result.hasAlpha,
+      backgroundRemoved: input.result.backgroundRemoved,
+      processingStatus: input.result.processingStatus,
       metadata: {
         provider: input.result.provider,
         model: input.result.model,

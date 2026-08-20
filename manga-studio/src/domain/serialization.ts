@@ -112,6 +112,14 @@ const MIGRATIONS: Record<number, Migration> = {
     }
     return { ...doc, schemaVersion: 4 };
   },
+  // v4 → v5: source images remain immutable while optional transparent
+  // derivatives become the preferred compositing surface. Legacy assets stay
+  // raw so users can process them explicitly without losing their originals.
+  4: (doc) => {
+    const assets = (doc.assets ?? {}) as Record<string, { processingStatus?: string }>;
+    for (const asset of Object.values(assets)) asset.processingStatus ??= "raw";
+    return { ...doc, schemaVersion: 5 };
+  },
 };
 
 function migrate(input: unknown): ProjectDocument {

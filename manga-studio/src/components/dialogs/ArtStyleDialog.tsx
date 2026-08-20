@@ -12,6 +12,7 @@ import {
 } from "@/styles/profiles";
 import { inspectReferenceImage, REFERENCE_ACCEPT, type ReferenceImageSelection } from "@/components/library/referenceImage";
 import { uploadImageFile } from "@/components/library/uploadAsset";
+import { assetRenderUrl } from "@/assets/renderSource";
 
 export function ArtStyleDialog() {
   const open = useUiStore((state) => state.artStyleOpen);
@@ -111,7 +112,7 @@ function StyleCard({ profile, active, onSelect }: { profile: StyleProfile; activ
 
 function StylePreview({ profile, localPreview }: { profile: StyleProfile; localPreview?: string }) {
   const doc = useEditorStore((state) => state.doc);
-  const referenceUrl = profile.referenceAssetId && doc ? doc.assets[profile.referenceAssetId]?.storageUrl : undefined;
+  const referenceUrl = profile.referenceAssetId && doc ? assetRenderUrl(doc.assets[profile.referenceAssetId]) : undefined;
   const image = localPreview ?? profile.previewImage ?? referenceUrl;
   const seed = hash(profile.id);
   const monochrome = profile.visualProperties?.colorMode?.includes("black") || profile.visualProperties?.colorMode?.includes("mono");

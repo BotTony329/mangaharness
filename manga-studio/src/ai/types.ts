@@ -21,6 +21,8 @@ export interface ImageGenerationRequest {
   assetType: GeneratedAssetType;
   width?: number;
   height?: number;
+  /** Ask capable providers for real alpha output; post-processing still verifies it. */
+  transparentBackground?: boolean;
   /** Raw reference images (already fetched & validated by the server layer). */
   referenceImages?: { mimeType: string; data: Buffer }[];
   /** The validated storage URLs of those references (custom APIs in URL mode). */

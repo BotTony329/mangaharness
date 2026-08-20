@@ -36,7 +36,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.characterDescription ?? "",
         input.description ?? "",
         "Standing neutral pose, front view, whole body visible head to feet.",
-        "Isolated single character on a plain white background, no scenery, no text, no speech bubbles.",
+        characterIsolationInstruction(),
       );
       break;
     case "character-pose":
@@ -57,7 +57,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.outfit ? `Outfit: ${input.outfit}.` : "",
         input.view ? `Camera angle: ${input.view}.` : "",
         input.description ?? "",
-        "Whole body visible, isolated single character on a plain white background, no scenery, no text.",
+        `Whole body visible head to feet. ${characterIsolationInstruction()}`,
       );
       break;
     }
@@ -70,7 +70,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
     case "prop":
       lines.push(
         `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
-        "Single isolated object on a plain white background, no scenery, no text.",
+        "Single isolated object with a full visible silhouette and clean separation from the background. Prefer real alpha transparency. No scenery, floor texture, frame, text, or fake checkerboard.",
       );
       break;
   }
@@ -93,7 +93,7 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
       ? "Preserve identity exactly: same face, facial structure, hairstyle, body proportions, and line-art style. Follow the requested outfit while keeping the character recognizable. Do not redesign the character."
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
-    "Whole body visible head to feet, isolated single character on a plain white background, no scenery, no text, no speech bubbles.",
+    `Whole body visible head to feet. ${characterIsolationInstruction()}`,
     styleInstruction(input.style),
     aspectHint(input.aspect ?? "portrait"),
   ]
@@ -110,6 +110,10 @@ function styleInstruction(style: AssetPromptInput["style"]): string {
         .join(", ")
     : "";
   return `Project art style — ${style.name}: ${style.positivePrompt}.${properties ? ` Visual properties: ${properties}.` : ""} Keep this visual language consistent across the project.`;
+}
+
+function characterIsolationInstruction(): string {
+  return "Isolated single character with a full visible silhouette and clean separation from the background. Prefer a real transparent alpha background. No scenery, environmental background, floor texture, frame, text, speech bubbles, or fake checkerboard.";
 }
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {
