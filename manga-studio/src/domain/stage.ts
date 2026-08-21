@@ -28,10 +28,12 @@ export const FAR_PLANE_SCALE = 0.32;
 
 export const DEFAULT_STAGE: InstanceStage = {
   depth: 0.5,
-  groundY: 0.92,
   anchor: "feet",
   scaleLocked: false,
 };
+
+/** Fallback ground line when neither the instance nor a camera specifies one. */
+export const DEFAULT_GROUND_LINE = 0.92;
 
 export function clampDepth(depth: number): number {
   if (!Number.isFinite(depth)) return DEFAULT_STAGE.depth;
@@ -41,7 +43,9 @@ export function clampDepth(depth: number): number {
 export function createStage(patch: Partial<InstanceStage> = {}): InstanceStage {
   return {
     depth: clampDepth(patch.depth ?? DEFAULT_STAGE.depth),
-    groundY: clamp01(patch.groundY ?? DEFAULT_STAGE.groundY),
+    // Undefined means "follow the panel camera's eye level" — only an explicit
+    // value pins the character to its own ground line.
+    groundY: patch.groundY === undefined ? undefined : clamp01(patch.groundY),
     anchor: patch.anchor ?? DEFAULT_STAGE.anchor,
     scaleLocked: patch.scaleLocked ?? false,
   };
@@ -92,7 +96,7 @@ export function applyStageToInstance(
   const aspect = instance.height === 0 ? 1 : instance.width / instance.height;
   const height = stage.scaleLocked ? instance.height : stageHeight(baseHeight, stage.depth);
   const width = stage.scaleLocked ? instance.width : height * aspect;
-  const groundLine = stage.groundY * panel.height;
+  const groundLine = (stage.groundY ?? DEFAULT_GROUND_LINE) * panel.height;
   const cy = stage.anchor === "center" ? groundLine : groundLine - height / 2;
   return { cx: instance.cx, cy, width, height };
 }

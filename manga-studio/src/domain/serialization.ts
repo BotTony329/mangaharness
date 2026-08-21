@@ -215,6 +215,26 @@ const MIGRATIONS: Record<number, Migration> = {
     if (doc.assets && doc.characters && doc.project) rebuildCharacterStates(migrated);
     return migrated as unknown as Record<string, unknown>;
   },
+  /**
+   * v8 → v9: the camera stage becomes visible.
+   *
+   * Panels gain a focal subject and auto depth ordering, both defaulted OFF so
+   * an existing project opens composed exactly as it was. Instance ground lines
+   * that match the old hard-coded default are cleared so they follow the panel
+   * camera from now on; an explicitly chosen line is left alone.
+   */
+  8: (doc) => {
+    const panels = (doc.panels ?? {}) as Record<string, Record<string, unknown>>;
+    for (const panel of Object.values(panels)) {
+      panel.autoDepthOrder ??= false;
+    }
+    const items = (doc.items ?? {}) as Record<string, Record<string, unknown>>;
+    for (const item of Object.values(items)) {
+      const stage = item.stage as Record<string, unknown> | undefined;
+      if (stage && stage.groundY === 0.92) delete stage.groundY;
+    }
+    return { ...doc, schemaVersion: 9 };
+  },
 };
 
 function migrate(input: unknown): ProjectDocument {

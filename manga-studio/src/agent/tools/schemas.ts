@@ -161,8 +161,15 @@ export const toolSchemas = {
   set_character_depth: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
-    depth: z.number().min(0).max(1).describe("0 nearest the camera, 1 furthest away"),
+    /** Semantic placement; preferred over a raw number (§16). */
+    placement: z.enum(["foreground", "midground", "background"]).optional(),
+    depth: z.number().min(0).max(1).optional().describe("0 nearest the camera, 1 furthest away"),
     groundY: z.number().min(0).max(1).optional().describe("Ground contact line in the panel"),
+  }),
+
+  set_focal_character: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80).describe("The subject camera framing works around"),
   }),
 
   set_character_pose_rig: z.object({
@@ -271,6 +278,7 @@ const PANEL_TOOLS = new Set<ToolName>([
   "set_character_depth",
   "attach_bubble",
   "set_character_pose_rig",
+  "set_focal_character",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -322,7 +330,8 @@ Available tools (call only these, with exactly these argument shapes):
 - add_effect {panel, effectKind: "speed-lines"|"focus-lines"|"screentone"|"impact-burst"} — add a manga effect layer.
 - set_camera {panel, shot?, angle?, lens?, mangaPerspective?} — direct the panel. Use the semantic vocabulary (close-up, low angle) rather than moving objects to fake a shot.
 - set_perspective {panel, type, horizonY?} — establish construction guides. These are editor guides only and never appear in the exported page.
-- set_character_depth {panel, characterName?, depth, groundY?} — place a character in stage depth. 0 is nearest the camera, 1 is furthest; size follows depth automatically.
+- set_character_depth {panel, characterName?, placement?, depth?, groundY?} — place a character in stage depth. Prefer placement ("foreground"|"midground"|"background") over a raw depth number. Size and ground contact follow automatically; do not also set scale or position.
+- set_focal_character {panel, characterName} — name the subject the camera frames. Set this before changing shot, so a close-up frames that character rather than the middle of the panel.
 - set_character_pose_rig {panel, characterName?, basePose?, adjustments} — adjust a placed character's pose semantically, e.g. basePose "walking" with adjustments ["right arm raised","head turned left"]. Identity, expression, outfit, view and props are preserved; only pose geometry changes. Prefer this over regenerating a character to change a limb.
 - attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).

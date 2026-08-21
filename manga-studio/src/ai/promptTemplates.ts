@@ -24,6 +24,11 @@ export interface AssetPromptInput {
   supportsNativeTransparency?: boolean;
   /** Project style is black-and-white line art, which selects the white-background strategy. */
   monochrome?: boolean;
+  /**
+   * Camera the asset is being generated for (§18). Provider-neutral sentences
+   * so a new character or background matches the stage it joins.
+   */
+  cameraContext?: string[];
   aspect?: "portrait" | "landscape" | "square";
   /** Provider-neutral project art direction. */
   style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
@@ -84,6 +89,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
       );
       break;
   }
+  lines.push(...(input.cameraContext ?? []));
   lines.push(styleInstruction(input.style), aspectHint(input.aspect ?? defaultAspect(input.assetType)));
   return lines.filter(Boolean).join(" ");
 }
@@ -104,6 +110,7 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
     `Whole body visible head to feet. ${characterIsolationInstruction(input)}`,
+    ...(input.cameraContext ?? []),
     styleInstruction(input.style),
     aspectHint(input.aspect ?? "portrait"),
   ]

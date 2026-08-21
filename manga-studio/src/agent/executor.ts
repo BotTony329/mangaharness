@@ -103,7 +103,9 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
     case "set_perspective":
       return `Set panel ${args.panel} perspective to ${String(args.type).replace(/-/g, " ")}`;
     case "set_character_depth":
-      return `Move ${args.characterName ?? "character"} to depth ${args.depth} in panel ${args.panel}`;
+      return `Move ${args.characterName ?? "character"} to the ${args.placement ?? `depth ${args.depth}`} of panel ${args.panel}`;
+    case "set_focal_character":
+      return `Focus panel ${args.panel} on ${args.characterName}`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
     case "set_character_pose_rig": {
@@ -205,6 +207,8 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doAttachBubble(args);
     case "set_character_pose_rig":
       return doSetCharacterPoseRig(args);
+    case "set_focal_character":
+      return doSetFocalCharacter(args);
     case "remove_items":
       return doRemoveItems(args);
   }
@@ -691,13 +695,26 @@ function characterInstanceInPanel(doc: ProjectDocument, panelId: ID, characterNa
   return target;
 }
 
-function doSetCharacterDepth(args: { panel: number; characterName?: string; depth: number; groundY?: number }): void {
+/** Semantic placement → depth. The Agent names a plane; the harness picks the number. */
+const PLACEMENT_DEPTH: Record<string, number> = { foreground: 0.15, midground: 0.5, background: 0.85 };
+
+function doSetCharacterDepth(args: {
+  panel: number;
+  characterName?: string;
+  placement?: "foreground" | "midground" | "background";
+  depth?: number;
+  groundY?: number;
+}): void {
   const panelId = panelIdByNumber(args.panel);
   const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
+  const depth = args.placement ? PLACEMENT_DEPTH[args.placement] : args.depth;
+  if (depth === undefined) throw new Error("set_character_depth needs a placement or a depth");
   dispatch({
     type: "set-instance-stage",
     instanceId: instance.id,
-    patch: { depth: args.depth, groundY: args.groundY },
+    // Releasing the scale lock is what lets depth actually resize a character
+    // that was previously framed or hand-resized.
+    patch: { depth, groundY: args.groundY, scaleLocked: false },
   });
   // Depth moves the speaker, so any bubble aimed at them follows.
   dispatch({ type: "refresh-bubble-tails", panelId });
@@ -758,4 +775,10 @@ async function doSetCharacterPoseRig(args: {
   }
 
   await applyCharacterStateToInstance({ instanceId: instance.id, patch: { poseRig: intent } });
+}
+
+function doSetFocalCharacter(args: { panel: number; characterName: string }): void {
+  const panelId = panelIdByNumber(args.panel);
+  const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
+  dispatch({ type: "set-panel-focal-item", panelId, itemId: instance.id });
 }

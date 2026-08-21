@@ -24,14 +24,18 @@ import {
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
 import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { useUiStore } from "@/editor/uiStore";
 
 export function PanelStageControls({ panelId }: { panelId: ID }) {
   const doc = useEditorStore((state) => state.doc);
   const dispatch = useEditorStore((state) => state.dispatch);
+  const guideEditPanelId = useUiStore((state) => state.guideEditPanelId);
+  const setGuideEditPanel = useUiStore((state) => state.setGuideEditPanel);
   const panel = doc?.panels[panelId];
   if (!panel) return null;
 
   const camera = panel.camera ?? createPanelCamera();
+  const editingGuides = guideEditPanelId === panelId;
   const perspective = panel.perspective ?? createPanelPerspective();
 
   return (
@@ -87,8 +91,8 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
       </section>
 
       <section className="space-y-2">
-        <Label>Construction guides</Label>
-        <Row label="Type">
+        <Label>Perspective</Label>
+        <Row label="Mode">
           <Select
             value={perspective.type}
             options={PERSPECTIVE_TYPES}
@@ -102,18 +106,76 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
           />
         </Row>
         {perspective.type !== "none" && (
-          <label className="flex items-center gap-2 text-[11px] text-zinc-400">
-            <input
-              type="checkbox"
-              checked={perspective.visible}
-              onChange={(event) =>
-                dispatch({ type: "set-panel-perspective", panelId, patch: { visible: event.target.checked } })
-              }
-            />
-            Show guides while editing
-          </label>
+          <>
+            <div>
+              <div className="mb-1 flex justify-between text-[10px] text-zinc-500">
+                <span>Eye level</span>
+                <span className="text-zinc-400">{Math.round(perspective.horizonY * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={perspective.horizonY}
+                className="w-full accent-sky-500"
+                onChange={(event) =>
+                  dispatch({
+                    type: "set-panel-perspective",
+                    panelId,
+                    patch: { horizonY: window.Number(event.target.value) },
+                  })
+                }
+              />
+              <div className="flex justify-between text-[9px] text-zinc-600">
+                <span>High</span>
+                <span>Low</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className={`flex-1 rounded border py-1 text-[11px] ${
+                  editingGuides
+                    ? "border-violet-500 bg-violet-600/30 text-violet-200"
+                    : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                }`}
+                onClick={() => setGuideEditPanel(editingGuides ? null : panelId)}
+              >
+                {editingGuides ? "Done Editing" : "Edit Guides"}
+              </button>
+              <label className="flex items-center gap-1 text-[10px] text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={perspective.visible}
+                  onChange={(event) =>
+                    dispatch({ type: "set-panel-perspective", panelId, patch: { visible: event.target.checked } })
+                  }
+                />
+                Show
+              </label>
+            </div>
+          </>
         )}
         <p className="text-[10px] leading-4 text-zinc-600">Guides are editor-only and never appear in the exported page.</p>
+      </section>
+
+      <section className="space-y-2">
+        <Label>Stage</Label>
+        <label className="flex items-center gap-2 text-[11px] text-zinc-400">
+          <input
+            type="checkbox"
+            checked={panel.autoDepthOrder ?? false}
+            onChange={(event) =>
+              dispatch({ type: "set-panel-auto-depth-order", panelId, enabled: event.target.checked })
+            }
+          />
+          Auto layer order by depth
+        </label>
+        <p className="text-[10px] leading-4 text-zinc-600">
+          {panel.autoDepthOrder
+            ? "Nearer characters draw over farther ones."
+            : "Manual layer order is in control."}
+        </p>
       </section>
 
       <details className="text-[11px] text-zinc-500">

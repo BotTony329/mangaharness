@@ -38,6 +38,8 @@ interface UiState {
   /** Calibration mode reuses the same overlay but drags baseline anchors (§3). */
   calibrating: boolean;
   calibrationDraft: PoseCalibration | null;
+  /** Panel whose perspective handles are draggable (§4 "Edit Guides"). */
+  guideEditPanelId: ID | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
@@ -47,6 +49,7 @@ interface UiState {
   beginPoseEdit(instanceId: ID, rig: PoseRigState): void;
   setPoseDraft(rig: PoseRigState): void;
   endPoseEdit(): void;
+  setGuideEditPanel(panelId: ID | null): void;
   beginCalibration(instanceId: ID, calibration: PoseCalibration): void;
   setCalibrationDraft(calibration: PoseCalibration): void;
   endCalibration(): void;
@@ -63,6 +66,7 @@ export const useUiStore = create<UiState>((set) => ({
   poseDraft: null,
   calibrating: false,
   calibrationDraft: null,
+  guideEditPanelId: null,
   settingsOpen: false,
   artStyleOpen: false,
   openGenerator: (request) => set({ generator: request }),
@@ -71,6 +75,7 @@ export const useUiStore = create<UiState>((set) => ({
   beginPoseEdit: (instanceId, rig) => set({ poseEditInstanceId: instanceId, poseDraft: rig }),
   setPoseDraft: (rig) => set({ poseDraft: rig }),
   endPoseEdit: () => set({ poseEditInstanceId: null, poseDraft: null, calibrating: false, calibrationDraft: null }),
+  setGuideEditPanel: (panelId) => set({ guideEditPanelId: panelId }),
   beginCalibration: (instanceId, calibration) =>
     set({ poseEditInstanceId: instanceId, calibrating: true, calibrationDraft: calibration, poseDraft: null }),
   setCalibrationDraft: (calibration) => set({ calibrationDraft: calibration }),

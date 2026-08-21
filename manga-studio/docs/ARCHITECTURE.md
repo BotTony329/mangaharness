@@ -56,6 +56,8 @@ Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the orig
 
 ## Virtual manga stage
 
+`domain/staging.ts` is the 2.5D projection engine: camera + depth → real transforms. Depth scale combines an optical exponent (from lens FOV) with a separate manga-exaggeration exponent, and characters are anchored at the ground line so they never float as they move through depth. `stageOps.setPanelCamera` reframes the focal subject and re-projects the panel, so shot/angle/lens visibly change composition rather than only metadata. `components/canvas/PerspectiveOverlay.tsx` draws horizon, vanishing-point handles and guide rays on the overlay layer, dragging through `transientDispatch` so one drag is one undo entry. `cameraChangeRequiresRedraw` is the explicit transform-vs-regeneration boundary.
+
 `Panel` carries a `camera` (shot/angle/lens presets deriving pitch, roll, horizon, FOV, plus `mangaPerspectiveStrength`) and a `perspective` (type, horizon, vanishing points). Guides are panel data, never items, so export cannot reach them. `AssetInstance` carries an optional `stage` (depth, ground line, anchor, scale lock) layered over the existing free transform. `domain/stageOps.ts` holds the mutations; `characters/` holds the Character Kit projection, semantic sockets, the pose-rig data model, and the state resolver that answers cache-or-generate for every caller.
 
 ## Character rig

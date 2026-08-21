@@ -16,6 +16,7 @@ import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
 import { PoseEditControls } from "./PoseEditControls";
+import { InstanceStageControls } from "./InstanceStageControls";
 import type { ReorderDirection } from "@/domain/itemOps";
 import type { DomainCommand } from "@/domain/commands";
 import type { AssetInstance, BubbleType, CharacterState, CropMode, PanelItem, SourceAsset } from "@/domain/types";
@@ -326,6 +327,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
           </div>
         ))}
       </div>
+      <InstanceStageControls item={item} />
       <PoseEditControls item={item} />
       {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
       {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}

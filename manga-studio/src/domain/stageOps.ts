@@ -10,10 +10,12 @@ import { applyCameraPatch, createPanelCamera, type CameraPatch } from "./camera"
 import { cloneDoc, panelPxRect, touch } from "./docHelpers";
 import { normalizeEffectParams, updateEffectParams } from "./effects";
 import { applyPerspectivePatch, createPanelPerspective, moveVanishingPoint, type PerspectivePatch } from "./perspective";
-import { applyStageToInstance, createStage, DEFAULT_STAGE, inferBaseHeight } from "./stage";
+import { createStage, DEFAULT_STAGE, depthSortKey } from "./stage";
+import { frameSubject, inferBaseHeight, isAirborne, projectInstance } from "./staging";
 import type {
   AssetInstance,
   CharacterState,
+  PanelCamera,
   EffectItem,
   ID,
   InstanceStage,
@@ -24,13 +26,185 @@ import type {
 
 // ─── Camera ─────────────────────────────────────────────────────────────────
 
+/**
+ * Change the panel camera AND restage the panel to match (§5/§24).
+ *
+ * A camera control that only writes metadata is worse than no control: this is
+ * the step that makes Shot, Angle and Lens visibly change the composition.
+ * Shot reframes the focal subject; angle and lens re-project every depth-staged
+ * character, because they change where the ground sits and how fast size falls
+ * off with distance.
+ */
 export function setPanelCamera(doc: ProjectDocument, panelId: ID, patch: CameraPatch): ProjectDocument {
   const next = cloneDoc(doc);
   const panel = next.panels[panelId];
   if (!panel) throw new Error(`Unknown panel: ${panelId}`);
-  panel.camera = applyCameraPatch(panel.camera ?? createPanelCamera(), patch);
+  const before = panel.camera ?? createPanelCamera();
+  panel.camera = applyCameraPatch(before, patch);
+
+  // Angle shifts where the subject sits in frame, so it reframes as well as
+  // re-projects. Base heights are captured under the OLD camera first: inferring
+  // them under the new one would cancel the very change being applied.
+  const baseHeights = captureBaseHeights(next, panelId, before);
+  if (
+    (patch.shot !== undefined && patch.shot !== before.shot) ||
+    (patch.angle !== undefined && patch.angle !== before.angle)
+  ) {
+    applyShotFraming(next, panelId);
+  }
+  restagePanel(next, panelId, baseHeights);
   touch(next);
   return next;
+}
+
+/** Reframe the focal subject for the panel's current shot type. */
+function applyShotFraming(doc: ProjectDocument, panelId: ID): void {
+  const panel = doc.panels[panelId];
+  const camera = panel.camera;
+  if (!camera) return;
+  const focal = focalInstance(doc, panelId);
+  if (!focal) return;
+  const rect = panelPxRect(doc, panelId);
+  const framed = frameSubject({ instance: focal, panel: rect, shot: camera.shot, angle: camera.angle });
+  focal.cx = framed.cx;
+  focal.cy = framed.cy;
+  focal.width = framed.width;
+  focal.height = framed.height;
+  // Framing is now the camera's, not a crop preset's.
+  focal.cropMode = "custom";
+  // Depth would immediately undo the framing, so a framed subject holds its size.
+  if (focal.stage) focal.stage = { ...focal.stage, scaleLocked: true };
+}
+
+/**
+ * The subject camera operations act on.
+ *
+ * Explicit focal item first; otherwise the topmost character in the panel, so
+ * a single-character panel needs no setup at all.
+ */
+export function focalInstance(doc: ProjectDocument, panelId: ID): AssetInstance | undefined {
+  const panel = doc.panels[panelId];
+  if (!panel) return undefined;
+  if (panel.focalItemId) {
+    const explicit = doc.items[panel.focalItemId];
+    if (explicit?.kind === "asset") return explicit;
+  }
+  const characters = panel.itemIds
+    .map((id) => doc.items[id])
+    .filter((item): item is AssetInstance => item?.kind === "asset")
+    .filter((item) => Boolean(item.characterState ?? doc.assets[item.sourceAssetId]?.metadata?.characterId));
+  return characters[characters.length - 1];
+}
+
+export function setPanelFocalItem(doc: ProjectDocument, panelId: ID, itemId: ID | undefined): ProjectDocument {
+  const next = cloneDoc(doc);
+  const panel = next.panels[panelId];
+  if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+  if (itemId && next.items[itemId]?.panelId !== panelId) {
+    throw new Error("The focal subject must be in this panel");
+  }
+  panel.focalItemId = itemId;
+  touch(next);
+  return next;
+}
+
+export function setPanelAutoDepthOrder(doc: ProjectDocument, panelId: ID, enabled: boolean): ProjectDocument {
+  const next = cloneDoc(doc);
+  const panel = next.panels[panelId];
+  if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+  panel.autoDepthOrder = enabled;
+  if (enabled) sortPanelByDepth(next, panelId);
+  touch(next);
+  return next;
+}
+
+/**
+ * Near-plane heights for every staged instance, measured under a given camera.
+ *
+ * Taken before a camera change so the re-projection has a stable reference.
+ * Without it, inferring the base height under the new camera reproduces the
+ * current size exactly and the lens or perspective change does nothing.
+ */
+export function captureBaseHeights(
+  doc: ProjectDocument,
+  panelId: ID,
+  camera: PanelCamera | undefined,
+): Map<ID, number> {
+  const heights = new Map<ID, number>();
+  const panel = doc.panels[panelId];
+  if (!panel) return heights;
+  for (const itemId of panel.itemIds) {
+    const item = doc.items[itemId];
+    if (item?.kind !== "asset" || !item.stage) continue;
+    heights.set(itemId, inferBaseHeight(item, item.stage.depth, camera));
+  }
+  return heights;
+}
+
+/**
+ * Re-project every depth-staged instance in a panel.
+ *
+ * Called whenever something panel-wide changes — the camera, the ground line —
+ * so a shared stage stays coherent instead of each character drifting to
+ * whatever geometry it last happened to have.
+ */
+export function restagePanel(doc: ProjectDocument, panelId: ID, baseHeights?: Map<ID, number>): void {
+  const panel = doc.panels[panelId];
+  if (!panel) return;
+  const rect = panelPxRect(doc, panelId);
+  const camera = panel.camera;
+  for (const itemId of panel.itemIds) {
+    const item = doc.items[itemId];
+    if (item?.kind !== "asset" || !item.stage) continue;
+    if (item.stage.scaleLocked) continue;
+    const state = item.characterState;
+    const projection = projectInstance({
+      instance: item,
+      stage: item.stage,
+      panel: rect,
+      camera,
+      baseHeight: baseHeights?.get(itemId) ?? inferBaseHeight(item, item.stage.depth, camera),
+      airborne: isAirborne(state?.pose, state?.poseRig?.descriptors),
+    });
+    item.cx = projection.cx;
+    item.cy = projection.cy;
+    item.width = projection.width;
+    item.height = projection.height;
+  }
+  if (panel.autoDepthOrder) sortPanelByDepth(doc, panelId);
+}
+
+/**
+ * Order a panel's items by depth (§10).
+ *
+ * Only depth-staged assets are reordered, and they keep their band relative to
+ * bubbles and effects — auto ordering is about the stage, not about promoting
+ * characters over dialogue.
+ */
+export function sortPanelByDepth(doc: ProjectDocument, panelId: ID): void {
+  const panel = doc.panels[panelId];
+  if (!panel) return;
+  const staged: ID[] = [];
+  const positions: number[] = [];
+  panel.itemIds.forEach((id, index) => {
+    const item = doc.items[id];
+    if (item?.kind === "asset" && item.stage) {
+      staged.push(id);
+      positions.push(index);
+    }
+  });
+  if (staged.length < 2) return;
+  // Far first so near draws on top.
+  staged.sort((a, b) => {
+    const left = doc.items[a] as AssetInstance;
+    const right = doc.items[b] as AssetInstance;
+    // depthSortKey is -depth, so ascending puts the farthest first and the
+    // nearest last — and last in itemIds is drawn on top.
+    return depthSortKey(left.stage) - depthSortKey(right.stage);
+  });
+  positions.forEach((position, index) => {
+    panel.itemIds[position] = staged[index];
+  });
 }
 
 // ─── Perspective ────────────────────────────────────────────────────────────
@@ -88,19 +262,31 @@ export function setInstanceStage(
   // scales relative to where the character already was. Inferring it at the new
   // depth instead would make every depth change a no-op: the inferred base
   // would exactly cancel the new scale.
-  const baseHeight = inferBaseHeight(instance, existing?.depth ?? DEFAULT_STAGE.depth);
+  const panel = next.panels[instance.panelId];
+  const camera = panel?.camera;
+  const baseHeight = inferBaseHeight(instance, existing?.depth ?? DEFAULT_STAGE.depth, camera);
 
   instance.stage = stage;
   if (!stage.scaleLocked) {
-    const panel = panelPxRect(next, instance.panelId);
-    const transform = applyStageToInstance(instance, stage, panel, baseHeight);
-    instance.cx = transform.cx;
-    instance.cy = transform.cy;
-    instance.width = transform.width;
-    instance.height = transform.height;
+    const rect = panelPxRect(next, instance.panelId);
+    const state = instance.characterState;
+    const projection = projectInstance({
+      instance,
+      stage,
+      panel: rect,
+      camera,
+      baseHeight,
+      airborne: isAirborne(state?.pose, state?.poseRig?.descriptors),
+    });
+    instance.cx = projection.cx;
+    instance.cy = projection.cy;
+    instance.width = projection.width;
+    instance.height = projection.height;
     // Depth now owns the size, so the framing mode no longer describes it.
     instance.cropMode = "custom";
   }
+  // Depth changed, so auto ordering may need to change with it.
+  if (panel?.autoDepthOrder) sortPanelByDepth(next, instance.panelId);
   touch(next);
   return next;
 }

@@ -29,6 +29,7 @@ import { PAGE_STAGE_ID } from "@/render/constants";
 import { BubbleTextEditor } from "./BubbleTextEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ShapeEditOverlay } from "./ShapeEditOverlay";
+import { PerspectiveOverlay } from "./PerspectiveOverlay";
 import { PoseEditOverlay } from "./PoseEditOverlay";
 import { useViewport, type Viewport } from "./useViewport";
 
@@ -44,6 +45,7 @@ export function CanvasStage() {
   const poseDraft = useUiStore((s) => s.poseDraft);
   const calibrating = useUiStore((s) => s.calibrating);
   const calibrationDraft = useUiStore((s) => s.calibrationDraft);
+  const guideEditPanelId = useUiStore((s) => s.guideEditPanelId);
   const setShapeEditPanel = useUiStore((s) => s.setShapeEditPanel);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -359,6 +361,19 @@ export function CanvasStage() {
           {hoveredPanel && (
             <PanelOutline doc={doc} page={page} panelId={hoveredPanel.id} color="#22d3ee" scale={view.scale} />
           )}
+          {page.panelIds.map((panelId) => {
+            const panel = doc.panels[panelId];
+            return panel ? (
+              <PerspectiveOverlay
+                key={`perspective-${panelId}`}
+                doc={doc}
+                page={page}
+                panel={panel}
+                scale={view.scale}
+                editable={guideEditPanelId === panelId}
+              />
+            ) : null;
+          })}
           {shapeEditPanel && <ShapeEditOverlay doc={doc} page={page} panel={shapeEditPanel} scale={view.scale} />}
           {poseEditInstance && (poseDraft || calibrating) && (
             <PoseEditOverlay

@@ -43,7 +43,9 @@ import {
   setEffectTarget,
   setInstanceCharacterState,
   setInstanceStage,
+  setPanelAutoDepthOrder,
   setPanelCamera,
+  setPanelFocalItem,
   setPanelPerspective,
 } from "./stageOps";
 
@@ -110,7 +112,9 @@ export type DomainCommand =
   | { type: "set-effect-target"; itemId: ID; targetItemId?: ID }
   | { type: "set-bubble-target"; itemId: ID; characterId?: ID; instanceId?: ID }
   | { type: "refresh-bubble-tails"; panelId: ID }
-  | { type: "set-state-calibration"; stateId: ID; calibration?: PoseCalibration };
+  | { type: "set-state-calibration"; stateId: ID; calibration?: PoseCalibration }
+  | { type: "set-panel-focal-item"; panelId: ID; itemId?: ID }
+  | { type: "set-panel-auto-depth-order"; panelId: ID; enabled: boolean };
 
 export interface CommandResult {
   doc: ProjectDocument;
@@ -252,6 +256,10 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       return { doc: setBubbleTarget(doc, command.itemId, { characterId: command.characterId, instanceId: command.instanceId }) };
     case "refresh-bubble-tails":
       return { doc: refreshBubbleTails(doc, command.panelId) };
+    case "set-panel-focal-item":
+      return { doc: setPanelFocalItem(doc, command.panelId, command.itemId) };
+    case "set-panel-auto-depth-order":
+      return { doc: setPanelAutoDepthOrder(doc, command.panelId, command.enabled) };
     case "set-state-calibration": {
       const next = cloneDoc(doc);
       setStateCalibration(next, command.stateId, command.calibration);

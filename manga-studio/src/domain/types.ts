@@ -270,6 +270,16 @@ export interface Panel {
   camera?: PanelCamera;
   /** Editor-only construction guides. Never rendered into the exported page. */
   perspective?: PanelPerspective;
+  /**
+   * The subject camera framing works around (§6). Without it a close-up would
+   * zoom the geometric centre of the panel rather than a character's face.
+   */
+  focalItemId?: ID;
+  /**
+   * Auto depth ordering: nearer subjects draw over farther ones. Off means the
+   * creator's manual layer order wins (§10).
+   */
+  autoDepthOrder?: boolean;
 }
 
 // ─── Panel camera & perspective ─────────────────────────────────────────────
@@ -391,8 +401,8 @@ export type GroundAnchor = "feet" | "center" | "custom";
 export interface InstanceStage {
   /** 0 = at the camera, 1 = far plane. */
   depth: number;
-  /** Ground contact line as a fraction of panel height. */
-  groundY: number;
+  /** Explicit ground line; absent means follow the panel camera's eye level. */
+  groundY?: number;
   anchor: GroundAnchor;
   /** The creator resized by hand; depth stops driving size. */
   scaleLocked: boolean;
@@ -543,4 +553,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;

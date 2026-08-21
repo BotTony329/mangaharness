@@ -212,3 +212,28 @@ Phase 4 closes two Phase 3 gaps: the generic rig did not sit on real artwork, an
 1. **`"look right"` parsed to nothing.** The bare side word was consumed as a body side before it could serve as a direction. For head and torso a side word IS the direction, and verbs like "look" and "lean" now imply their body part.
 2. **Dragging a hand reported a bend nobody asked for.** The untouched elbow was left off the limb line, so "raise the arm" also produced "right elbow bent" — and the Agent's equivalent intent did not, breaking unification. Dragging a tip now carries its mid joint at half the delta, which is also how a puppet limb behaves.
 3. **Bend was measured absolutely, not as a change.** A calibrated arm that already looked bent reported "elbow bent" with zero movement, so a calibrated character read as permanently posed. Bend is now a delta against the calibrated baseline, consistent with every other descriptor.
+
+## D37 — The camera stage becomes visible
+
+Phase 1 shipped a complete, tested, serializing camera and perspective model that **nothing read**. `shotCoverage`, `depthSortKey` and `perspectiveGuideLines` had zero call sites; `panel.camera` was touched only by the inspector that displayed it back to itself. Phase 5 connects the model to the renderer. It adds little new architecture — it makes the existing architecture have consequences.
+
+**`domain/staging.ts` is the projection engine.** Deterministic and pure: panel + camera + instance → transform. No physical camera solve; a manga stage compresses depth for readability rather than reproducing optics.
+
+**The ground line is the anchor, not the image centre.** Scaling about the centre is what makes characters float as they move through depth. Feet stay on the ground line, so two characters at different depths read as standing on one floor.
+
+**Base heights are captured under the OLD camera before a change.** Inferring them under the new camera reproduces the current size exactly and the lens or perspective change does nothing — the same cancellation bug Phase 1 hit with depth.
+
+**Framing follows the focal subject.** `Panel.focalItemId`, falling back to the last character in the panel. Zooming the geometric centre would frame whatever happened to be in the middle rather than a face.
+
+**Optical and manga perspective are separate multipliers.** Lens exponent comes from FOV; manga exponent from `mangaPerspectiveStrength`, and is exactly 1.0 at strength 0 so the control is honest at its default. One is what a camera would see; the other is the artist overstating it.
+
+**Auto depth order is opt-in and defaults off.** Turning it on for existing projects would silently rearrange compositions people had already made. Only staged assets are reordered; bubbles and effects keep their band.
+
+**The redraw boundary is explicit.** Shot and lens are transform-only — cropping to a close-up is honest, the artwork is unchanged and the viewport is tighter. A low or overhead angle is not: it is a new viewpoint that scaling cannot fake, so it reports `requiresRedraw` with a reason rather than stretching the image and calling it a low angle.
+
+### Four bugs the acceptance tests caught
+
+1. **Depth ordering was inverted.** `depthSortKey` is `-depth`, so the comparator had to sort ascending to put the farthest first; it sorted descending and drew near characters behind far ones.
+2. **Angle changes did not reframe.** Framing ran only when the shot changed, so setting a low angle moved the horizon but left the subject where it was.
+3. **Lens changes did nothing** — the base-height cancellation above.
+4. **Depth could not release a framed subject.** Camera framing sets `scaleLocked`, and the Agent's depth tool did not clear it, so "put Mio in the foreground" silently failed after any shot change.
