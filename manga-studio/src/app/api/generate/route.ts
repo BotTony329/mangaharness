@@ -26,7 +26,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     // BYOK session config first; deployment env vars as operator fallback.
     const resolved = resolveProvider(request, "image", trace);
-    const result = await generateAssetImage(parsed.data, resolved?.config ?? null, trace);
+    const background = resolveProvider(request, "background", trace);
+    const result = await generateAssetImage(parsed.data, resolved?.config ?? null, trace, background?.config);
     trace("request_complete", { provider: result.provider });
     return NextResponse.json({ ...result, requestId });
   } catch (error) {

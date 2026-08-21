@@ -24,6 +24,7 @@ export interface AssetProcessingResult {
   processedData?: Buffer;
   processedMimeType?: "image/png";
   processingMethod?: string;
+  processingProvider?: string;
   reason?: string;
 }
 
@@ -34,6 +35,10 @@ export interface AssetPostProcessor {
 export interface AssetProcessingOptions {
   forceBackgroundRemoval?: boolean;
   backgroundRemovalProvider?: BackgroundRemovalProvider;
+  allowLocalFallback?: boolean;
+  sourceUrl?: string;
+  sourceMimeType?: string;
+  strategy?: "auto" | "image-edit" | "provider" | "local";
 }
 
 const MAX_DECODED_PIXELS = 25_000_000;
@@ -61,6 +66,8 @@ export async function processAssetImage(
 
   const alpha = inspectUsefulAlpha(decoded.data, width, height);
   if (alpha.useful) {
+    const validation = validateProcessedAlpha(decoded.data, width, height);
+    if (!validation.valid) return failed(validation.reason);
     return {
       sourceHasAlpha: true,
       hasAlpha: true,
@@ -81,6 +88,11 @@ export async function processAssetImage(
 
   const background = estimateEdgeBackground(decoded.data, width, height);
   if (!background) return failed("No stable edge-connected background was detected");
+  if (options.allowLocalFallback === false) {
+    return failed(background.kind === "checkerboard"
+      ? "Opaque checkerboard detected; provider segmentation is required"
+      : "Opaque image requires foreground extraction");
+  }
   let extraction;
   try {
     extraction = await (options.backgroundRemovalProvider ?? builtInBackgroundRemovalProvider).removeBackground({
@@ -112,9 +124,43 @@ export async function processAssetImage(
       processedData,
       processedMimeType: "image/png",
       processingMethod: `${(options.backgroundRemovalProvider ?? builtInBackgroundRemovalProvider).id}:${extraction.method}`,
+      processingProvider: (options.backgroundRemovalProvider ?? builtInBackgroundRemovalProvider).id,
     };
   } catch {
     return failed("The transparent derivative could not be encoded");
+  }
+}
+
+/** Validate and normalize provider-produced cutouts before they can become derivatives. */
+export async function validateTransparentImageBytes(
+  data: Buffer,
+  processingMethod: string,
+  processingProvider: string,
+): Promise<AssetProcessingResult> {
+  let decoded: { data: Buffer; info: sharp.OutputInfo };
+  try {
+    decoded = await sharp(data, { limitInputPixels: MAX_DECODED_PIXELS }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  } catch {
+    return failed("Provider cutout could not be decoded safely");
+  }
+  const { width, height, channels } = decoded.info;
+  if (channels !== 4 || width < 4 || height < 4) return failed("Provider cutout dimensions or channels are unsupported");
+  if (!inspectUsefulAlpha(decoded.data, width, height).useful) return failed("Provider cutout did not contain real transparency");
+  const validation = validateProcessedAlpha(decoded.data, width, height);
+  if (!validation.valid) return failed(validation.reason);
+  try {
+    return {
+      sourceHasAlpha: false,
+      hasAlpha: true,
+      backgroundRemoved: true,
+      processingStatus: "ready",
+      processedData: await sharp(decoded.data, { raw: { width, height, channels: 4 } }).png().toBuffer(),
+      processedMimeType: "image/png",
+      processingMethod,
+      processingProvider,
+    };
+  } catch {
+    return failed("Provider cutout could not be normalized as PNG");
   }
 }
 

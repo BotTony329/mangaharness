@@ -48,8 +48,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 /** Forget Provider: deletes the encrypted credential cookie. */
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const kind = request.nextUrl.searchParams.get("kind");
-  if (kind !== "agent" && kind !== "image") {
-    return NextResponse.json({ error: "kind must be 'agent' or 'image'" }, { status: 400 });
+  if (kind !== "agent" && kind !== "image" && kind !== "background") {
+    return NextResponse.json({ error: "Unknown provider kind" }, { status: 400 });
   }
   const response = NextResponse.json({ ok: true });
   clearSessionConfig(response, kind as ProviderKind);

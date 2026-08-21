@@ -36,8 +36,19 @@ export interface ImageGenerationResult {
   data: Buffer;
 }
 
+export interface ImageEditRequest {
+  instruction: string;
+  image: { mimeType: string; data: Buffer; url?: string };
+  trace?: GenerationTrace;
+}
+
 export interface ProviderCapabilities {
   textToImage: boolean;
+  /** Canonical capability names used by the processing cascade. */
+  supportsReferenceImage: boolean;
+  supportsTransparentBackground: boolean;
+  supportsImageEditing: boolean;
+  /** Compatibility aliases retained for existing clients and stored tests. */
   referenceImage: boolean;
   imageVariation: boolean;
   transparentOutput: boolean;
@@ -56,6 +67,7 @@ export interface ImageGenerationProvider {
   capabilities: ProviderCapabilities;
   testConnection(): Promise<ProviderStatus>;
   generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult>;
+  editImage?(request: ImageEditRequest): Promise<ImageGenerationResult>;
 }
 
 /** Thrown by adapters; `safeMessage` is what may reach the browser. */

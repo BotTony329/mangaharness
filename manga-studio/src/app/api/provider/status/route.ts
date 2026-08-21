@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createImageProvider } from "@/ai/providerRegistry";
 import { resolveProvider, summarize } from "@/server/providerSession";
 import { isBlobConfigured } from "@/storage/objectStore";
+import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const image = resolveProvider(request, "image");
   const agent = resolveProvider(request, "agent");
+  const background = resolveProvider(request, "background");
 
   let capabilities: unknown;
   if (image) {
@@ -26,6 +28,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     image: { ...summarize(image), capabilities },
     agent: summarize(agent),
+    background: {
+      ...summarize(background),
+      provider: background ? createBackgroundRemovalProvider(background.config).id : undefined,
+    },
     // Legacy top-level fields kept for the generator/agent panels.
     configured: image !== null,
     capabilities,

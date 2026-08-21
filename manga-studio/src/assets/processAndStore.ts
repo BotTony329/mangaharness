@@ -9,6 +9,8 @@ export interface StoredProcessedAsset {
   backgroundRemoved: boolean;
   processingStatus: "ready" | "failed";
   processingReason?: string;
+  backgroundRemovalMethod?: string;
+  backgroundRemovalProvider?: string;
 }
 
 /** Persist the provider/upload source first, then add a transparent derivative when safe. */
@@ -27,7 +29,10 @@ export async function processAndStoreAsset(input: {
   );
   let result: AssetProcessingResult;
   try {
-    result = await (input.processor ?? defaultAssetPostProcessor).process(input.data, input.category);
+    result = await (input.processor ?? defaultAssetPostProcessor).process(input.data, input.category, {
+      sourceUrl: source.url,
+      sourceMimeType: input.mimeType,
+    });
   } catch {
     return {
       sourceUrl: source.url,
@@ -65,5 +70,7 @@ export async function processAndStoreAsset(input: {
     backgroundRemoved: result.backgroundRemoved,
     processingStatus: result.processingStatus,
     processingReason: result.reason,
+    backgroundRemovalMethod: result.processingMethod,
+    backgroundRemovalProvider: result.processingProvider,
   };
 }

@@ -8,6 +8,7 @@ import { redactSecrets } from "../security";
 import {
   ProviderError,
   type ImageGenerationProvider,
+  type ImageEditRequest,
   type ImageGenerationRequest,
   type ImageGenerationResult,
   type ProviderStatus,
@@ -34,6 +35,9 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
     model: config.model,
     capabilities: {
       textToImage: true,
+      supportsReferenceImage: true,
+      supportsTransparentBackground: false,
+      supportsImageEditing: true,
       referenceImage: true,
       imageVariation: true,
       // Gemini returns opaque images; we do not fake transparency.
@@ -48,51 +52,68 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
     },
 
     async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
-      const parts: unknown[] = [];
-      for (const ref of request.referenceImages ?? []) {
-        parts.push({ inline_data: { mime_type: ref.mimeType, data: ref.data.toString("base64") } });
-      }
-      parts.push({ text: request.prompt });
-
-      request.trace?.("outbound_request_start", {
-        provider: "gemini",
-        operation: "generate_image",
-        endpointPath: "/v1beta/models/:model:generateContent",
-      });
-      const response = await geminiFetch(config, `/v1beta/models/${config.model}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-        }),
-      });
-      request.trace?.("outbound_response_received", { provider: "gemini", httpStatus: response.status });
-
-      if (!response.ok) {
-        throw new ProviderError(await safeErrorMessage(response, config.model, config.apiKey), mapStatus(response.status), {
-          provider: "Google Gemini",
-          model: config.model,
-          endpoint: "/v1beta/models/:model:generateContent",
-          httpStatus: response.status,
-        });
-      }
-
-      const body = (await readBounded(response)) as {
-        candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[];
-      };
-      const imagePart = body.candidates
-        ?.flatMap((c) => c.content?.parts ?? [])
-        .find((part) => part.inlineData?.data);
-      if (!imagePart?.inlineData?.data) {
-        throw new ProviderError("Provider returned no image (the prompt may have been refused)");
-      }
-      request.trace?.("provider_response_parsed", { provider: "gemini", imageFound: true });
-      return {
-        mimeType: imagePart.inlineData.mimeType ?? "image/png",
-        data: Buffer.from(imagePart.inlineData.data, "base64"),
-      };
+      return runGeminiImageRequest(config, request, "generate_image");
     },
+
+    async editImage(request: ImageEditRequest): Promise<ImageGenerationResult> {
+      return runGeminiImageRequest(config, {
+        prompt: request.instruction,
+        assetType: "character",
+        referenceImages: [request.image],
+        trace: request.trace,
+      }, "edit_image");
+    },
+  };
+}
+
+async function runGeminiImageRequest(
+  config: GeminiConfig,
+  request: ImageGenerationRequest,
+  operation: "generate_image" | "edit_image",
+): Promise<ImageGenerationResult> {
+  const parts: unknown[] = [];
+  for (const ref of request.referenceImages ?? []) {
+    parts.push({ inline_data: { mime_type: ref.mimeType, data: ref.data.toString("base64") } });
+  }
+  parts.push({ text: request.prompt });
+
+  request.trace?.("outbound_request_start", {
+    provider: "gemini",
+    operation,
+    endpointPath: "/v1beta/models/:model:generateContent",
+  });
+  const response = await geminiFetch(config, `/v1beta/models/${config.model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+    }),
+  });
+  request.trace?.("outbound_response_received", { provider: "gemini", httpStatus: response.status });
+
+  if (!response.ok) {
+    throw new ProviderError(await safeErrorMessage(response, config.model, config.apiKey), mapStatus(response.status), {
+      provider: "Google Gemini",
+      model: config.model,
+      endpoint: "/v1beta/models/:model:generateContent",
+      httpStatus: response.status,
+    });
+  }
+
+  const body = (await readBounded(response)) as {
+    candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[];
+  };
+  const imagePart = body.candidates
+    ?.flatMap((c) => c.content?.parts ?? [])
+    .find((part) => part.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    throw new ProviderError("Provider returned no image (the prompt may have been refused)");
+  }
+  request.trace?.("provider_response_parsed", { provider: "gemini", imageFound: true });
+  return {
+    mimeType: imagePart.inlineData.mimeType ?? "image/png",
+    data: Buffer.from(imagePart.inlineData.data, "base64"),
   };
 }
 

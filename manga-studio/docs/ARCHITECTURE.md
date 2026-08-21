@@ -41,16 +41,18 @@ Character and prop images are compositing layers, while backgrounds are rectangu
 
 ```text
 ImageGenerationProvider → immutable source image
-                        → AssetPostProcessor inspection
-                        → BackgroundRemovalProvider (when opaque)
-                        → alpha/bounds validation
+                        → validate provider-native alpha
+                        → same-provider edit/cutout (when supported)
+                        → dedicated BackgroundRemovalProvider (when configured)
+                        → built-in heuristic (last fallback only)
+                        → alpha/bounds validation after every candidate
                         → transparent PNG derivative
                         → SourceAsset ready for canvas/Agent composition
 ```
 
-`src/assets/backgroundRemoval.ts` is the provider boundary. Its built-in Vercel-compatible implementation uses bounded pixel operations: an edge-connected flood for solid backgrounds and a connectivity-based matte for baked two-colour checkerboards. The checkerboard path identifies interior foreground evidence, closes narrow line-art gaps, fills enclosed artwork, and removes the spatially exterior pattern; it never deletes white, grey, or black colours globally. A hosted or ML segmentation adapter can replace it without changing generation providers, library ingestion, or canvas rendering.
+`src/assets/processingPipeline.ts` owns that ordered cascade. Image adapters declare `supportsTransparentBackground`, `supportsImageEditing`, and `supportsReferenceImage`; capable generation adapters are explicitly asked for alpha, and capable edit adapters receive the immutable generated/uploaded source plus a strict isolate-without-redrawing instruction. `src/assets/providers/` is the independent hosted-segmentation boundary, currently with a remove.bg preset and the declarative Custom API adapter. `src/assets/backgroundRemoval.ts` remains the bounded local connectivity/morphology implementation and is deliberately last: a baked checkerboard overlapping white clothing, skin, grayscale shading, or thin line art is not safely solvable by color thresholding.
 
-Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the original bytes; `processedImageUrl` identifies a separately stored PNG derivative. A character/prop with an explicit processing state is composable only when the state is `ready`, real alpha was validated, and a derivative URL exists. Failed sources stay in the library with a safe reason and can be retried through the same server pipeline. `assetRenderUrl` is the single thumbnail, reference, canvas, and export selection rule and only promotes a validated derivative.
+Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the original bytes; `processedImageUrl` identifies a separately stored PNG derivative. `backgroundRemovalStatus`, method, and provider record the cutout lifecycle without putting credentials in project data. A character/prop is composable only when the state is `ready`, real alpha was validated, and a derivative URL exists. Failed sources stay in the library with Retry, Image AI, provider selection, Keep Raw, and expandable safe details. `assetRenderUrl` is the single thumbnail, reference, canvas, and export selection rule and only promotes a validated derivative.
 
 ## Module rules
 
@@ -80,4 +82,4 @@ Konva.js via react-konva. Rationale: per-group clipping (`clipX/Y/Width/Height`)
 
 ## Testing
 
-Vitest suites guard geometry, source-vs-instance invariants, lifecycle references, Character state merging and resolution, scene continuity, command behavior, scope enforcement/auditing, serialization migrations, AI security, transparency inspection, solid/checkerboard extraction, invalid-alpha rejection, derivative preference, reprocessing, and Agent readiness. `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.
+Vitest suites guard geometry, source-vs-instance invariants, lifecycle references, Character state merging and resolution, scene continuity, command behavior, scope enforcement/auditing, serialization migrations, AI security, transparency inspection, cascade ordering, image-edit cutout, dedicated-provider validation, solid/checkerboard fallback, remove.bg multipart/auth handling, derivative preference, reprocessing, and Agent readiness. `scripts/e2e.mjs` drives the full agent → generation → composition → persistence → export loop in headless Chromium against `scripts/fake-providers.mjs`.

@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { loadStoredAsset } from "@/assets/loadStoredAsset";
-import { defaultAssetPostProcessor } from "@/assets/postProcessor";
+import { createAssetProcessingPipeline } from "@/assets/processingPipeline";
 import { putObject } from "@/storage/objectStore";
 import { POST } from "./route";
 
 vi.mock("@/assets/loadStoredAsset", () => ({ loadStoredAsset: vi.fn() }));
-vi.mock("@/assets/postProcessor", () => ({
-  defaultAssetPostProcessor: { process: vi.fn() },
+const processMock = vi.fn();
+vi.mock("@/assets/processingPipeline", () => ({
+  createAssetProcessingPipeline: vi.fn(() => ({ process: processMock })),
 }));
 vi.mock("@/storage/objectStore", () => ({ putObject: vi.fn() }));
 
 const loadMock = vi.mocked(loadStoredAsset);
-const processMock = vi.mocked(defaultAssetPostProcessor.process);
 const putMock = vi.mocked(putObject);
 
 beforeEach(() => {
@@ -48,7 +48,13 @@ describe("POST /api/assets/remove-background", () => {
       backgroundRemoved: true,
       processingStatus: "ready",
     });
-    expect(processMock).toHaveBeenCalledWith(Buffer.from("source-image"), "character", { forceBackgroundRemoval: true });
+    expect(createAssetProcessingPipeline).toHaveBeenCalled();
+    expect(processMock).toHaveBeenCalledWith(Buffer.from("source-image"), "character", {
+      forceBackgroundRemoval: true,
+      sourceMimeType: "image/jpeg",
+      sourceUrl: "https://blob.example/cute-girl.jpg",
+      strategy: "auto",
+    });
     expect(putMock).toHaveBeenCalledWith(expect.stringMatching(/^processed\/manual-/), Buffer.from("transparent-png"), "image/png");
   });
 

@@ -416,7 +416,7 @@ describe("executePlan", () => {
     const failedAsset = Object.values(after.assets).find((asset) => asset.metadata?.pose === "jumping");
     expect(failedAsset).toMatchObject({ processingStatus: "failed", storageUrl: "https://example.com/generated-yuri.jpg" });
     expect(after.panels[page.panelIds[0]].itemIds).toHaveLength(0);
-    expect(failures.join(" ")).toContain("raw source was preserved");
+    expect(failures.join(" ")).toContain("raw source has been preserved");
     expect(failures.join(" ")).toContain("Reprocess");
   });
 
