@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { processAssetImage } from "./postProcessor";
 import { detectColorContamination, COLOR_CONTAMINATION_MESSAGE } from "./colorContamination";
-import { selectBackgroundStrategy } from "@/ai/promptTemplates";
+import { foregroundAssetPolicy } from "@/ai/foregroundPolicy";
 
 const W = 160;
 const H = 220;
@@ -124,12 +124,13 @@ async function extract(buf: Buffer, expectMonochrome = true) {
 }
 
 describe("monochrome character on a pure white background", () => {
-  it("prefers the white background strategy for monochrome, chroma key otherwise", () => {
-    expect(selectBackgroundStrategy({ monochrome: true })).toBe("white");
-    expect(selectBackgroundStrategy({ monochrome: false })).toBe("chroma-key");
-    // Native alpha always wins when the provider genuinely supports it.
-    expect(selectBackgroundStrategy({ monochrome: true, supportsNativeTransparency: true })).toBe("native-alpha");
-    expect(selectBackgroundStrategy({ monochrome: false, supportsNativeTransparency: true })).toBe("native-alpha");
+  it("puts every foreground asset on white, colour and monochrome alike", () => {
+    // The old split — white for monochrome, a magenta chroma key otherwise —
+    // is exactly what kept reintroducing the purple fringe on colour art.
+    expect(foregroundAssetPolicy({}).background).toBe("pure-white");
+    expect(foregroundAssetPolicy({ supportsNativeTransparency: false }).background).toBe("pure-white");
+    // A provider with real alpha still needs no matte at all.
+    expect(foregroundAssetPolicy({ supportsNativeTransparency: true }).background).toBe("native-alpha");
   });
 
   it("removes the exterior white background", async () => {

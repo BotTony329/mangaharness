@@ -7,6 +7,11 @@
 
 import type { GeneratedAssetType } from "./types";
 import type { StyleProfile } from "@/domain/types";
+import {
+  backgroundClause,
+  foregroundAssetPolicy,
+  type ForegroundAssetGenerationPolicy,
+} from "./foregroundPolicy";
 
 export interface AssetPromptInput {
   assetType: GeneratedAssetType;
@@ -84,13 +89,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
     case "prop":
       lines.push(
         `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
-        isolationInstruction(
-          "object",
-          selectBackgroundStrategy({
-            supportsNativeTransparency: input.supportsNativeTransparency,
-            monochrome: input.monochrome,
-          }),
-        ),
+        isolationInstruction("object", foregroundAssetPolicy({ supportsNativeTransparency: input.supportsNativeTransparency })),
       );
       break;
   }
@@ -135,84 +134,35 @@ function styleInstruction(style: AssetPromptInput["style"]): string {
 }
 
 /**
- * The colour the extractor keys out when a provider cannot emit alpha.
- *
- * Magenta is chosen because it is maximally distant from ink, paper, and skin
- * in RGB, so the perimeter flood has a wide safety margin, and because it is
- * far rarer in manga artwork than a green screen would be.
- */
-export const CHROMA_KEY_PROMPT_COLOR = "magenta (RGB 255, 0, 255)";
-
-/**
  * How to ask for an isolated subject.
  *
- * Critically, no branch ever asks an opaque-only provider for a "transparent
- * background", and none uses the word checkerboard. Image models cannot honour
- * negations reliably, so naming the checkerboard conditions them to draw one;
- * and a model with no alpha channel can only satisfy "transparent background"
- * by painting the thing transparency looks like — the grey grid. That pairing
- * produced the baked checkerboards this pipeline then failed to remove.
+ * The backdrop decision does NOT live here any more — it lives in
+ * `foregroundAssetPolicy`, so character, prop, expression, SFX and decoration
+ * generation cannot drift apart. What remains here is framing: what to draw and
+ * what to leave out.
  *
- * Every branch instead asks for something an opaque model CAN deliver and the
- * extractor can key deterministically: one flat, unbroken field.
+ * No branch ever asks an opaque-only provider for a "transparent background",
+ * and none names the checkerboard. Image models cannot honour negations
+ * reliably: naming the checkerboard conditions them to draw one, and a model
+ * with no alpha channel can only satisfy "transparent background" by painting
+ * the thing transparency looks like.
  */
-export type BackgroundStrategy = "native-alpha" | "white" | "chroma-key";
-
-/**
- * Which background to ask the model for.
- *
- * Monochrome line art gets a pure white field rather than a chroma key. A
- * saturated screen reflects onto the subject, and the model bakes that spill
- * into hair strands and silhouette edges as part of the artwork — no
- * post-process can separate it from intended colour afterwards, and on a
- * black-and-white asset a magenta halo is glaring. White cannot tint anything.
- *
- * White is only safe because extraction is connectivity-based: the flood
- * removes perimeter-connected background and never touches enclosed whites, so
- * eye whites, white clothing, highlights, and interior gaps survive. A global
- * "near-white becomes transparent" rule could not use this strategy at all.
- *
- * Coloured art keeps the chroma key: its own palette can occupy the full
- * near-white range, where a white background offers no separation.
- */
-export function selectBackgroundStrategy(input: {
-  supportsNativeTransparency?: boolean;
-  monochrome?: boolean;
-}): BackgroundStrategy {
-  if (input.supportsNativeTransparency) return "native-alpha";
-  return input.monochrome ? "white" : "chroma-key";
-}
-
-function backgroundInstruction(subject: "character" | "object", strategy: BackgroundStrategy): string {
-  switch (strategy) {
-    case "native-alpha":
-      return `Output a PNG whose background is genuinely empty using a real alpha channel.`;
-    case "white":
-      return `Place the ${subject} on a completely uniform pure white (#FFFFFF) background. The background must contain no objects, texture, gradient, shadows, pattern, or colour.`;
-    case "chroma-key":
-      return `Place the ${subject} on a completely flat, uniform, solid ${CHROMA_KEY_PROMPT_COLOR} background — one single unbroken colour covering every pixel behind the ${subject}, with no gradient, shading, texture, pattern, or objects.`;
-  }
-}
-
-function isolationInstruction(subject: "character" | "object", strategy: BackgroundStrategy): string {
+function isolationInstruction(subject: "character" | "object", policy: ForegroundAssetGenerationPolicy): string {
   const framing =
     subject === "character"
       ? "Isolated single character, complete unbroken silhouette, nothing cropped. No scenery, no environment, no floor, no shadow on the ground, no frame, no border, no text, no speech bubbles."
       : "Single isolated object, complete unbroken silhouette. No scenery, no surface it rests on, no shadow on the ground, no frame, no text.";
-  return `${framing} ${backgroundInstruction(subject, strategy)}`;
+  return `${framing} ${backgroundClause(policy, subject)}`;
 }
 
 function characterIsolationInstruction(input: AssetPromptInput | Omit<AssetPromptInput, "assetType">): string {
-  const strategy = selectBackgroundStrategy({
-    supportsNativeTransparency: input.supportsNativeTransparency,
-    monochrome: input.monochrome,
-  });
-  // Monochrome renders state the art language and the background together, so
-  // the model never has to infer that "no colour" also governs the backdrop.
-  if (strategy === "white") {
-    return "Draw the character as clean monochrome black-and-white manga line art on a completely uniform pure white background. The background must contain no objects, texture, gradient, shadows, pattern, checkerboard, or colour. Isolated single character, complete unbroken silhouette, nothing cropped, no frame, no text, no speech bubbles.";
-  }
-  return isolationInstruction("character", strategy);
+  const policy = foregroundAssetPolicy({ supportsNativeTransparency: input.supportsNativeTransparency });
+  // Monochrome states the art language and the backdrop together, so the model
+  // never has to infer that "no colour" also governs what is behind the figure.
+  const language = input.monochrome
+    ? "Draw the character as clean monochrome black-and-white manga line art."
+    : "";
+  return [language, isolationInstruction("character", policy)].filter(Boolean).join(" ");
 }
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {
@@ -245,17 +195,14 @@ function mangaEffectDescription(input: AssetPromptInput): string {
 }
 
 function mangaEffectIsolation(input: AssetPromptInput): string {
-  const strategy = selectBackgroundStrategy({
-    supportsNativeTransparency: input.supportsNativeTransparency,
-    monochrome: input.monochrome,
-  });
+  const policy = foregroundAssetPolicy({ supportsNativeTransparency: input.supportsNativeTransparency });
   // A tone tile must fill its frame; every other language asset is one
   // isolated graphic that will be composited over artwork.
   const framing =
     input.languageCategory === "tones"
       ? "The texture fills the entire frame edge to edge, evenly, with no border, no subject, and no text."
       : "One single isolated graphic, centered, complete and uncropped. No characters, no scenery, no frame, no border, no watermark, and no text unless the graphic itself is lettering.";
-  return `${framing} ${backgroundInstruction("object", strategy)}`;
+  return `${framing} ${backgroundClause(policy, "graphic")}`;
 }
 
 function aspectHint(aspect: "portrait" | "landscape" | "square"): string {

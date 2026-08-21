@@ -26,6 +26,8 @@ const EFFECT_KINDS: { kind: EffectKind; label: string }[] = [
 ];
 
 export function TopBar() {
+  const advanced = useUiStore((s) => s.advancedMode);
+  const setAdvancedMode = useUiStore((s) => s.setAdvancedMode);
   const doc = useEditorStore((s) => s.doc);
   const dirty = useEditorStore((s) => s.dirty);
   const canUndo = useEditorStore((s) => s.past.length > 0);
@@ -113,6 +115,18 @@ export function TopBar() {
       <Dropdown label="+ Effect" items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))} onPick={(k) => addEffectToPanel(k as EffectKind)} />
 
       <div className="flex-1" />
+
+      {/* Advanced reveals rigging and raw camera numerics. Off by default: a
+          creator directs the scene, the harness picks the implementation. */}
+      <label className="flex items-center gap-1 text-[10px] text-zinc-500" title="Show rigging and numeric camera controls">
+        <input
+          type="checkbox"
+          className="accent-violet-500"
+          checked={advanced}
+          onChange={(event) => setAdvancedMode(event.target.checked)}
+        />
+        Advanced
+      </label>
 
       <button
         className="max-w-[220px] truncate rounded border border-violet-700/70 bg-violet-950/40 px-3 py-1 text-violet-200 hover:bg-violet-900/50"

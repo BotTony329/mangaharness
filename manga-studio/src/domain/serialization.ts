@@ -252,6 +252,21 @@ const MIGRATIONS: Record<number, Migration> = {
    * same appearance they had before styles existed.
    */
   10: (doc) => ({ ...doc, language: doc.language ?? {}, schemaVersion: 11 }),
+  /**
+   * v11 → v12: relationships and interactions.
+   *
+   * Purely additive. No relationship is inferred from existing scene data —
+   * two characters appearing in one panel is not evidence they are friends,
+   * and fabricating edges would poison the grounding this graph exists to make
+   * deterministic.
+   */
+  11: (doc) => ({
+    ...doc,
+    relationships: doc.relationships ?? {},
+    interactions: doc.interactions ?? {},
+    interactionRenders: doc.interactionRenders ?? {},
+    schemaVersion: 12,
+  }),
 };
 
 function migrate(input: unknown): ProjectDocument {

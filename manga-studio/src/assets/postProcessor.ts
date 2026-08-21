@@ -11,6 +11,7 @@ import type { AssetCategory } from "@/domain/types";
 import {
   builtInBackgroundRemovalProvider,
   estimateEdgeBackground,
+  validateWhiteBackground,
   type BackgroundRemovalProvider,
 } from "./backgroundRemoval";
 import { describeContamination, detectColorContamination } from "./colorContamination";
@@ -41,6 +42,14 @@ export interface AssetProcessingOptions {
   strategy?: "auto" | "image-edit" | "provider" | "local";
   /** Project style is black-and-white: refuse a result carrying real colour. */
   expectMonochrome?: boolean;
+  /**
+   * Enforce the pure-white backdrop contract.
+   *
+   * Opt-IN, and set only by the generation path. Uploads may legitimately carry
+   * any backdrop, and repairing a pre-policy asset means re-extracting the
+   * magenta matte it was generated with — refusing those would break both.
+   */
+  requireWhiteBackground?: boolean;
 }
 
 const MAX_DECODED_PIXELS = 25_000_000;
@@ -102,6 +111,23 @@ export async function processAssetImage(
 
   const background = estimateEdgeBackground(decoded.data, width, height);
   if (!background) return failed("No stable edge-connected background was detected");
+
+  /**
+   * Enforce the white-background contract BEFORE keying anything out.
+   *
+   * Every foreground asset is now generated on pure white. If the provider
+   * returned a coloured backdrop anyway, extracting it would blend that colour
+   * into every anti-aliased edge — the exact failure the policy exists to
+   * prevent. Failing here is recoverable (regenerate); a tinted silhouette that
+   * passed validation is not.
+   *
+   * Only the generation path opts in. Uploads and the repair of pre-policy
+   * assets deliberately skip it.
+   */
+  if (options.requireWhiteBackground === true) {
+    const white = validateWhiteBackground(decoded.data, width, height);
+    if (!white.valid) return failed(white.reason ?? "The generated background is not white.");
+  }
   if (options.allowLocalFallback === false) {
     return failed("Opaque image requires foreground extraction");
   }

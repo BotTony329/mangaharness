@@ -83,6 +83,15 @@ interface UiState {
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
+  /**
+   * Advanced / Developer surface.
+   *
+   * Rigging is an implementation capability, not a creator workflow: nobody
+   * should have to segment body parts or confirm sixteen rectangles to move an
+   * arm. The puppet machinery stays — it is what makes local edits free — but
+   * the controls that expose it live behind this flag.
+   */
+  advancedMode: boolean;
   openGenerator(request: GeneratorRequest): void;
   closeGenerator(): void;
   setShapeEditPanel(panelId: ID | null): void;
@@ -102,6 +111,7 @@ interface UiState {
   closeSettings(): void;
   openArtStyle(): void;
   closeArtStyle(): void;
+  setAdvancedMode(enabled: boolean): void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -118,6 +128,7 @@ export const useUiStore = create<UiState>((set) => ({
   compilerCharacterId: null,
   settingsOpen: false,
   artStyleOpen: false,
+  advancedMode: false,
   openGenerator: (request) => set({ generator: request }),
   closeGenerator: () => set({ generator: null }),
   setShapeEditPanel: (panelId) => set({ shapeEditPanelId: panelId }),
@@ -136,6 +147,7 @@ export const useUiStore = create<UiState>((set) => ({
   closeCompiler: () => set({ compilerCharacterId: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  setAdvancedMode: (enabled) => set({ advancedMode: enabled }),
   openArtStyle: () => set({ artStyleOpen: true }),
   closeArtStyle: () => set({ artStyleOpen: false }),
 }));

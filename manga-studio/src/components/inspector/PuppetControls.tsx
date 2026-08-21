@@ -39,6 +39,7 @@ export function PuppetControls({ item }: { item: AssetInstance }) {
   const transientDispatch = useEditorStore((state) => state.transientDispatch);
   const commitTransient = useEditorStore((state) => state.commitTransient);
   const showPrompt = useUiStore((state) => state.showPuppetCapabilityPrompt);
+  const advanced = useUiStore((state) => state.advancedMode);
 
   const puppet = puppetForInstance(doc, item);
   if (!puppet || !item.puppet) return null;
@@ -129,11 +130,21 @@ export function PuppetControls({ item }: { item: AssetInstance }) {
 
       {/* ── POSE ── */}
       <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Pose</p>
-      <div className="mb-3 space-y-1.5">
-        {jointRow("head")}
-        {ARM_JOINTS.map(jointRow)}
-      </div>
-      <p className="mb-3 text-[9px] text-zinc-600">Or drag the joint handles directly on canvas.</p>
+      {advanced ? (
+        <>
+          <div className="mb-3 space-y-1.5">
+            {jointRow("head")}
+            {ARM_JOINTS.map(jointRow)}
+          </div>
+          <p className="mb-3 text-[9px] text-zinc-600">Raw joint angles — Advanced.</p>
+        </>
+      ) : (
+        // Normal creators pose by dragging on the canvas. Degree sliders per
+        // joint are a rigging surface, not a directing one.
+        <p className="mb-3 text-[10px] leading-4 text-zinc-500">
+          Drag the handles on the character to pose them. Nothing is generated.
+        </p>
+      )}
 
       {/* ── HANDS & PROPS ── */}
       {Object.values(puppet.attachments).length > 0 && (

@@ -279,3 +279,87 @@ function medianColor(values: Rgb[]): Rgb {
   return [channel(0), channel(1), channel(2)];
 }
 
+/**
+ * Does this look like the pure-white backdrop the policy asked for?
+ *
+ * Checked BEFORE extraction. A provider that ignored the contract and returned
+ * a coloured, textured or gradient backdrop must not be quietly keyed out: the
+ * result would carry that colour into every edge pixel, which is the failure
+ * the white policy exists to prevent. Better to fail loudly and let the
+ * creator regenerate.
+ *
+ * Tolerant of anti-aliasing, JPEG ringing and slightly off-white paper — it is
+ * checking for a *violation*, not grading whiteness.
+ */
+export interface WhiteBackgroundVerdict {
+  valid: boolean;
+  /** The colour actually found at the border. */
+  measured: Rgb;
+  reason?: string;
+}
+
+/** Minimum luminance for a border colour to read as white paper rather than a tone. */
+const WHITE_MIN_LUMINANCE = 208;
+/** Above this saturation the backdrop is a colour, not white. */
+const WHITE_MAX_CHROMA = 34;
+/** Border variation above this means texture or a gradient rather than a flat field. */
+const WHITE_MAX_SPREAD = 46;
+
+export function validateWhiteBackground(data: Buffer, width: number, height: number): WhiteBackgroundVerdict {
+  const samples: Rgb[] = [];
+  const push = (x: number, y: number) => {
+    const offset = (y * width + x) * 4;
+    // A fully transparent border is a provider cutout, not a white field.
+    if (data[offset + 3] === 0) return;
+    samples.push([data[offset], data[offset + 1], data[offset + 2]]);
+  };
+  const step = Math.max(1, Math.floor(Math.max(width, height) / 128));
+  for (let x = 0; x < width; x += step) {
+    push(x, 0);
+    push(x, height - 1);
+  }
+  for (let y = step; y < height - 1; y += step) {
+    push(0, y);
+    push(width - 1, y);
+  }
+  if (samples.length === 0) {
+    return { valid: true, measured: [255, 255, 255] };
+  }
+
+  const median = (index: number) =>
+    samples.map((sample) => sample[index]).sort((a, b) => a - b)[Math.floor(samples.length / 2)];
+  const measured: Rgb = [median(0), median(1), median(2)];
+
+  if (chroma(measured) > WHITE_MAX_CHROMA) {
+    return { valid: false, measured, reason: describeBackdrop(measured) };
+  }
+  if (luminance(measured) < WHITE_MIN_LUMINANCE) {
+    return { valid: false, measured, reason: "The generated background is grey or dark rather than white." };
+  }
+  const spread = median3(samples.map((sample) => colorDistance(sample, measured)));
+  if (spread > WHITE_MAX_SPREAD) {
+    return { valid: false, measured, reason: "The generated background is textured or a gradient rather than flat white." };
+  }
+  return { valid: true, measured };
+}
+
+/** Name the colour a creator can see, so the message is actionable. */
+function describeBackdrop(color: Rgb): string {
+  const [red, green, blue] = color;
+  const name =
+    red > green && blue > green
+      ? "purple/magenta"
+      : green > red && green > blue
+        ? "green"
+        : blue > red && blue > green
+          ? "blue"
+          : red > green && red > blue
+            ? "red/orange"
+            : "coloured";
+  return `The generated background is ${name} rather than white, so extracting it would tint the artwork's edges.`;
+}
+
+function median3(values: number[]): number {
+  return values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+}
+

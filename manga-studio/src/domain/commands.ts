@@ -8,6 +8,14 @@ import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAsse
 import { addBubble, addEffect, duplicateItem, moveItemToIndex, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
 import { addPage, removePage, setPageLayout } from "./pageOps";
 import { renameProject } from "./projectOps";
+import { addRelationship, removeRelationship } from "./relationships";
+import {
+  createInteraction,
+  recordInteractionRender,
+  removeInteraction,
+  setInteractionAnchor,
+  type CreateInteractionInput,
+} from "./interactions";
 import {
   addLanguageAsset,
   applyAttachments,
@@ -29,6 +37,9 @@ import type {
   BubbleType,
   CropMode,
   MangaLanguageCategory,
+  RelationshipType,
+  InteractionAnchor,
+  InteractionRender,
   EffectKind,
   ID,
   LayoutPresetId,
@@ -144,6 +155,13 @@ export type DomainCommand =
   | { type: "panel-to-workspace"; instanceId: ID; at?: Point }
   | { type: "delete-workspace-instance"; itemId: ID }
   | { type: "rename-project"; name: string }
+  // ── Relationships and interactions ──
+  | { type: "add-relationship"; characterAId: ID; characterBId: ID; relationshipType: RelationshipType; label?: string }
+  | { type: "remove-relationship"; relationshipId: ID }
+  | { type: "create-interaction"; input: CreateInteractionInput }
+  | { type: "remove-interaction"; interactionId: ID }
+  | { type: "set-interaction-anchor"; interactionId: ID; anchor: InteractionAnchor }
+  | { type: "record-interaction-render"; input: Omit<InteractionRender, "id" | "createdAt"> }
   | { type: "set-project-style"; styleId: ID }
   | { type: "add-custom-style"; input: Omit<StyleProfile, "id" | "family"> }
   | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements }
@@ -357,6 +375,29 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
     }
     case "delete-workspace-instance":
       return { doc: removeWorkspaceItem(doc, command.itemId) };
+    case "add-relationship": {
+      const result = addRelationship(doc, {
+        characterAId: command.characterAId,
+        characterBId: command.characterBId,
+        type: command.relationshipType,
+        label: command.label,
+      });
+      return { doc: result.doc, createdId: result.relationshipId };
+    }
+    case "remove-relationship":
+      return { doc: removeRelationship(doc, command.relationshipId) };
+    case "create-interaction": {
+      const result = createInteraction(doc, command.input);
+      return { doc: result.doc, createdId: result.interactionId };
+    }
+    case "remove-interaction":
+      return { doc: removeInteraction(doc, command.interactionId) };
+    case "set-interaction-anchor":
+      return { doc: setInteractionAnchor(doc, command.interactionId, command.anchor) };
+    case "record-interaction-render": {
+      const result = recordInteractionRender(doc, command.input);
+      return { doc: result.doc, createdId: result.renderId };
+    }
     case "rename-project":
       return { doc: renameProject(doc, command.name) };
     case "set-project-style":

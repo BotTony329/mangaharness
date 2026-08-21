@@ -713,6 +713,110 @@ export interface MangaLanguageAsset {
   updatedAt?: ISODate;
 }
 
+
+// ─── Character relationships and scene interactions ─────────────────────────
+
+/**
+ * Who two characters are to each other — a persistent project fact.
+ *
+ * Deliberately distinct from `CharacterInteraction`: a relationship is who
+ * they ARE, an interaction is what they are DOING in one panel. Collapsing them
+ * would make a single hug imply a permanent bond.
+ */
+export type RelationshipType =
+  | "friend"
+  | "close_friend"
+  | "sibling"
+  | "parent_child"
+  | "teacher_student"
+  | "coworker"
+  | "rival"
+  | "enemy"
+  | "romantic"
+  | "acquaintance"
+  | "custom";
+
+export interface CharacterRelationship {
+  id: ID;
+  projectId: ID;
+  /** For asymmetric types, A holds the leading role: A is the parent, A teaches B. */
+  characterAId: ID;
+  characterBId: ID;
+  type: RelationshipType;
+  /** Creator's own wording, shown instead of the type when present. */
+  label?: string;
+  createdAt: ISODate;
+}
+
+/** What a group of characters is doing together in one panel. */
+export type InteractionType =
+  | "beside"
+  | "face_to_face"
+  | "look_at"
+  | "hold_hands"
+  | "hug"
+  | "high_five"
+  | "hand_object"
+  | "lean_on"
+  | "walk_together"
+  | "sit_together";
+
+/**
+ * How an interaction is currently realised.
+ *
+ * `synchronized` keeps participants as independent instances held together by
+ * shared anchors; `composite` is ONE generated image containing everyone. The
+ * distinction is recorded rather than hidden, because a composite render is
+ * genuinely not two separately editable actors and pretending otherwise would
+ * be the same lie as a skeleton drawn over a flat PNG.
+ */
+export type InteractionRenderMode = "synchronized" | "composite";
+
+export type InteractionStatus = "planned" | "active" | "unsupported";
+
+/** A point two participants must both reach, e.g. joined hands. */
+export interface InteractionAnchor {
+  id: string;
+  /** Panel-local point the participants are solved toward. */
+  at: Point;
+  /** participantId → which body point of theirs meets the anchor. */
+  contacts: Record<ID, "leftHand" | "rightHand" | "shoulder" | "head" | "torso">;
+}
+
+export interface CharacterInteraction {
+  id: ID;
+  panelId: ID;
+  /** Character ids, in role order. */
+  participantIds: ID[];
+  type: InteractionType;
+  /** e.g. { subject: yuriId, target: mioId } — who does what to whom. */
+  roles?: Record<string, ID>;
+  anchors?: InteractionAnchor[];
+  renderMode?: InteractionRenderMode;
+  status?: InteractionStatus;
+  /** Present for composite renders: the joint image and its provenance. */
+  renderId?: ID;
+  createdAt: ISODate;
+}
+
+/**
+ * Provenance for a jointly generated multi-character image.
+ *
+ * The system must know an image contains Yuri AND Mio — for agent grounding,
+ * for reuse, for lineage, and so deleting Mio can report what it would break.
+ */
+export interface InteractionRender {
+  id: ID;
+  interactionId: ID;
+  participantCharacterIds: ID[];
+  /** The identity reference sent for each participant, in the same order. */
+  participantReferenceAssetIds: ID[];
+  generatedAssetId: ID;
+  /** Everything that makes this render reusable; see interactionCacheKey. */
+  cacheKey: string;
+  createdAt: ISODate;
+}
+
 export interface ProjectDocument {
   schemaVersion: number;
   project: Project;
@@ -730,6 +834,12 @@ export interface ProjectDocument {
    * merged in at read time, so this holds only what the creator actually owns.
    */
   language: Record<ID, MangaLanguageAsset>;
+  /** Who characters are to each other — persistent, project-scoped facts. */
+  relationships: Record<ID, CharacterRelationship>;
+  /** What characters are doing together, per panel. */
+  interactions: Record<ID, CharacterInteraction>;
+  /** Provenance for jointly generated multi-character images. */
+  interactionRenders: Record<ID, InteractionRender>;
   items: Record<ID, PanelItem>;
   /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
   workspaceItems: Record<ID, WorkspaceItem>;
@@ -737,4 +847,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;

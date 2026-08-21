@@ -23,6 +23,8 @@ export async function processAndStoreAsset(input: {
   keyPrefix: string;
   processor?: AssetPostProcessor;
   expectMonochrome?: boolean;
+  /** Enforce the pure-white backdrop contract (generation path only). */
+  requireWhiteBackground?: boolean;
 }): Promise<StoredProcessedAsset> {
   const source = await putObject(
     `${input.keyPrefix}/source-${crypto.randomUUID()}.${input.extension}`,
@@ -35,6 +37,7 @@ export async function processAndStoreAsset(input: {
       sourceUrl: source.url,
       sourceMimeType: input.mimeType,
       expectMonochrome: input.expectMonochrome,
+      requireWhiteBackground: input.requireWhiteBackground,
     });
   } catch {
     return {

@@ -17,6 +17,7 @@
  */
 
 import type { Character, ID, ProjectDocument } from "@/domain/types";
+import { relatedCharacters, relationshipTypeFromPhrase } from "@/domain/relationships";
 
 // ─── Normalization ──────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ function tokens(value: string): string[] {
 
 export type CharacterMatchType =
   | "id"
+  | "relationship"
   | "exact-name"
   | "normalized-name"
   | "alias"
@@ -78,6 +80,15 @@ export type CharacterResolution =
 export interface CharacterReferenceInput {
   query: string;
   projectCharacters: Character[];
+  /**
+   * The project's relationship graph, and whose relationships to read.
+   *
+   * "her best friend" is resolvable ONLY when that edge exists as structured
+   * project data. Without it the phrase stays unresolved — inferring who
+   * someone's best friend probably is would be exactly the guessing this
+   * resolver was built to eliminate.
+   */
+  relationships?: RelationshipLookup;
   /** The character behind the user's current selection — the pronoun anchor. */
   selectedCharacterId?: ID;
   selectedInstanceId?: ID;
@@ -153,6 +164,10 @@ export function resolveCharacterReference(input: CharacterReferenceInput): Chara
 
   // 4. Pronouns resolve to context, in the priority order of §13.
   if (PRONOUNS.has(query)) return resolvePronoun(input, raw);
+
+  // 5. Explicit relationships: "her best friend" → whoever that edge names.
+  const related = resolveByRelationship(input, raw);
+  if (related) return related;
 
   const queryTokens = tokens(raw);
 
@@ -486,6 +501,39 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
     entities.push(toEntity(surface, resolution));
   }
 
+  /**
+   * Relationship phrases resolve LAST, because the anchor is usually a
+   * character named earlier in the same sentence: "Yuri hugs her best friend"
+   * needs Yuri resolved before "her best friend" means anything.
+   */
+  const anchorId = input.selectedCharacterId ?? entities.find((entity) => entity.status === "resolved")?.characterId;
+  if (anchorId) {
+    for (const phrase of relationshipPhrases(input.prompt)) {
+      if (entities.some((entity) => normalizeReference(entity.surface) === normalizeReference(phrase))) continue;
+      const resolution = resolveCharacterReference({
+        query: phrase,
+        projectCharacters,
+        selectedCharacterId: input.selectedCharacterId,
+        sceneCharacterIds,
+        relationships: {
+          anchorCharacterId: anchorId,
+          related: relatedCharacters(input.doc, anchorId).map((entry) => ({
+            characterId: entry.characterId,
+            type: entry.relationship.type,
+            label: entry.relationship.label,
+          })),
+        },
+      });
+      // Only report a phrase the graph had an opinion about; an unrelated
+      // "the room" must not become a blocking unresolved entity.
+      if (resolution.status === "resolved" || resolution.status === "ambiguous") {
+        entities.push(toEntity(phrase, resolution));
+      } else if (relationshipTypeFromPhrase(phrase)) {
+        entities.push(toEntity(phrase, resolution));
+      }
+    }
+  }
+
   const blocking = entities
     .filter((entity) => entity.status !== "resolved")
     .map((entity) =>
@@ -552,4 +600,73 @@ export function groundingContext(report: GroundingReport): string[] {
       : "CHARACTER CREATION: FORBIDDEN for this run. create_character and reference generation will be rejected by the runtime.",
   );
   return lines;
+}
+
+// ─── Relationship-based resolution ──────────────────────────────────────────
+
+/**
+ * Read a relationship phrase against the project's relationship graph.
+ *
+ * The anchor is whoever the phrase belongs to — the selected character, or a
+ * character named earlier in the same prompt. Exactly one match resolves;
+ * several is AMBIGUOUS, and none is not-found. A relationship that was never
+ * recorded is never invented.
+ */
+export interface RelationshipLookup {
+  /** Whose relationships to read: the selection, or a character named in the prompt. */
+  anchorCharacterId?: ID;
+  /** Candidates related to the anchor, already filtered to existing characters. */
+  related: { characterId: ID; type: string; label?: string }[];
+}
+
+const RELATIONSHIP_PHRASE = /\b(?:her|his|their|the)\s+([a-z][a-z\s-]{2,30})$/i;
+
+function resolveByRelationship(input: CharacterReferenceInput, raw: string): CharacterResolution | null {
+  const lookup = input.relationships;
+  if (!lookup || lookup.related.length === 0) return null;
+
+  const phrase = RELATIONSHIP_PHRASE.exec(raw.trim());
+  if (!phrase) return null;
+  const wantedType = relationshipTypeFromPhrase(phrase[1]);
+  if (!wantedType) return null;
+
+  const matches = lookup.related.filter((entry) => entry.type === wantedType);
+  if (matches.length === 1) {
+    const character = input.projectCharacters.find((candidate) => candidate.id === matches[0].characterId);
+    if (character) return resolved(character, 0.9, "relationship");
+  }
+  if (matches.length > 1) {
+    return {
+      status: "ambiguous",
+      query: raw,
+      reason: `${matches.length} characters match "${raw}". Say which one.`,
+      candidates: matches.map((entry) => ({
+        characterId: entry.characterId,
+        name: input.projectCharacters.find((c) => c.id === entry.characterId)?.name ?? entry.characterId,
+        matchType: "relationship" as const,
+        note: entry.label,
+      })),
+    };
+  }
+  /**
+   * The phrase names a real relationship KIND that this character does not
+   * have. "Yuri hugs her sister" with no sibling recorded must fail, not fall
+   * through to a token match that might hit someone unrelated.
+   */
+  return { status: "not-found", query: raw };
+}
+
+/**
+ * Relationship phrases in a prompt, e.g. "her best friend", "his sister".
+ *
+ * Only possessive forms count. A bare "the teacher" is a description, and the
+ * description branch already refuses to guess at those.
+ */
+function relationshipPhrases(prompt: string): string[] {
+  const found: string[] = [];
+  for (const match of prompt.matchAll(/\b(her|his|their)\s+([a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)/gi)) {
+    const phrase = `${match[1]} ${match[2]}`.trim();
+    if (relationshipTypeFromPhrase(match[2])) found.push(phrase);
+  }
+  return [...new Set(found)];
 }

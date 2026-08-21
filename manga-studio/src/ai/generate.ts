@@ -111,6 +111,9 @@ export async function generateAssetImage(
       category,
       keyPrefix: "generated",
       expectMonochrome: input.expectMonochrome,
+      // Generation is the one path that promised a white backdrop, so it is the
+      // one path that enforces it.
+      requireWhiteBackground: category === "character" || category === "prop",
       processor: createAssetProcessingPipeline({ imageProvider: provider, backgroundProvider, trace }),
     });
   } catch (error) {

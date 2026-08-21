@@ -410,3 +410,37 @@ After D45 shipped and deployed, the purple fringe was still visible on a charact
 **A rebuild must not be able to break an asset that currently works.** Without care, a failed repair marks the asset failed, `assetRenderUrl` then returns undefined, and a character that was on the page a moment ago disappears — a strictly worse outcome than the fringe being repaired. `preserveOnFailure` restores the asset's previous processing state, and a batch continues past a failure rather than aborting.
 
 The general lesson worth keeping: **any fix to an asset-processing pipeline needs a migration story for already-processed assets, or it is only half shipped.** D43 and D45 both fixed real defects and both left production visibly broken for this reason.
+
+## D47 — Pure white is the only foreground backdrop
+
+Three separate fixes chased the purple fringe downstream. This removes its source.
+
+**Coloured artwork was deliberately generated on a magenta screen.** A saturated matte is blended into every anti-aliased edge pixel by definition, so the contamination was created at generation time, before any extraction code ran — and the model additionally bounced the screen colour onto hair strands as *intended* artwork, which no post-process can separate. Every extraction path then had to be taught to undo it, so any path that forgot reproduced the halo. Decontamination made the symptom recoverable; not introducing the matte makes it impossible.
+
+**One policy, one place.** `foregroundAssetPolicy` is the single decision. Characters, props, expression variations, SFX and manga-language decorations consume it; none carries its own `#FFFFFF` string or chooses a backdrop. Monochrome and colour take the same path — the old split is exactly what let a chroma key survive for colour art. A provider with real alpha still wins, because then there is no matte at all.
+
+**White is safe only because extraction is connectivity-based.** The perimeter flood removes background reachable from the border and never enters enclosed regions, so white shirts, eye whites, highlights and paper survive. A global "near-white becomes transparent" rule could not use this strategy.
+
+**The contract is verified before keying, not assumed.** `validateWhiteBackground` measures the border and refuses extraction when the provider returned a coloured, dark, gradient or textured backdrop, naming the colour it found. It is opt-in and set only by the generation path: uploads may carry any backdrop, and repairing a pre-policy asset means re-extracting the very magenta matte it was generated with. Mild noise is deliberately accepted — variation the flood's own tolerance absorbs is cleanly removable, so failing it would block a usable render for nothing.
+
+The magenta decontamination code stays as legacy repair. It is no longer part of the expected path.
+
+## D48 — Relationships, interactions and puppets are three different things
+
+**A relationship is who two characters ARE; an interaction is what they are DOING in one panel; a puppet is how one of them currently renders.** Collapsing any pair breaks something: a hug in panel 3 would imply a permanent bond, a friendship would imply a pose, and an interaction would inherit one participant's rig limits.
+
+**`hug(Yuri, Mio)` must never decay into two pose values.** Two independently generated renders share no geometry, so the arms miss, the torsos interpenetrate and the scales disagree. The interaction owns what is *between* the participants, which is why it is an object rather than a field on each character.
+
+**Capability decides local versus generative, and says why.** `beside` is placement and works for flat characters. `hold_hands` is a shared contact point two rigs reach toward. `hug` is `JOINT_GENERATION` **even when both characters are fully rigged** — not a rig limitation: no joint rotation produces the occlusion of one arm passing behind the other's back, because the source artwork does not contain it. One rigged and one flat participant reports `HYBRID` rather than pretending either extreme.
+
+**Joint generation sends every participant's own reference.** Describing one character in text while sending the other's picture is what makes a model blend two people into one, so a participant without a usable reference is a hard failure rather than a text fallback.
+
+**Composite renders are recorded honestly.** `InteractionRender` knows the image contains Yuri AND Mio, so grounding, reuse, lineage and deletion can all reason about it. The mode is stored as `composite`: pretending a joint render is still two independently editable puppets would be the same lie as a skeleton drawn over a flat PNG.
+
+**Cache identity is participants + roles + outfits + view + style.** Participants sort so Yuri+Mio matches Mio+Yuri, but roles do not — "Yuri hugs Mio" and "Mio hugs Yuri" are different pictures.
+
+**Relationships resolve phrases, never invent them.** "her close friend" resolves only through a stored edge. A recorded relationship *kind* that this character lacks — "her sister" with no sibling edge — returns NOT_FOUND rather than falling through to a token match that might hit someone unrelated.
+
+## D49 — Rigging becomes an implementation capability, not a workflow
+
+Convert to Puppet, the compiler wizard and raw joint sliders now live behind Advanced. The machinery is unchanged and still powers every free local edit; what changed is that a creator never has to segment body parts or confirm sixteen rectangles to move an arm. The user directs the scene; the harness picks the implementation.
