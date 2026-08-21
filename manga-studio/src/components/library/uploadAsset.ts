@@ -25,6 +25,9 @@ export async function uploadImageFile(
     hasAlpha?: boolean;
     backgroundRemoved?: boolean;
     processingStatus?: "ready" | "failed";
+    processingReason?: string;
+    backgroundRemovalMethod?: string;
+    backgroundRemovalProvider?: string;
     error?: string;
   };
   if (!response.ok || !body.sourceUrl) throw new Error(body.error ?? "Upload failed");
@@ -42,6 +45,10 @@ export async function uploadImageFile(
       hasAlpha: body.hasAlpha,
       backgroundRemoved: body.backgroundRemoved,
       processingStatus: body.processingStatus,
+      backgroundRemovalStatus: body.processingStatus,
+      processingReason: body.processingReason,
+      backgroundRemovalMethod: body.backgroundRemovalMethod,
+      backgroundRemovalProvider: body.backgroundRemovalProvider,
       ...extra,
     },
   });

@@ -55,6 +55,29 @@ describe("Gemini image generation adapter", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("implements second-pass editing with the source image and cutout instruction", async () => {
+    const stages: { stage: string; operation?: string }[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.contents[0].parts[0].inline_data.data).toBe(Buffer.from("opaque source").toString("base64"));
+      expect(body.contents[0].parts[1].text).toContain("transparent background");
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: "iVBORw0KGgo=" } }] } }] }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provider().editImage!({
+      instruction: "Return the character on a transparent background",
+      image: { mimeType: "image/jpeg", data: Buffer.from("opaque source") },
+      trace: (stage, details) => stages.push({ stage, operation: String(details?.operation ?? "") }),
+    });
+
+    expect(stages[0]).toEqual({ stage: "outbound_request_start", operation: "edit_image" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("rejects malformed and image-less responses safely", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 200 })));
     await expect(provider().generateImage(request)).rejects.toMatchObject({ safeMessage: "Invalid image response from provider" });

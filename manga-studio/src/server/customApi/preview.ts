@@ -43,8 +43,8 @@ export function buildRequestPreview(config: ProviderConfig): RequestPreview | nu
   const custom = config.custom;
   if (!custom) return null;
   try {
-    const vars = { ...(config.kind === "image" ? SAMPLE_IMAGE_VARS : SAMPLE_AGENT_VARS), model: config.model };
-    const allowed = config.kind === "image" ? IMAGE_TEMPLATE_VARS : AGENT_TEMPLATE_VARS;
+    const vars = { ...(config.kind !== "agent" ? SAMPLE_IMAGE_VARS : SAMPLE_AGENT_VARS), model: config.model };
+    const allowed = config.kind !== "agent" ? IMAGE_TEMPLATE_VARS : AGENT_TEMPLATE_VARS;
     const body = renderTemplate(parseTemplate(custom.requestTemplate, allowed), vars);
     return previewRequest(custom.method, config.baseUrl, buildHeaders(config, custom), body, config);
   } catch {

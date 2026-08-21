@@ -43,6 +43,7 @@ No AI keys go into Vercel. Each user opens **AI Settings** in the deployed app a
 
 - **Manga Agent (LLM):** pick an API standard (OpenAI Compatible / Anthropic Compatible / Google Gemini), enter base URL, API key, and model — e.g. DeepSeek, Kimi/Moonshot, OpenRouter, Claude, Gemini, or any compatible gateway.
 - **Image Generation:** Google Gemini (supports reference images for character consistency) or any OpenAI-compatible image endpoint.
+- **Background Removal (optional):** remove.bg Quick Preset or any compatible JSON cutout endpoint through Custom API. This is tried only after native alpha and Image AI editing fail.
 
 Test Connection, Save — done. Credentials are encrypted per browser session; "Forget credentials" removes them. Replacing an endpoint/key/model later needs no redeploy and doesn't touch projects.
 
@@ -50,7 +51,7 @@ Test Connection, Save — done. Credentials are encrypted per browser session; "
 
 ## 6. Verify after deployment
 
-1. Open the app → **AI Settings** → enter your agent + image providers → **Test Connection** on both → Save.
+1. Open the app → **AI Settings** → enter your agent + image providers and, if needed, a Background Removal provider → **Test Connection** → Save.
 2. Create a character → *Create & Generate* → a real image should arrive and enter the library.
 3. Run the acceptance flow: agent prompt → compose → edit → save → refresh → export PNG.
 4. Storage should read `vercel-blob` in AI Settings' status (via the API) — if uploads fail, the Blob store isn't connected.

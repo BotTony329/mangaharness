@@ -20,14 +20,16 @@ import { isEncryptionConfigured, openSecret, sealSecret } from "./secretBox";
 
 export const AGENT_COOKIE = "ms_agent_provider";
 export const IMAGE_COOKIE = "ms_image_provider";
+export const BACKGROUND_COOKIE = "ms_background_provider";
 
-export type ProviderKind = "agent" | "image";
+export type ProviderKind = "agent" | "image" | "background";
 
 // "custom" is the universal, declarative provider type — presets are
 // conveniences layered on top, never the capability boundary.
 const agentTypes = ["custom", "openai-compatible", "anthropic-compatible", "gemini"] as const;
 // "generic-rest" is a legacy alias for openai-compatible image endpoints.
 const imageTypes = ["custom", "gemini", "openai-compatible", "generic-rest"] as const;
+const backgroundTypes = ["custom", "remove-bg"] as const;
 
 export type AgentProviderType = (typeof agentTypes)[number];
 export type ImageProviderType = (typeof imageTypes)[number];
@@ -58,18 +60,19 @@ export type ProviderResolutionTrace = (
 export const DEFAULT_BASE_URLS: Record<string, string> = {
   gemini: "https://generativelanguage.googleapis.com",
   "anthropic-compatible": "https://api.anthropic.com",
+  "remove-bg": "https://api.remove.bg/v1.0/removebg",
 };
 
 // ─── Save payload validation ────────────────────────────────────────────────
 
 export const configPayloadSchema = z.object({
-  kind: z.enum(["agent", "image"]),
+  kind: z.enum(["agent", "image", "background"]),
   providerType: z.string().min(1).max(40),
   name: z.string().max(60).optional(),
   baseUrl: z.string().max(1024).optional(),
   /** Omitted on save = keep the previously stored key (replace-fields flow). */
   apiKey: z.string().min(4).max(4096).optional(),
-  model: z.string().min(1).max(200),
+  model: z.string().max(200).default(""),
   custom: customApiSchema.optional(),
 });
 
@@ -80,7 +83,7 @@ export type ConfigPayload = z.infer<typeof configPayloadSchema>;
  * when the user edits other fields without re-entering the secret.
  */
 export function buildProviderConfig(payload: ConfigPayload, existing: ProviderConfig | null): ProviderConfig {
-  const allowed: readonly string[] = payload.kind === "agent" ? agentTypes : imageTypes;
+  const allowed: readonly string[] = payload.kind === "agent" ? agentTypes : payload.kind === "image" ? imageTypes : backgroundTypes;
   if (!allowed.includes(payload.providerType)) {
     throw new Error(`Unsupported ${payload.kind} provider type: ${payload.providerType}`);
   }
@@ -91,7 +94,7 @@ export function buildProviderConfig(payload: ConfigPayload, existing: ProviderCo
   const isCustom = payload.providerType === "custom";
   if (isCustom) {
     if (!payload.custom) throw new Error("Custom API configuration is required");
-    validateCustomApi(payload.custom, payload.kind);
+    validateCustomApi(payload.custom, payload.kind === "background" ? "image" : payload.kind);
   }
 
   const apiKey = payload.apiKey ?? existing?.apiKey ?? "";
@@ -106,7 +109,7 @@ export function buildProviderConfig(payload: ConfigPayload, existing: ProviderCo
     name: payload.name?.trim() || undefined,
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
-    model: payload.model.trim(),
+    model: payload.model.trim() || (payload.kind === "background" ? "background-removal" : ""),
     custom: isCustom ? payload.custom : undefined,
   };
 
@@ -120,7 +123,7 @@ export function buildProviderConfig(payload: ConfigPayload, existing: ProviderCo
 // ─── Cookie round-trip ──────────────────────────────────────────────────────
 
 export function cookieNameFor(kind: ProviderKind): string {
-  return kind === "agent" ? AGENT_COOKIE : IMAGE_COOKIE;
+  return kind === "agent" ? AGENT_COOKIE : kind === "image" ? IMAGE_COOKIE : BACKGROUND_COOKIE;
 }
 
 export function readSessionConfig(
@@ -183,7 +186,7 @@ export function resolveProvider(
     trace?.("provider_config_loaded", { kind, source: "session", providerType: session.providerType });
     return { config: session, source: "session" };
   }
-  const env = kind === "agent" ? envAgentConfig() : envImageConfig();
+  const env = kind === "agent" ? envAgentConfig() : kind === "image" ? envImageConfig() : envBackgroundConfig();
   if (env) {
     trace?.("provider_config_loaded", { kind, source: "deployment", providerType: env.providerType });
     return { config: env, source: "deployment" };
@@ -226,6 +229,18 @@ export function envImageConfig(): ProviderConfig | null {
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
     model: process.env.IMAGE_MODEL || "",
+  };
+}
+
+export function envBackgroundConfig(): ProviderConfig | null {
+  const apiKey = process.env.BACKGROUND_REMOVAL_API_KEY;
+  if (!apiKey) return null;
+  return {
+    kind: "background",
+    providerType: process.env.BACKGROUND_REMOVAL_PROVIDER || "remove-bg",
+    baseUrl: (process.env.BACKGROUND_REMOVAL_API_BASE_URL || DEFAULT_BASE_URLS["remove-bg"]).replace(/\/$/, ""),
+    apiKey,
+    model: process.env.BACKGROUND_REMOVAL_MODEL || "background-removal",
   };
 }
 

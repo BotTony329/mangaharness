@@ -36,23 +36,23 @@ export interface CustomFormState {
   responseTextPath: string;
 }
 
-export function emptyCustomForm(kind: "agent" | "image"): CustomFormState {
+export function emptyCustomForm(kind: "agent" | "image" | "background"): CustomFormState {
   return {
     name: "",
     endpoint: "",
     apiKey: "",
-    model: "",
+    model: kind === "background" ? "background-removal" : "",
     method: "POST",
     authMode: "bearer",
     authHeader: "x-api-key",
     headers: [],
     requestTemplate:
-      kind === "image"
+      kind !== "agent"
         ? '{\n  "model": "{{model}}",\n  "prompt": "{{prompt}}",\n  "width": "{{width}}",\n  "height": "{{height}}"\n}'
         : '{\n  "model": "{{model}}",\n  "messages": "{{messages}}",\n  "temperature": "{{temperature}}"\n}',
     responseType: "url",
     responsePath: "data[0].url",
-    referenceMode: "none",
+    referenceMode: kind === "background" ? "base64" : "none",
     execution: "sync",
     polling: {
       taskIdPath: "task_id",
@@ -67,7 +67,7 @@ export function emptyCustomForm(kind: "agent" | "image"): CustomFormState {
 }
 
 /** Starting points that prefill the editable fields — convenience, not logic. */
-const PRESETS: Record<"agent" | "image", { label: string; apply: (f: CustomFormState) => CustomFormState }[]> = {
+const PRESETS: Record<"agent" | "image" | "background", { label: string; apply: (f: CustomFormState) => CustomFormState }[]> = {
   agent: [
     {
       label: "OpenAI-style chat",
@@ -118,16 +118,40 @@ const PRESETS: Record<"agent" | "image", { label: string; apply: (f: CustomFormS
       }),
     },
   ],
+  background: [
+    {
+      label: "JSON cutout API",
+      apply: (f) => ({
+        ...f,
+        model: f.model || "background-removal",
+        referenceMode: "base64",
+        requestTemplate: '{\n  "model": "{{model}}",\n  "image": "{{referenceImage}}",\n  "output_format": "png"\n}',
+        responseType: "base64",
+        responsePath: "data.image",
+      }),
+    },
+    {
+      label: "URL-result cutout API",
+      apply: (f) => ({
+        ...f,
+        model: f.model || "background-removal",
+        referenceMode: "url",
+        requestTemplate: '{\n  "image_url": "{{referenceImage}}",\n  "format": "png"\n}',
+        responseType: "url",
+        responsePath: "data.url",
+      }),
+    },
+  ],
 };
 
 /** Serialize the form into the API payload's `custom` block. */
-export function customPayloadFromForm(kind: "agent" | "image", form: CustomFormState) {
+export function customPayloadFromForm(kind: "agent" | "image" | "background", form: CustomFormState) {
   return {
     method: form.method,
     auth: { mode: form.authMode, header: form.authMode === "header" ? form.authHeader : undefined },
     headers: form.headers.filter((h) => h.name.trim().length > 0),
     requestTemplate: form.requestTemplate,
-    ...(kind === "image"
+    ...(kind !== "agent"
       ? {
           response: { type: form.responseType, path: form.responsePath },
           referenceMode: form.referenceMode,
@@ -148,7 +172,7 @@ export function customPayloadFromForm(kind: "agent" | "image", form: CustomFormS
 }
 
 interface CustomProviderFormProps {
-  kind: "agent" | "image";
+  kind: "agent" | "image" | "background";
   form: CustomFormState;
   configured: boolean;
   onChange: (form: CustomFormState) => void;
@@ -248,7 +272,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
                 <option>GET</option>
               </select>
             </Field>
-            {kind === "image" && (
+            {kind !== "agent" && (
               <Field label="Reference images">
                 <select
                   className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
@@ -298,7 +322,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
           </Field>
 
           <Field
-            label={`Request body template — variables: ${kind === "image" ? "{{model}} {{prompt}} {{negativePrompt}} {{width}} {{height}} {{aspectRatio}} {{seed}} {{referenceImage}} {{referenceImages}}" : "{{model}} {{systemPrompt}} {{userPrompt}} {{messages}} {{temperature}}"}`}
+            label={`Request body template — variables: ${kind !== "agent" ? "{{model}} {{prompt}} {{negativePrompt}} {{width}} {{height}} {{aspectRatio}} {{seed}} {{referenceImage}} {{referenceImages}}" : "{{model}} {{systemPrompt}} {{userPrompt}} {{messages}} {{temperature}}"}`}
           >
             <textarea
               className="h-32 w-full resize-y rounded border border-zinc-700 bg-zinc-900 p-2 font-mono text-[11px]"
@@ -308,7 +332,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
             />
           </Field>
 
-          {kind === "image" ? (
+          {kind !== "agent" ? (
             <>
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Response type">

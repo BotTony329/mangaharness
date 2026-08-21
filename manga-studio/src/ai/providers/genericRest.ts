@@ -33,9 +33,12 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
     model: config.model,
     capabilities: {
       textToImage: true,
+      supportsReferenceImage: false,
+      supportsTransparentBackground: /^gpt-image-/i.test(config.model),
+      supportsImageEditing: false,
       referenceImage: false,
       imageVariation: false,
-      transparentOutput: false,
+      transparentOutput: /^gpt-image-/i.test(config.model),
       asyncGeneration: false,
     },
 

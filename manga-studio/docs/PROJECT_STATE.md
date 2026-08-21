@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
+Last updated: 2026-08-21 (semantic transparency cascade and Background Removal BYOK)
 
 ## Current status
 
@@ -13,7 +13,7 @@ Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
 | Agent validation | WORKING LOCALLY | Plan/runtime scope checks are followed by structural before/after scope auditing and panel composition validation. Tiny/off-panel Characters are safely corrected; unresolved missing/occluded content remains visible as validation warnings. |
 | Agent planning reliability | DEPLOYED | The exact Panel 2 prompt returned a streamed plan in 77 ms of route work against the local Qwen-compatible fixture. Planning has a 25 s application deadline, safe stage timings, streamed content/tool-call parsing, Qwen hybrid non-thinking mode, and controlled timeout/provider/parser/validation failures. Production is live; real Qwen acceptance still requires the user's browser-held BYOK session. |
 | Image generation | PARTIAL | The previously failing production request reached provider result handling, then failed while persisting the returned image because Vercel Blob was not connected. The fixed production handler emits request-scoped stage traces and Blob is connected; a fresh real BYOK generation still requires the user's configured browser session. |
-| Gemini adapter | WORKING AT ADAPTER/UNIT LEVEL | `gemini-3.1-flash-lite-image` is a current stable Google image-generation/editing model. Adapter tests cover success, reference input, malformed/missing images, HTTP 400/401/403/404/429/5xx, and timeout. The prior production exception occurred after provider invocation, not in Gemini payload construction. |
+| Gemini adapter | WORKING AT ADAPTER/UNIT LEVEL | Gemini declares reference/image-edit support but not native transparency. The adapter now performs provider-specific second-pass cutout requests through `generateContent`; returned bytes must pass real-alpha validation. Tests cover generation, references, edit serialization, malformed/missing images, HTTP failures, timeout, and secret redaction. |
 | BYOK credential storage | CONFIGURED | User credentials remain encrypted in HttpOnly cookies. `APP_ENCRYPTION_KEY` is an operator infrastructure secret configured once in Vercel for Preview and Production; users do not configure it. Trace tests verify successful retrieval/decryption and the missing-key failure path without logging secrets. |
 | Character reference persistence | PARTIAL | Accepted uploads and accepted generated results become Character assets; the first character asset becomes the reference. Project JSON persists in IndexedDB. Production refresh verification remains to be rerun after deployment. |
 | Production asset storage | CONFIGURED | Public Vercel Blob store `manga-studio-assets` is connected to the existing `personal-b90d/mangaharness` project in `iad1`; the Blob credential is injected into Development, Preview, and Production. |
@@ -28,9 +28,10 @@ Last updated: 2026-08-21 (Agent timeout and streaming stabilization)
 | Visual style selection | DEPLOYED | The Top Bar shows the active style. The visual Art Style dialog presents six major families, generated preview cards, active-state feedback, and custom style creation with optional uploaded reference. |
 | Style propagation | DEPLOYED | Manual generation, canonical character references, semantic character states, progressive Asset Packs, backgrounds, props, and Manga Agent generations all inherit the active style, negative prompt, optional style reference, and immutable asset-level style provenance. |
 | Character identity UX | DEPLOYED | Character creation separates Name, Appearance, and Personality / visual identity from Project Art Style. The progressive Asset Pack contains eight poses and eight expressions without a Cartesian-product explosion. |
-| Transparent character assets | DEPLOYED | Generated and uploaded characters, poses, expressions, and Asset Pack states pass through one provider-neutral post-processing boundary. Useful source alpha is preserved; opaque edge-connected backgrounds produce non-destructive transparent PNG derivatives. |
-| Background removal | DEPLOYED | The MVP processor estimates the dominant perimeter background, flood-fills only connected background pixels, feathers antialiased edges, rejects opaque checkerboards, and preserves enclosed white artwork. Character and prop thumbnails expose a manual Remove/Reprocess Background action. |
-| Canvas compositing | DEPLOYED | Library previews, generation references, loose objects, panel instances, ghosts, and export all use the processed derivative when present and fall back to the immutable source for legacy/failed assets. Background images remain rectangular. |
+| Transparent character assets | DEPLOYED; EXACT PROVIDER ACCEPTANCE PENDING | Generated/uploaded character and prop sources use an ordered cascade: native alpha → image-provider edit → dedicated removal provider → conservative local fallback. Every candidate is decoded and checked for meaningful alpha, visible foreground, background removal, and usable bounds before a derivative is promoted. |
+| Background removal | DEPLOYED | Background Removal is an independent BYOK capability with its own encrypted cookie, remove.bg Quick Preset, Custom API mapping, safe logs/errors, and optional deployment fallback. Manual recovery offers Retry, Image AI, provider selection, Keep Raw, and safe Details. |
+| Agent Character readiness | DEPLOYED | Planner context, semantic resolution, slot switching, placement, and composition exclude raw/processing/failed Character derivatives. Generation stores a failed raw source for retry but fails the step; a following composition step reports that reprocessing is required. Activity exposes generation, removal, validation, and ready/composed phases. |
+| Canvas compositing | DEPLOYED | Library previews, generation references, loose objects, panel instances, ghosts, and export share `assetRenderUrl`; only a `ready` derivative with validated alpha supersedes the immutable source. Background images remain rectangular. Live canvas and exported-PNG acceptance passed. |
 
 ## Root cause record
 
@@ -50,6 +51,17 @@ Agent planning failed: Timed out
 
 Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIMEOUT_MS = 90_000` timer for the user-configured Custom API call. The external POST began, but no response headers/body reached Manga Studio before that application timer aborted fetch. `CustomApiError("Timed out", 504)` escaped the adapter's conversion boundary and the route collapsed it to a generic 500. The route is Node with `maxDuration = 120`; Vercel did not terminate it at 90 seconds. There is no evidence that Qwen returned a response, so response parsing and post-processing did not begin.
 
+Earlier production evidence for a previous Cute Girl checkerboard:
+
+```text
+[generate] provider_response_received 200
+[generate] asset_post_processing_complete status=failed hasAlpha=false backgroundRemoved=false
+```
+
+That earlier detector-only failure was replaced by the built-in connectivity matte and remains a valid historical record. It is not evidence that every checkerboard image is safely segmentable.
+
+Latest exact production failure (request `21f2a2ac-f572-4298-8e0f-e15e2910b368`) loaded the current Cute Girl source `source-b6810c8c-b3a6-4ffe-be6f-0968b6cd8cda-…jpg`, 546,997 bytes, 848×1264, SHA-256 `311ad513a4ef2203e7bb583e2028d07b76174b1cc2eb171e3a4ae482a373e34e`, and returned HTTP 422 after about one second in the processor. The JPEG has no alpha. Its light checker cells overlap the subject's white clothing, skin, grayscale shading, and anti-aliased line art, leaving no safe deterministic foreground seed. Local replay of those exact unchanged bytes reproduces the guarded failure. This is algorithmic, not a Sharp/Vercel runtime exception. The new pipeline therefore refuses threshold tuning and attempts semantic provider editing/segmentation before the local fallback.
+
 ## Known limitations
 
 - Project documents are browser-local IndexedDB data; there is no authenticated cross-device project sync in the MVP.
@@ -60,7 +72,7 @@ Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIM
 - Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
 - Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
-- The bundled foreground extractor is optimized for plain or near-uniform edge-connected backgrounds. Complex scenery or an opaque fake checkerboard fails safely and preserves the source; the `AssetPostProcessor` boundary is ready for a future dedicated segmentation service.
+- The bundled extractor is deterministic rather than semantic ML and remains last-resort only. The latest exact Cute Girl proves that low-contrast light checkerboards overlapping pale manga artwork require a capable image-edit or segmentation provider. Every uncertain result fails safely and preserves the source.
 - Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
 - Archived sources remain visible in panels that already use them, by design, but are excluded from new library/Agent/Character-state resolution until restored.
 - A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.
@@ -70,8 +82,20 @@ Exact cause: `src/server/customApi/execute.ts` armed its historical `REQUEST_TIM
 
 - Typecheck: passed.
 - Lint: passed.
-- Tests: 30 files, 177 tests passed. New coverage includes provider timeout/cancellation, slow SSE, content JSON, tool-call-only/null-content responses, malformed/invalid/missing-action output, provider 429/500, Custom API timeout normalization, Qwen planning flags, and selected-Panel-2 scope rejection. Existing lifecycle, provider/security, compositing, scene, and command coverage remains intact.
+- Tests: 34 files, 199 tests passed. Transparency coverage includes cascade ordering, native-alpha short circuit, Gemini edit serialization, opaque edit fallthrough, dedicated-provider validation, remove.bg multipart/auth behavior, local-last fallback, total failure, processed URL preference, manual reprocessing, and Agent wait-for-ready behavior. Existing lifecycle, provider/security, compositing, scene, scope, and command coverage remains intact.
+- Exact-current-fixture characterization: passed locally against the unchanged 546,997-byte 848×1264 source (`311ad…34e`). It remains `failed`, `hasAlpha=false` with local-only processing, which is the correct non-destructive result; no local-threshold success is claimed. Provider-backed production reprocessing remains the acceptance gate.
+- Local browser verification: passed. The editor rendered meaningful controls, no framework overlay/page errors appeared, and AI Settings exposed independent Manga Agent, Image Generation, and Background Removal sections with both Custom API and Quick Preset modes.
+- GitHub semantic-segmentation commit: `cedd52e` on `refactor/controlled-core-architecture`, pushed to `origin`.
+- Production semantic-segmentation deployment: READY, `dpl_6PF2xHfT5hCDbZertz4amgJffRfv`, built in `iad1` from commit `cedd52e` and aliased to `https://mangaharness.vercel.app`.
+- Production clean-session verification: passed. Home and `/api/provider/status` returned successfully; storage remained `vercel-blob`; the live AI Settings rendered the Background Removal Custom API and Quick Preset modes; no framework overlay, browser page error, or error-level Vercel log was found.
+- Current exact Cute Girl production acceptance: pending a session-bound provider attempt. The clean verifier correctly reported no Image or Background Removal provider, and the user's Chrome session was not connected to Codex, so its encrypted HttpOnly BYOK cookie could not be used or inspected. No claim is made yet for provider HTTP status, transparent derivative, same-asset Canvas refresh, or checkerboard-free export for SHA-256 `311ad…34e`.
 - Production build: passed with Next.js 15.5.23.
+- Historical fixture verification (not the latest failing source): the earlier 848×1264 Cute Girl canonical/jumping JPEGs were locally converted to validated derivatives. This does not supersede the current 546,997-byte failure recorded above.
+- Checkerboard-removal production deployment: READY, `dpl_546yQrY4SrS8LWheJ9bgunfcRzva` (`https://mangaharness.vercel.app`), built in `iad1` from tested commit `a2ca901`.
+- Historical existing-asset route acceptance: request `03868b20-20f6-462d-83ab-187a38250dff` repaired the earlier 710,104-byte Cute Girl source. It is retained as regression evidence only, not acceptance for the current `311ad…34e` source.
+- Historical production UI/canvas/export acceptance: request `5f151390-c9bf-4d0b-bf5a-231cf4396792` repaired and composed the earlier source. The current source still requires provider-backed production reprocessing, Canvas refresh, and export acceptance after this deployment.
+- Production error scan after the exact route and browser flow: clean.
+- Fresh BYOK Agent acceptance remains pending: the clean verification session correctly reported no image or agent provider, and HttpOnly user BYOK credentials were not available to automation. The original user run already proved Agent generation/provider response for this exact Cute Girl state; unit/integration coverage now proves that a failed cutout stops composition and a ready cutout permits it, but no new provider-side request is claimed.
 - Local exact-prompt route acceptance: passed. With Panel 2 authoritative scope and `Suddenly, her besty's smile face jumped into the panel`, `/api/agent` returned HTTP 200; first streamed event was 16 ms after outbound start, provider completion was 57 ms, route work was 77 ms, finish reason was `stop`, and the only accepted action was `compose_character` for Mio smiling in Panel 2. No other-panel action was present.
 - Local browser: passed (six style families, visual cards, built-in/custom activation, persistent Top Bar label, identity-separated character form, 16-generation Asset Pack estimate, no error overlay/console errors).
 - Local controlled-core browser acceptance: passed. The app loaded with meaningful editor controls and no framework/page errors; Character creation exposed the lifecycle controls; explicit Character deletion removed the entity; after autosave and a full reload it remained deleted. The Manga Agent rendered its authoritative scope control (`Auto · Current Page · Page 1`).

@@ -29,6 +29,7 @@ interface ProviderSummary {
 interface StatusResponse {
   agent: ProviderSummary;
   image: ProviderSummary & { capabilities?: Record<string, boolean> };
+  background: ProviderSummary;
 }
 
 const AGENT_TYPES = [
@@ -40,6 +41,10 @@ const AGENT_TYPES = [
 const IMAGE_TYPES = [
   { id: "gemini", label: "Google Gemini (reference images)", placeholder: "https://generativelanguage.googleapis.com" },
   { id: "openai-compatible", label: "OpenAI-Compatible Image API", placeholder: "https://api.example.com/v1" },
+];
+
+const BACKGROUND_TYPES = [
+  { id: "remove-bg", label: "remove.bg", placeholder: "https://api.remove.bg/v1.0/removebg" },
 ];
 
 export function AiSettingsDialog() {
@@ -93,11 +98,19 @@ export function AiSettingsDialog() {
           onChanged={refresh}
           footnote={
             status?.image?.configured
-              ? status.image.capabilities?.referenceImage
+              ? (status.image.capabilities?.supportsReferenceImage ?? status.image.capabilities?.referenceImage)
                 ? "This provider supports reference images — character identity can be carried into pose/expression generation (provider-dependent, never guaranteed)."
                 : "This provider does not support reference images: identity preservation relies on text descriptions only."
               : undefined
           }
+        />
+        <ProviderCard
+          kind="background"
+          title="Background Removal"
+          types={BACKGROUND_TYPES}
+          summary={status?.background ?? null}
+          onChanged={refresh}
+          footnote="Optional fallback after native alpha and Image AI editing. remove.bg is a quick preset; Custom API supports any JSON cutout service. Provider usage may incur charges."
         />
       </div>
     </div>
@@ -107,7 +120,7 @@ export function AiSettingsDialog() {
 // ─── One provider configuration card ────────────────────────────────────────
 
 interface ProviderCardProps {
-  kind: "agent" | "image";
+  kind: "agent" | "image" | "background";
   title: string;
   types: { id: string; label: string; placeholder: string }[];
   summary: ProviderSummary | null;
@@ -125,7 +138,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState(kind === "background" ? "background-removal" : "");
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState<"save" | "test" | "forget" | "models" | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -156,7 +169,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
   const canSave =
     mode === "custom"
       ? Boolean(customForm.endpoint && customForm.model && (configured || customForm.apiKey || customForm.authMode === "none"))
-      : Boolean(model && (configured || apiKey));
+      : Boolean((kind === "background" || model) && (configured || apiKey));
 
   const save = async () => {
     setBusy("save");
@@ -180,7 +193,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
               baseUrl: baseUrl || undefined,
               // Empty field + already configured = keep the stored key.
               apiKey: apiKey || undefined,
-              model,
+              model: model || (kind === "background" ? "background-removal" : ""),
             };
       const response = await fetch("/api/provider/config", {
         method: "POST",
@@ -287,6 +300,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
                   setProviderType(e.target.value);
                   setBaseUrl("");
                   setModels([]);
+                  if (kind === "background") setModel("background-removal");
                 }}
               >
                 {types.map((t) => (
@@ -336,7 +350,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
             </div>
           </Field>
 
-          <Field label="Model">
+          {kind !== "background" && <Field label="Model">
             <div className="flex gap-2">
               <input
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-xs"
@@ -363,7 +377,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
                 ))}
               </datalist>
             )}
-          </Field>
+          </Field>}
         </>
       )}
 
@@ -382,7 +396,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
           title={
             !configured
               ? "Save first, then test"
-              : kind === "image" && summary?.providerType === "custom"
+              : (kind === "image" || kind === "background") && summary?.providerType === "custom"
                 ? "Runs one real minimal generation to verify the mapping"
                 : "Round-trip to the provider"
           }
@@ -440,7 +454,7 @@ function ModeTab({ active, onClick, children }: { active: boolean; onClick: () =
 }
 
 /** Rebuild the custom form from a saved (non-secret) summary for re-editing. */
-function hydrateCustomForm(kind: "agent" | "image", summary: ProviderSummary): CustomFormState {
+function hydrateCustomForm(kind: "agent" | "image" | "background", summary: ProviderSummary): CustomFormState {
   const base = emptyCustomForm(kind);
   const custom = (summary.custom ?? {}) as Record<string, never>;
   const auth = (custom.auth ?? {}) as { mode?: string; header?: string };

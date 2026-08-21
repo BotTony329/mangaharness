@@ -24,6 +24,10 @@ export interface NewAssetInput {
   hasAlpha?: boolean;
   backgroundRemoved?: boolean;
   processingStatus?: SourceAsset["processingStatus"];
+  backgroundRemovalStatus?: SourceAsset["backgroundRemovalStatus"];
+  processingReason?: string;
+  backgroundRemovalMethod?: string;
+  backgroundRemovalProvider?: string;
   metadata?: AssetGenerationMetadata;
   type?: SourceAsset["type"];
   provenance?: SourceAsset["provenance"];
@@ -33,7 +37,7 @@ export interface NewAssetInput {
 export function setAssetProcessedImage(
   doc: ProjectDocument,
   assetId: ID,
-  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus">,
+  update: Pick<SourceAsset, "processedImageUrl" | "hasAlpha" | "backgroundRemoved" | "processingStatus" | "backgroundRemovalStatus" | "processingReason" | "backgroundRemovalMethod" | "backgroundRemovalProvider">,
 ): ProjectDocument {
   const next = cloneDoc(doc);
   const asset = next.assets[assetId];
@@ -54,6 +58,7 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
     id: newId(),
     projectId: next.project.id,
     ...input,
+    backgroundRemovalStatus: input.backgroundRemovalStatus ?? input.processingStatus,
     type: input.type ?? assetTypeFromInput(input),
     sourceUrl: input.storageUrl,
     status: input.processingStatus === "processing" ? "processing" : input.processingStatus === "failed" ? "failed" : "ready",

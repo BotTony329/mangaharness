@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { detectImageType, MAX_UPLOAD_BYTES } from "@/storage/imageValidation";
 import { processAndStoreAsset } from "@/assets/processAndStore";
 import type { AssetCategory } from "@/domain/types";
+import { resolveProvider } from "@/server/providerSession";
+import { createImageProvider } from "@/ai/providerRegistry";
+import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
+import { createAssetProcessingPipeline } from "@/assets/processingPipeline";
 
 export const runtime = "nodejs";
 
@@ -34,12 +38,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const category = parseCategory(form.get("category"));
+    const imageConfig = resolveProvider(request, "image")?.config;
+    const backgroundConfig = resolveProvider(request, "background")?.config;
     const stored = await processAndStoreAsset({
       data: Buffer.from(bytes),
       mimeType: detected.mimeType,
       extension: detected.extension,
       category,
       keyPrefix: "uploads",
+      processor: createAssetProcessingPipeline({
+        imageProvider: imageConfig ? createImageProvider(imageConfig) : undefined,
+        backgroundProvider: backgroundConfig ? createBackgroundRemovalProvider(backgroundConfig) : undefined,
+      }),
     });
     return NextResponse.json({
       url: stored.processedImageUrl ?? stored.sourceUrl,
@@ -49,6 +59,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       hasAlpha: stored.hasAlpha,
       backgroundRemoved: stored.backgroundRemoved,
       processingStatus: stored.processingStatus,
+      processingReason: stored.processingReason,
+      backgroundRemovalMethod: stored.backgroundRemovalMethod,
+      backgroundRemovalProvider: stored.backgroundRemovalProvider,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upload failed";

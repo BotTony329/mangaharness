@@ -30,8 +30,8 @@ import type {
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
-import { assetRenderUrl } from "@/assets/renderSource";
-import { findCharacter, resolveCharacterState, resolveLibraryAsset } from "./resolver";
+import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
+import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
 
@@ -107,11 +107,11 @@ export async function executePlan(
   store.beginTransaction();
   try {
     for (let i = 0; i < plan.steps.length; i++) {
-      onProgress(i, "running");
+      onProgress(i, "running", runningDetail(plan.steps[i].tool));
       try {
         await executeStep(plan.steps[i], plan.targetScope);
         completed += 1;
-        onProgress(i, "done");
+        onProgress(i, "done", completedDetail(plan.steps[i].tool));
       } catch (error) {
         failed += 1;
         onProgress(i, "failed", error instanceof Error ? error.message : "Step failed");
@@ -122,6 +122,16 @@ export async function executePlan(
     useEditorStore.getState().endTransaction();
   }
   return { completed, failed, validationIssues };
+}
+
+function runningDetail(tool: ToolName): string | undefined {
+  if (tool === "generate_character_asset") return "Generating image · removing background · validating cutout";
+  if (tool === "place_character" || tool === "compose_character") return "Resolving a ready character cutout before composition";
+}
+
+function completedDetail(tool: ToolName): string | undefined {
+  if (tool === "generate_character_asset") return "Image generated · character cutout ready";
+  if (tool === "place_character" || tool === "compose_character") return "Character cutout ready · composed";
 }
 
 // ─── Step dispatch ──────────────────────────────────────────────────────────
@@ -321,6 +331,10 @@ async function doPlaceCharacter(args: {
   const { character } = resolution;
   let asset = resolution.asset;
   if (!asset) {
+    const blocked = findUnreadyCharacterAsset(doc, character, resolution.desired);
+    if (blocked) {
+      throw new Error(`Character asset exists, but background removal is not ready. Reprocess "${blocked.name}" before composition.`);
+    }
     if (args.generateIfMissing === false) {
       throw new Error(`No cached state matches ${character.name}; generation was disabled`);
     }
@@ -333,7 +347,7 @@ async function doPlaceCharacter(args: {
     doc = currentDoc();
     asset = doc.assets[assetId];
   }
-  if (!asset) throw new Error(`Unable to resolve a reusable state for ${character.name}`);
+  if (!asset || !isAssetReadyForComposition(asset)) throw new Error(`Unable to resolve a ready reusable state for ${character.name}`);
 
   if (args.target === "workspace" || args.panel === undefined) {
     stageOnWorkspace(asset.id);
@@ -368,6 +382,10 @@ async function doComposeCharacter(args: {
   if (resolution.status === "character-not-found") throw new Error(`Character "${args.characterName}" not found`);
   let asset = resolution.asset;
   if (!asset) {
+    const blocked = findUnreadyCharacterAsset(doc, resolution.character, resolution.desired);
+    if (blocked) {
+      throw new Error(`Character asset exists, but background removal is not ready. Reprocess "${blocked.name}" before composition.`);
+    }
     if (args.generateIfMissing === false) throw new Error(`No cached state matches ${resolution.character.name}; generation was disabled`);
     const assetId = await generateCharacterAssetForState({
       characterId: resolution.character.id,
@@ -378,7 +396,7 @@ async function doComposeCharacter(args: {
     doc = currentDoc();
     asset = doc.assets[assetId];
   }
-  if (!asset) throw new Error(`Unable to resolve a reusable state for ${resolution.character.name}`);
+  if (!asset || !isAssetReadyForComposition(asset)) throw new Error(`Unable to resolve a ready reusable state for ${resolution.character.name}`);
   dispatch({
     type: "compose-character",
     panelId: panelIdByNumber(args.panel),

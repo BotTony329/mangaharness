@@ -23,11 +23,14 @@ The editor never sees provider SDKs, keys, or raw provider responses. Adapters i
 ```ts
 interface ImageGenerationProvider {
   id: string; label: string; model: string;
-  capabilities: ProviderCapabilities;   // textToImage, referenceImage, …
+  capabilities: ProviderCapabilities;   // supportsReferenceImage/editing/transparentBackground
   testConnection(): Promise<ProviderStatus>;
   generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult>;
+  editImage?(req: ImageEditRequest): Promise<ImageGenerationResult>;
 }
 ```
+
+Character/prop results then enter an independent capability cascade: validate native alpha; ask the same image provider to isolate the source when `supportsImageEditing`; call the user's optional `BackgroundRemovalProvider`; and only then try the conservative local heuristic. Every candidate must contain meaningful mixed alpha, visible foreground, non-full-frame background removal, and usable bounds before it can become a stored derivative.
 
 ## Implemented adapters
 
@@ -36,6 +39,7 @@ interface ImageGenerationProvider {
 - Models: `gemini-2.5-flash-image` by default (override with `IMAGE_MODEL`).
 - **Reference images supported natively**: character reference images are sent as `inline_data` parts, which is what powers "generate another pose/expression of the same character". Consistency is provider-dependent and the UI says so — it is never claimed as guaranteed.
 - Synchronous request/response; 90 s timeout; bounded response reads.
+- Declares image editing and implements the second pass through the same `generateContent` surface. Gemini is not declared as native-alpha capable; returned bytes must still pass actual alpha validation.
 
 ### Generic REST (`src/ai/providers/genericRest.ts`)
 
@@ -45,7 +49,11 @@ interface ImageGenerationProvider {
 
 ## Capabilities drive the UI
 
-`/api/provider/status` returns `{ configured, provider, model, capabilities }` (never keys). The generator dialog and agent executor check `capabilities.referenceImage` before attaching references and tell the user which mode they're in.
+`/api/provider/status` returns safe Agent, Image Generation, and Background Removal summaries plus image capabilities (never keys). The generator and processing cascade use the canonical `supportsReferenceImage`, `supportsImageEditing`, and `supportsTransparentBackground` flags instead of inferring capabilities from prompt wording.
+
+## Background-removal BYOK
+
+Background removal is a third independent provider kind with its own encrypted HttpOnly cookie. AI Settings offers a remove.bg quick preset and a declarative Custom API mapping (URL or base64 reference, response URL/base64, sync or polling). The user supplies only that provider's endpoint/key in the UI. `APP_ENCRYPTION_KEY` remains a one-time operator infrastructure secret used to encrypt all user BYOK cookies; it is never a user provider key. Optional `BACKGROUND_REMOVAL_*` environment variables are deployment-wide fallbacks only.
 
 ## Prompt composition
 

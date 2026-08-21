@@ -32,7 +32,7 @@ Authentication/accounts/billing; collaboration; multi-project management UI (dom
 ## Known limitations
 
 - Undo history is in-memory (refresh clears history; the document itself persists).
-- Gemini does not return transparent PNGs; character assets arrive with white backgrounds (not faked otherwise). A provider with transparent output can declare the capability.
+- Gemini is not treated as native-alpha capable. Opaque characters are sent through a second-pass Gemini edit and then an optional user-configured segmentation provider; all output is pixel-validated. If neither produces real alpha and the conservative local fallback is uncertain, the raw source remains visibly marked for cleanup.
 - Identity consistency depends on the provider; the UI labels reference-aware generation as provider-dependent, never guaranteed.
 - The agent plans in a single pass (no mid-run replanning); failed steps are reported and skipped.
 - One page-size preset (1200×1800); RTL reading direction is stored but doesn't yet reorder panel numbering.

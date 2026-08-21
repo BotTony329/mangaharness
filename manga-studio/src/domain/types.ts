@@ -100,6 +100,12 @@ export interface SourceAsset {
   hasAlpha?: boolean;
   backgroundRemoved?: boolean;
   processingStatus?: "raw" | "processing" | "ready" | "failed";
+  /** Background-specific status retained independently for provider retries/audit. */
+  backgroundRemovalStatus?: "raw" | "processing" | "ready" | "failed";
+  /** Safe user-facing post-processing result; never contains provider secrets. */
+  processingReason?: string;
+  backgroundRemovalMethod?: string;
+  backgroundRemovalProvider?: string;
   status: AssetStatus;
   focusRegions?: FocusRegion[];
   metadata?: AssetGenerationMetadata;

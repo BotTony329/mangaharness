@@ -18,6 +18,9 @@ export interface GenerateApiResult {
   hasAlpha: boolean;
   backgroundRemoved: boolean;
   processingStatus: "ready" | "failed";
+  processingReason?: string;
+  backgroundRemovalMethod?: string;
+  backgroundRemovalProvider?: string;
   provider: string;
   model: string;
   referenceUsed: boolean;
@@ -99,6 +102,10 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
       hasAlpha: input.result.hasAlpha,
       backgroundRemoved: input.result.backgroundRemoved,
       processingStatus: input.result.processingStatus,
+      backgroundRemovalStatus: input.result.processingStatus,
+      processingReason: input.result.processingReason,
+      backgroundRemovalMethod: input.result.backgroundRemovalMethod,
+      backgroundRemovalProvider: input.result.backgroundRemovalProvider,
       metadata: {
         provider: input.result.provider,
         model: input.result.model,
@@ -116,6 +123,10 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
     },
   });
   if (!created.createdId) throw new Error("Generated asset could not be registered");
+  if ((input.category === "character" || input.category === "prop") &&
+      (input.result.processingStatus !== "ready" || !input.result.hasAlpha || !input.result.processedImageUrl)) {
+    throw new Error(`${input.category === "character" ? "Character" : "Prop"} generated, but I couldn't remove the background reliably. The raw source has been preserved.`);
+  }
   return created.createdId;
 }
 

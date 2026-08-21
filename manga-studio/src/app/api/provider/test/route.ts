@@ -3,6 +3,7 @@ import { createImageProvider } from "@/ai/providerRegistry";
 import { createAgentProvider } from "@/agent/providers/registry";
 import { buildRequestPreview } from "@/server/customApi/preview";
 import { resolveProvider } from "@/server/providerSession";
+import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,8 +17,8 @@ export const maxDuration = 60;
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = (await request.json().catch(() => null)) as { kind?: string } | null;
   const kind = body?.kind;
-  if (kind !== "agent" && kind !== "image") {
-    return NextResponse.json({ ok: false, error: "kind must be 'agent' or 'image'" }, { status: 400 });
+  if (kind !== "agent" && kind !== "image" && kind !== "background") {
+    return NextResponse.json({ ok: false, error: "Unknown provider kind" }, { status: 400 });
   }
 
   const resolved = resolveProvider(request, kind);
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const status =
       kind === "agent"
         ? await createAgentProvider(resolved.config).testConnection()
-        : await createImageProvider(resolved.config).testConnection();
+        : kind === "image"
+          ? await createImageProvider(resolved.config).testConnection()
+          : (await createBackgroundRemovalProvider(resolved.config).testConnection?.()) ?? { ok: true };
     return NextResponse.json(
       status.ok
         ? { ok: true, status: "Connected", detail: status.message, preview }

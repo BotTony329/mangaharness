@@ -326,6 +326,7 @@ describe("executePlan", () => {
           JSON.stringify({
             url: "https://example.com/generated-yuri.png",
             sourceUrl: "https://example.com/generated-yuri.png",
+            processedImageUrl: "https://example.com/generated-yuri-alpha.png",
             mimeType: "image/png",
             hasAlpha: true,
             backgroundRemoved: true,
@@ -364,6 +365,59 @@ describe("executePlan", () => {
     const placedId = after.panels[page.panelIds[0]].itemIds[0];
     const placed = after.items[placedId];
     expect(placed.kind === "asset" ? placed.sourceAssetId : null).toBe(generated?.id);
+  });
+
+  it("preserves a failed generated source but waits for a ready cutout before composition", async () => {
+    let doc = createProjectDocument("Failed cutout");
+    const yuri = addCharacter(doc, "Yuri");
+    doc = yuri.doc;
+    useEditorStore.getState().loadDocument(doc);
+    const page = Object.values(doc.pages)[0];
+    vi.stubGlobal("fetch", vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ capabilities: { referenceImage: false } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        url: "https://example.com/generated-yuri.jpg",
+        sourceUrl: "https://example.com/generated-yuri.jpg",
+        mimeType: "image/jpeg",
+        hasAlpha: false,
+        backgroundRemoved: false,
+        processingStatus: "failed",
+        processingReason: "Opaque checkerboard detected, but no reliable foreground could be extracted",
+        provider: "test-provider",
+        model: "test-model",
+        referenceUsed: false,
+      }), { status: 200 })));
+    class MockImage {
+      naturalWidth = 800;
+      naturalHeight = 1600;
+      crossOrigin = "";
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) { this.onload?.(); }
+    }
+    vi.stubGlobal("Image", MockImage);
+
+    const { plan } = validatePlan({
+      summary: "Generate then compose",
+      steps: [
+        { tool: "generate_character_asset", args: { characterName: "Yuri", kind: "pose", pose: "jumping" } },
+        { tool: "compose_character", args: { panel: 1, characterName: "Yuri", pose: "jumping" } },
+      ],
+    });
+    const failures: string[] = [];
+    const summary = await executePlan(plan, (_index, status, detail) => {
+      if (status === "failed" && detail) failures.push(detail);
+    });
+
+    expect(summary.completed).toBe(0);
+    expect(summary.failed).toBe(2);
+    const after = useEditorStore.getState().doc!;
+    const failedAsset = Object.values(after.assets).find((asset) => asset.metadata?.pose === "jumping");
+    expect(failedAsset).toMatchObject({ processingStatus: "failed", storageUrl: "https://example.com/generated-yuri.jpg" });
+    expect(after.panels[page.panelIds[0]].itemIds).toHaveLength(0);
+    expect(failures.join(" ")).toContain("raw source has been preserved");
+    expect(failures.join(" ")).toContain("Reprocess");
   });
 
   it("reports failed steps but keeps executing the rest", async () => {

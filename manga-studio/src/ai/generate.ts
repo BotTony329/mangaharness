@@ -13,6 +13,8 @@ import { isAllowedReferenceUrl } from "./security";
 import { ProviderError, type GeneratedAssetType, type GenerationTrace } from "./types";
 import { processAndStoreAsset } from "@/assets/processAndStore";
 import type { AssetCategory } from "@/domain/types";
+import { createAssetProcessingPipeline } from "@/assets/processingPipeline";
+import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
 
 export const generateRequestSchema = z.object({
   assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop"]),
@@ -32,6 +34,9 @@ export interface GenerateResult {
   hasAlpha: boolean;
   backgroundRemoved: boolean;
   processingStatus: "ready" | "failed";
+  processingReason?: string;
+  backgroundRemovalMethod?: string;
+  backgroundRemovalProvider?: string;
   provider: string;
   model: string;
   referenceUsed: boolean;
@@ -49,17 +54,19 @@ export async function generateAssetImage(
   input: GenerateRequestInput,
   config: ProviderConfig | null,
   trace?: GenerationTrace,
+  backgroundConfig?: ProviderConfig | null,
 ): Promise<GenerateResult> {
   if (!config) {
     throw new ProviderError("No image provider connected. Open AI Settings to add one.", 503);
   }
   trace?.("adapter_construction_start", { providerType: config.providerType });
   const provider = createImageProvider(config);
-  trace?.("adapter_created", { provider: provider.id, referenceImage: provider.capabilities.referenceImage });
+  const backgroundProvider = backgroundConfig ? createBackgroundRemovalProvider(backgroundConfig) : undefined;
+  trace?.("adapter_created", { provider: provider.id, referenceImage: provider.capabilities.supportsReferenceImage });
 
   // References are only sent when the provider actually supports them —
   // the UI must never pretend identity preservation happens when it can't.
-  const wantsReferences = provider.capabilities.referenceImage;
+  const wantsReferences = provider.capabilities.supportsReferenceImage;
   const validatedUrls = wantsReferences ? (input.referenceUrls ?? []).filter(isAllowedReferenceUrl) : [];
   trace?.("reference_processing_start", { requested: input.referenceUrls?.length ?? 0, supported: wantsReferences });
   const referenceImages = wantsReferences ? await loadReferences(input.referenceUrls ?? []) : [];
@@ -68,7 +75,7 @@ export async function generateAssetImage(
   const size = SIZE_MAP[input.size ?? "portrait"];
   const category = categoryFor(input.assetType);
   const transparentBackground =
-    provider.capabilities.transparentOutput && (category === "character" || category === "prop");
+    provider.capabilities.supportsTransparentBackground && (category === "character" || category === "prop");
   trace?.("normalized_request_constructed", {
     assetType: input.assetType,
     references: referenceImages.length,
@@ -101,6 +108,7 @@ export async function generateAssetImage(
       extension,
       category,
       keyPrefix: "generated",
+      processor: createAssetProcessingPipeline({ imageProvider: provider, backgroundProvider, trace }),
     });
   } catch (error) {
     if (error instanceof Error && error.message.includes("Persistent storage is not configured")) {
@@ -127,6 +135,9 @@ export async function generateAssetImage(
     hasAlpha: stored.hasAlpha,
     backgroundRemoved: stored.backgroundRemoved,
     processingStatus: stored.processingStatus,
+    processingReason: stored.processingReason,
+    backgroundRemovalMethod: stored.backgroundRemovalMethod,
+    backgroundRemovalProvider: stored.backgroundRemovalProvider,
     provider: provider.id,
     model: provider.model,
     referenceUsed: referenceImages.length > 0,

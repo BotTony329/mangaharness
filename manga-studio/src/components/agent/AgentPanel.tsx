@@ -296,7 +296,11 @@ export function AgentPanel() {
                 </span>
                 <span className={step.status === "failed" ? "text-red-300" : "text-zinc-300"}>
                   {step.label}
-                  {step.detail && <span className="block text-[10px] text-red-400/80">{step.detail}</span>}
+                  {step.detail && (
+                    <span className={`block text-[10px] ${step.status === "failed" ? "text-red-400/80" : "text-zinc-500"}`}>
+                      {step.detail}
+                    </span>
+                  )}
                 </span>
               </li>
             ))}

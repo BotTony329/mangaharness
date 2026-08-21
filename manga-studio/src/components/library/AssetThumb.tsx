@@ -8,7 +8,8 @@
 import { useState } from "react";
 import type { SourceAsset } from "@/domain/types";
 import { assetRenderUrl } from "@/assets/renderSource";
-import { removeAssetBackground } from "@/assets/clientProcessing";
+import { keepRawAsset, removeAssetBackground } from "@/assets/clientProcessing";
+import { useUiStore } from "@/editor/uiStore";
 
 interface AssetThumbProps {
   asset: SourceAsset;
@@ -25,7 +26,15 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [menuOpen, setMenuOpen] = useState(false);
+  const openSettings = useUiStore((state) => state.openSettings);
   const canRemoveBackground = asset.category === "character" || asset.category === "prop";
+  const runRemoval = (strategy: "auto" | "image-edit" | "provider" | "local" = "auto") => {
+    setBusy(true);
+    setError(undefined);
+    void removeAssetBackground(asset.id, strategy)
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Background removal failed"))
+      .finally(() => setBusy(false));
+  };
   return (
     <div
       className="group relative w-[104px] cursor-grab select-none"
@@ -44,7 +53,7 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       <div className="h-[104px] w-[104px] overflow-hidden rounded-md border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={asset.processedImageUrl ?? asset.thumbnailUrl ?? assetRenderUrl(asset)}
+          src={asset.thumbnailUrl ?? assetRenderUrl(asset)}
           alt={asset.name}
           className="h-full w-full object-contain pointer-events-none"
           draggable={false}
@@ -52,7 +61,7 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       </div>
       <p className="mt-1 truncate text-[11px] text-zinc-400">{asset.name}</p>
       {subtitle && <p className="truncate text-[10px] text-zinc-500">{subtitle}</p>}
-      {canRemoveBackground && (
+      {canRemoveBackground && asset.processingStatus !== "failed" && (
         <button
           type="button"
           disabled={busy}
@@ -60,17 +69,32 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
           title="Create a transparent derivative while preserving the original"
           onClick={(event) => {
             event.stopPropagation();
-            setBusy(true);
-            setError(undefined);
-            void removeAssetBackground(asset.id)
-              .catch((cause) => setError(cause instanceof Error ? cause.message : "Background removal failed"))
-              .finally(() => setBusy(false));
+            runRemoval();
           }}
         >
           {busy ? "Removing…" : asset.hasAlpha ? "Reprocess Background" : "Remove Background"}
         </button>
       )}
-      {asset.processingStatus === "failed" && <p className="mt-0.5 text-[9px] text-amber-400">Source preserved · retry available</p>}
+      {asset.processingStatus === "failed" && (
+        <div className="mt-1 space-y-1 text-[9px]">
+          <p className="font-medium text-amber-400">Needs background cleanup</p>
+          <div className="flex flex-wrap gap-1">
+            <SmallAction label={busy ? "Working…" : "Retry"} disabled={busy} onClick={() => runRemoval("auto")} />
+            <SmallAction label="Use Image AI" title="Use Image AI to Remove Background" disabled={busy} onClick={() => runRemoval("image-edit")} />
+            <SmallAction label="Choose Provider" title="Choose Background Removal Provider" disabled={busy} onClick={openSettings} />
+            {asset.backgroundRemovalProvider && (
+              <SmallAction label="Remove Again" title="Remove Background Again" disabled={busy} onClick={() => runRemoval("provider")} />
+            )}
+            <SmallAction label="Keep Raw" disabled={busy} onClick={() => keepRawAsset(asset.id)} />
+          </div>
+          {asset.processingReason && (
+            <details className="text-zinc-500">
+              <summary className="cursor-pointer">Details</summary>
+              <p className="mt-0.5 leading-3">{asset.processingReason}</p>
+            </details>
+          )}
+        </div>
+      )}
       {error && <p className="mt-0.5 line-clamp-2 text-[9px] text-red-400" title={error}>{error}</p>}
       {onDelete && (
         <button
@@ -86,19 +110,27 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
           {onUse && <MenuItem label="Use in selected panel" onClick={onUse} />}
           {onRename && <MenuItem label="Rename" onClick={onRename} />}
           {onRegenerate && <MenuItem label="Regenerate and replace" onClick={onRegenerate} />}
-          {canRemoveBackground && <MenuItem label="Remove background" onClick={() => {
-            setBusy(true);
-            setError(undefined);
-            void removeAssetBackground(asset.id)
-              .catch((cause) => setError(cause instanceof Error ? cause.message : "Background removal failed"))
-              .finally(() => setBusy(false));
-          }} />}
+          {canRemoveBackground && <MenuItem label="Remove background" onClick={() => runRemoval()} />}
           {onArchive && <MenuItem label="Archive" onClick={onArchive} />}
           {onRestore && <MenuItem label="Restore" onClick={onRestore} />}
           {onDelete && <MenuItem label="Delete…" danger onClick={onDelete} />}
         </div>
       )}
     </div>
+  );
+}
+
+function SmallAction({ label, title, disabled, onClick }: { label: string; title?: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={title}
+      className="rounded border border-zinc-700 px-1 py-0.5 text-zinc-400 hover:border-violet-600 hover:text-violet-300 disabled:opacity-50"
+      onClick={(event) => { event.stopPropagation(); onClick(); }}
+    >
+      {label}
+    </button>
   );
 }
 

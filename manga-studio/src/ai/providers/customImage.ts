@@ -22,6 +22,7 @@ import { detectImageType } from "@/storage/imageValidation";
 import {
   ProviderError,
   type ImageGenerationProvider,
+  type ImageEditRequest,
   type ImageGenerationRequest,
   type ImageGenerationResult,
   type ProviderStatus,
@@ -37,6 +38,9 @@ export function createCustomImageProvider(config: ProviderConfig): ImageGenerati
     model: config.model,
     capabilities: {
       textToImage: true,
+      supportsReferenceImage: custom.referenceMode !== "none",
+      supportsTransparentBackground: false,
+      supportsImageEditing: custom.referenceMode !== "none",
       referenceImage: custom.referenceMode !== "none",
       imageVariation: custom.referenceMode !== "none",
       transparentOutput: false,
@@ -70,6 +74,23 @@ export function createCustomImageProvider(config: ProviderConfig): ImageGenerati
         throw error;
       }
     },
+
+    ...(custom.referenceMode !== "none" ? {
+      async editImage(request: ImageEditRequest): Promise<ImageGenerationResult> {
+        try {
+          return await runGeneration(config, {
+            prompt: request.instruction,
+            assetType: "character",
+            referenceImages: [request.image],
+            referenceUrls: request.image.url ? [request.image.url] : undefined,
+            trace: request.trace,
+          });
+        } catch (error) {
+          if (error instanceof CustomApiError) throw new ProviderError(error.safeMessage, error.status);
+          throw error;
+        }
+      },
+    } : {}),
   };
 }
 

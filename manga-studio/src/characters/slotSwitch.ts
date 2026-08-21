@@ -6,6 +6,7 @@
  */
 
 import type { Character, ID, ProjectDocument, SourceAsset } from "@/domain/types";
+import { isAssetReadyForComposition } from "@/assets/renderSource";
 
 export interface SlotQuery {
   pose?: string;
@@ -20,7 +21,7 @@ export function characterOfAsset(doc: ProjectDocument, sourceAssetId: ID): Chara
 /** Distinct slot values available for a character, for dropdown options. */
 export function availableSlotValues(doc: ProjectDocument, character: Character, key: "pose" | "expression"): string[] {
   const values = character.assetIds
-    .map((id) => doc.assets[id]?.status === "archived" ? undefined : doc.assets[id]?.metadata?.[key])
+    .map((id) => isAssetReadyForComposition(doc.assets[id]) ? doc.assets[id]?.metadata?.[key] : undefined)
     .filter((v): v is string => Boolean(v));
   return [...new Set(values)];
 }
@@ -36,7 +37,7 @@ export function findSlotAsset(
   requested: SlotQuery,
   current: SlotQuery = {},
 ): SourceAsset | null {
-  const assets = character.assetIds.map((id) => doc.assets[id]).filter((asset) => asset && asset.status !== "archived") as SourceAsset[];
+  const assets = character.assetIds.map((id) => doc.assets[id]).filter(isAssetReadyForComposition) as SourceAsset[];
   const matches = assets.filter((asset) =>
     (["pose", "expression"] as const).every(
       (key) => !requested[key] || asset.metadata?.[key]?.toLowerCase() === requested[key]!.toLowerCase(),

@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { openSecret, sealSecret } from "./secretBox";
 import {
   buildProviderConfig,
+  BACKGROUND_COOKIE,
   IMAGE_COOKIE,
   envAgentConfig,
   resolveProvider,
@@ -100,6 +101,21 @@ describe("buildProviderConfig", () => {
   it("requires a key when none exists yet", () => {
     expect(() => buildProviderConfig({ ...payload, apiKey: undefined }, null)).toThrow(/API key/);
   });
+
+  it("builds an independent background-removal BYOK configuration", () => {
+    const config = buildProviderConfig({
+      kind: "background",
+      providerType: "remove-bg",
+      apiKey: "remove-bg-user-key",
+      model: "",
+    }, null);
+    expect(config).toMatchObject({
+      kind: "background",
+      providerType: "remove-bg",
+      baseUrl: "https://api.remove.bg/v1.0/removebg",
+      model: "background-removal",
+    });
+  });
 });
 
 describe("summaries never leak secrets", () => {
@@ -179,5 +195,20 @@ describe("resolution priority", () => {
     expect(resolveProvider(request, "image", (stage, details) => stages.push({ stage, details }))).toBeNull();
     expect(stages).toContainEqual({ stage: "encryption_key_checked", details: { configured: false } });
     expect(stages.map((event) => event.stage)).toContain("credential_decryption_failed");
+  });
+
+  it("retrieves a background provider from its own encrypted cookie", () => {
+    process.env.APP_ENCRYPTION_KEY = "operator-secret-for-test";
+    const config: ProviderConfig = {
+      kind: "background",
+      providerType: "remove-bg",
+      baseUrl: "https://api.remove.bg/v1.0/removebg",
+      apiKey: "background-user-key",
+      model: "background-removal",
+    };
+    const request = new NextRequest("https://manga.example/api/assets/remove-background", {
+      headers: { cookie: `${BACKGROUND_COOKIE}=${sealSecret(JSON.stringify(config))}` },
+    });
+    expect(resolveProvider(request, "background")?.config).toEqual(config);
   });
 });
