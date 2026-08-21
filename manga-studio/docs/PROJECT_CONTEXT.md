@@ -171,6 +171,50 @@ subject, which is who the pronoun means.
 - A character already obscured BEFORE the run is a warning, not a fatal — the
   Agent is not blamed for a pile-up it did not create.
 
+## GROUNDING IS NOT A CREATION GATE
+
+**A missing asset is a REQUIREMENT, not a failure. The Agent's job is to route
+it to generation, not to refuse the sentence.**
+
+Grounding answers "what does this sentence refer to?", not "is this allowed?".
+Every reference resolves to exactly one of three outcomes:
+
+| Outcome | When | What happens |
+| --- | --- | --- |
+| `existing` | the library has it | reuse it — never re-create |
+| `create` | a SELF-IDENTIFYING reference the library lacks — "Roach Man", "a cockroach superhero", "a new robot named Kumo" | create the entity and generate its assets, then continue the run |
+| `unresolved` | a POINTING reference nothing answers — "her sister", "the teacher" — or a genuinely ambiguous one | block, because inventing an answer would put a stranger in the creator's manga |
+
+The discriminator is the FORM of the reference, never whether the project
+happens to contain a match. A creator who writes a name is introducing someone;
+a creator who points at a relationship is asserting one already exists.
+
+### The arrow
+
+    PROMPT → grounding → entity resolution → asset requirements
+           → FULFILMENT (create character · generate canonical · generate state)
+           → asset library → plan validation → editor commands → page
+
+Fulfilment runs BEFORE the page transaction and is deliberately outside it:
+generated library assets are paid for and must survive a failed composition,
+while the page is what rolls back. It goes through the SAME services the manual
+UI uses — the `create-character` command behind "+ New Character" and
+`generateCharacterAssetForState` behind the starter pack — so an Agent-made
+character is indistinguishable from a hand-made one and is reusable afterwards.
+There is deliberately no Agent-only generation path.
+
+### Consequences that are easy to get wrong
+
+- **Plan validation validates against the state a step will RUN in**, not the
+  document as it is at planning time. A step naming a character the run is
+  about to create must pass.
+- **The planner context must say so too.** The refusal creators actually saw was
+  written by the model, because the context block said creation was FORBIDDEN.
+  Fixing the runtime alone leaves the message intact.
+- **An unmatched capitalized word is only a character when the sentence treats
+  it as one** — a person descriptor, or an action only a character performs.
+  Quoted text is dialogue and never a reference.
+
 ## CAPABILITY RECOVERY RULE
 
 **A creator-facing capability is not complete if its failure state only explains

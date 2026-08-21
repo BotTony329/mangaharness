@@ -99,9 +99,38 @@ export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanVali
    * legitimate, and distinct from referencing a character that will never
    * exist.
    */
+  /**
+   * Names that will EXIST by the time these steps run.
+   *
+   * Validation runs before requirement fulfilment, so a character the run is
+   * about to create is absent from the document right now. Judging a step
+   * against the document as it is today rejected exactly the runs this
+   * architecture is meant to enable — "place Roach Man" failed as "does not
+   * exist" while the stage that creates Roach Man was already queued. A step
+   * is validated against the state it will actually run in.
+   */
   const pendingNames = new Set<string>();
 
-  const authorizedNames = grounding.creation.requestedNames.map(normalizeReference);
+  /**
+   * Who this run may create.
+   *
+   * Authorization comes from ENTITY RESOLUTION, not from spotting a verb.
+   * Every reference the grounder classified as self-identifying — "Roach Man",
+   * "a cockroach superhero", a name the library has never heard of — is a
+   * character the creator introduced, so creating them is exactly what was
+   * asked for. An explicit "create a character called X" still contributes its
+   * name, so both routes agree.
+   */
+  const authorizedNames = [
+    ...grounding.creation.requestedNames,
+    ...grounding.entities
+      .map((entity) => (entity.resolution?.status === "create" ? entity.resolution.proposedName : undefined))
+      .filter((name): name is string => Boolean(name)),
+  ].map(normalizeReference);
+  const creationAuthorized = grounding.creation.allowed || authorizedNames.length > 0;
+  for (const entity of grounding.entities) {
+    if (entity.resolution?.status === "create") pendingNames.add(normalizeReference(entity.resolution.proposedName));
+  }
 
   for (const step of plan.steps) {
     const args = { ...step.args };
@@ -205,7 +234,7 @@ export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanVali
     rejected,
     blocked,
     blockReason,
-    creationAuthorized: grounding.creation.allowed,
+    creationAuthorized,
     authorizedCreationNames: authorizedNames,
   };
 }
@@ -228,11 +257,15 @@ function creationRejection(
     return `"${existing.name}" already exists — reuse character ${existing.characterId} instead of creating a duplicate.`;
   }
 
-  if (!grounding.creation.allowed) {
-    return `Creating the character "${name}" was not requested. ${grounding.creation.reason} Failing to resolve a name is not permission to invent a character.`;
-  }
-  if (authorizedNames.length > 0 && !authorizedNames.includes(normalized)) {
-    return `Creation was authorized for ${authorizedNames.join(", ")}, not "${name}".`;
+  /**
+   * The rule is no longer "was a creation verb used" but "did the creator's own
+   * words introduce THIS entity". A name nobody typed is still refused, which
+   * is what stops a planner inventing a cast around the request.
+   */
+  if (!authorizedNames.includes(normalized)) {
+    return authorizedNames.length > 0
+      ? `Creation was authorized for ${authorizedNames.join(", ")}, not "${name}".`
+      : `Creating the character "${name}" was not requested. Failing to resolve a name is not permission to invent a character.`;
   }
   return null;
 }

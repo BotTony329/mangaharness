@@ -59,7 +59,7 @@ export function buildAgentContext({ doc, currentPageId, selection, scope, ground
         `- Dialogue is EDITOR-NATIVE: add a ${beat.delivery === "shout" ? "shout" : beat.delivery === "whisper" ? "whisper" : "speech"} bubble with text "${beat.text}". Never ask an image model to draw readable text.`,
       );
     }
-    const movement = intent.beats.find((beat) => beat.type === "movement" && beat.direction === "toward_camera");
+    const movement = intent.beats.find((beat) => beat.direction === "toward_camera");
     if (movement) {
       lines.push(
         "- Movement toward the camera is CAMERA INTENT: express it with the stage and camera tools (nearer depth, tighter shot in the later beat), not by arbitrarily scaling the artwork.",

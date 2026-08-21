@@ -855,3 +855,46 @@ anchor reproduces the pose and loses the face.
 Choose Existing re-runs the existing transparency pipeline when the picked image
 is not yet usable. Pointing at a broken image and declaring the problem solved
 would be a button that changes nothing.
+
+## D72 — A missing asset is a requirement, not a refusal
+
+"The bad guy roach man punching to the camera" answered "Roach Man does not
+exist in the project's character inventory, and creating new characters is
+forbidden for this run." Nothing was wrong with the sentence. The Agent could
+identify what a request needed, and could generate assets, and there was no
+arrow between the two.
+
+The cause was that grounding doubled as an authorization gate: an unmatched
+name was fatal unless the prompt also contained a creation verb. That rule
+cannot be patched per-sentence, because the sentences are unbounded.
+
+**Reference FORM decides, not library contents.** A self-identifying reference
+("Roach Man", "a cockroach superhero", "a new robot named Kumo") is someone the
+creator is introducing, so it resolves to `create`. A pointing reference ("her
+sister", "the teacher") asserts something already exists, so when nothing
+answers it, it blocks — inventing an answer would put a stranger in the
+creator's manga. Ambiguity always blocks.
+
+Four things had to change together, and any one alone leaves the failure intact:
+
+1. **Grounding stopped dropping introduced names.** A name the creator
+   introduced in this very prompt was skipped on the theory that creation was
+   handled elsewhere. Nothing handled it, so the entity vanished.
+2. **Validation validates against the state a step will RUN in.** "Place Roach
+   Man" was rejected as "does not exist" while the stage that creates Roach Man
+   was already queued.
+3. **The planner context stopped saying creation was FORBIDDEN.** The refusal
+   creators saw was the MODEL's own words, produced from that line. Fixing the
+   runtime alone would have left the message exactly as it was.
+4. **Physical actions became poses.** "Punching" was in no vocabulary, so the
+   beat fell through to a default standing pose — a character with a perfectly
+   good punching asset would have been asked to generate another one.
+
+Fulfilment runs before the page transaction and outside it: generated assets are
+paid for and must survive a failed composition, while the page rolls back. It
+uses the same services as the manual UI, so an Agent-made character is an
+ordinary library character afterwards.
+
+An unmatched capitalized word is only a character when the sentence frames it as
+one, and quoted text is dialogue, never a reference. Without that, a fresh
+project would turn prose into characters.

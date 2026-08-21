@@ -30,6 +30,7 @@
 
 import type { ID, ProjectDocument } from "@/domain/types";
 import type { CharacterMatchType, GroundingReport } from "./grounding";
+import type { EntityResolution } from "./entityResolution";
 
 export type SubjectBasis =
   | "explicit-name"
@@ -38,9 +39,23 @@ export type SubjectBasis =
   | "selection"
   | "none";
 
+export interface NewSubject {
+  semanticId: string;
+  proposedName: string;
+  description: string;
+}
+
 export interface SubjectResolution {
   /** Characters the user named or implied, subject first. */
   characterIds: ID[];
+  /**
+   * Characters the creator introduced that the project does not have yet.
+   *
+   * A subject exists whether or not the library has heard of them — §3. These
+   * used to vanish at inventory lookup, which is why "The bad guy Roach Man
+   * punching to the camera" reported "No character subject".
+   */
+  newCharacters: NewSubject[];
   /** How the subject was decided — shown in the run log so failures are debuggable. */
   basis: SubjectBasis;
   /** Whether the current selection was used as the subject. */
@@ -69,6 +84,22 @@ export function resolveSubject(input: {
   );
 
   /**
+   * Entities the creator introduced, in reading order. They are subjects in
+   * exactly the same sense as existing characters; the only difference is that
+   * they still need to be made.
+   */
+  const introduced: NewSubject[] = grounding.entities
+    .filter((entity) => entity.resolution?.status === "create")
+    .map((entity) => {
+      const resolution = entity.resolution as Extract<EntityResolution, { status: "create" }>;
+      return {
+        semanticId: resolution.semanticId,
+        proposedName: resolution.proposedName,
+        description: resolution.description,
+      };
+    });
+
+  /**
    * Ordered by where they appeared in the prompt, so "Cute Girl … Yuri's name"
    * makes Cute Girl the subject and Yuri the referenced party. Grounding
    * preserves prompt order, which is the only ordering signal available without
@@ -79,19 +110,26 @@ export function resolveSubject(input: {
 
   /** The user typed a name (or an id, or a stored alias). Nothing outranks this. */
   const explicit = byMatch(["exact-name", "normalized-name", "alias", "unique-token", "id"]);
-  if (explicit.length > 0) {
+  if (explicit.length > 0 || introduced.length > 0) {
+    const names = [
+      ...explicit.map((entity) => name(entity.characterId)),
+      ...introduced.map((entity) => entity.proposedName),
+    ];
     return {
       characterIds: explicit.map((entity) => entity.characterId),
+      newCharacters: introduced,
       basis: "explicit-name",
       usedSelection: false,
-      explanation: `${explicit.map((entity) => name(entity.characterId)).join(", ")} — named explicitly, so the current selection is not the subject`,
+      explanation: `${names.join(", ")} — named explicitly, so the current selection is not the subject`,
     };
   }
+
 
   const relational = byMatch(["relationship"]);
   if (relational.length > 0) {
     return {
       characterIds: relational.map((entity) => entity.characterId),
+      newCharacters: introduced,
       basis: "relationship",
       usedSelection: false,
       explanation: `${relational.map((entity) => name(entity.characterId)).join(", ")} — resolved through a stored relationship`,
@@ -103,6 +141,7 @@ export function resolveSubject(input: {
     const usedSelection = pronoun.some((entity) => entity.characterId === grounding.selectedCharacterId);
     return {
       characterIds: pronoun.map((entity) => entity.characterId),
+      newCharacters: introduced,
       basis: "pronoun",
       usedSelection,
       explanation: `${pronoun.map((entity) => name(entity.characterId)).join(", ")} — a pronoun resolved from ${usedSelection ? "the selection" : "the scene"}`,
@@ -117,6 +156,7 @@ export function resolveSubject(input: {
   if (grounding.selectedCharacterId) {
     return {
       characterIds: [grounding.selectedCharacterId],
+      newCharacters: introduced,
       basis: "selection",
       usedSelection: true,
       explanation: `${name(grounding.selectedCharacterId)} — nothing was named, so the selected character is the subject`,
@@ -125,6 +165,7 @@ export function resolveSubject(input: {
 
   return {
     characterIds: [],
+    newCharacters: introduced,
     basis: "none",
     usedSelection: false,
     explanation: "No character subject — the request is about a panel, an object, or the page",

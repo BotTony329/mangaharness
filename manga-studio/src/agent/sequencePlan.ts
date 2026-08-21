@@ -171,7 +171,8 @@ export function buildSequencePlan(input: BuildSequenceInput): SequencePlan {
      * the actor ends up nearer than they started. Expressed through the stage,
      * not by scaling artwork.
      */
-    if (movement?.direction === "toward_camera" && subjects[0]) {
+    const towardCamera = group.find((beat) => beat.direction === "toward_camera");
+    if (towardCamera && subjects[0]) {
       camera.placements = [
         ...(camera.placements ?? []).filter((p) => p.characterId !== subjects[0]),
         { characterId: subjects[0], placement: index === 0 ? "midground" : "foreground" },

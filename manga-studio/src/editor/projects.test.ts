@@ -374,9 +374,12 @@ describe("project scoping", () => {
 
     // Yuri exists — in another project. Grounding must NOT reach her.
     const report = groundPrompt({ doc: active, prompt: "Yuri walks in." });
-    expect(report.entities).toContainEqual(expect.objectContaining({ surface: "Yuri", status: "not-found" }));
-    expect(report.blocking).toHaveLength(1);
-    expect(report.creation.allowed).toBe(false);
+    const yuri = report.entities.find((entity) => entity.surface === "Yuri");
+    // The property that matters: she is NOT reached across the project boundary.
+    expect(yuri?.status).toBe("not-found");
+    expect(yuri?.characterId).toBeUndefined();
+    // In this project she is simply somebody new, not a fatal error.
+    expect(yuri?.resolution).toMatchObject({ status: "create", proposedName: "Yuri" });
 
     // Mio, who does belong here, resolves normally.
     const local = groundPrompt({ doc: active, prompt: "Mio walks in." });
@@ -406,10 +409,13 @@ describe("project scoping", () => {
     await useProjectsStore.getState().bootstrap();
 
     await useProjectsStore.getState().openProject(projectA.project.id);
-    expect(groundPrompt({ doc: useEditorStore.getState().doc!, prompt: "Yuri walks in." }).blocking).toEqual([]);
+    const inA = groundPrompt({ doc: useEditorStore.getState().doc!, prompt: "Yuri walks in." });
+    expect(inA.entities.find((e) => e.surface === "Yuri")?.resolution?.status).toBe("existing");
 
     await useProjectsStore.getState().openProject(projectB.project.id);
-    expect(groundPrompt({ doc: useEditorStore.getState().doc!, prompt: "Yuri walks in." }).blocking).toHaveLength(1);
+    const inB = groundPrompt({ doc: useEditorStore.getState().doc!, prompt: "Yuri walks in." });
+    // Same word, different project: she is not carried across.
+    expect(inB.entities.find((e) => e.surface === "Yuri")?.resolution?.status).toBe("create");
   });
 });
 

@@ -18,6 +18,8 @@
 
 import type { Character, ID, ProjectDocument } from "@/domain/types";
 import { relatedCharacters, relationshipTypeFromPhrase } from "@/domain/relationships";
+import { resolveUnmatched, type EntityResolution } from "./entityResolution";
+import { ACTION_VERBS, MOVEMENT_VERBS, SHOUT_VERBS, SPEAK_VERBS, WHISPER_VERBS } from "./sceneIntent";
 
 // ─── Normalization ──────────────────────────────────────────────────────────
 
@@ -391,6 +393,14 @@ export interface GroundedEntity {
   promptIndex?: number;
   candidates?: CharacterCandidate[];
   reason?: string;
+  /**
+   * What should HAPPEN about this reference.
+   *
+   * Separate from `status`, which only says whether the library recognised it.
+   * A name the library has never heard of is not a failure — it is a character
+   * the creator just introduced, and it becomes an asset requirement.
+   */
+  resolution?: EntityResolution;
 }
 
 export interface GroundingReport {
@@ -442,6 +452,41 @@ const NOT_A_NAME = new Set(
   ],
 );
 
+/** Character-frame evidence: words that introduce a person. */
+const PERSON_DESCRIPTOR =
+  /\b(?:guy|man|woman|girl|boy|kid|child|person|hero|heroine|villain|bad guy|enemy|rival|friend|stranger|robot|android|monster|creature|cat|dog|knight|ninja|samurai|witch|wizard|detective|student|teacher|character|protagonist|antagonist)\b/i;
+
+/** Verbs that only a subject can perform, in any of the beat vocabularies. */
+const ACTS_LIKE_A_CHARACTER = new RegExp(
+  `\\b(?:${[...MOVEMENT_VERBS, ...ACTION_VERBS, ...SHOUT_VERBS, ...WHISPER_VERBS, ...SPEAK_VERBS].join("|")})\\b`,
+  "i",
+);
+
+/** Spans of the prompt that are quoted dialogue text. */
+function quotedRanges(prompt: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  for (const match of prompt.matchAll(/["\u201c\u2018']([^"\u201d\u2019']{0,120})["\u201d\u2019']/g)) {
+    ranges.push([match.index, match.index + match[0].length]);
+  }
+  return ranges;
+}
+
+/**
+ * Does the sentence treat this surface as a character?
+ *
+ * Either it is introduced as a person ("the bad guy Roach Man", "a robot named
+ * Kumo") or it does something only a character can do ("Roach Man punches").
+ */
+function hasCharacterFrame(prompt: string, surface: string): boolean {
+  const at = prompt.indexOf(surface);
+  if (at < 0) return false;
+  const before = prompt.slice(Math.max(0, at - 40), at);
+  const after = prompt.slice(at + surface.length, at + surface.length + 40);
+  if (PERSON_DESCRIPTOR.test(before)) return true;
+  if (/\b(?:named|called)\s+$/i.test(before)) return true;
+  return ACTS_LIKE_A_CHARACTER.test(after) || ACTS_LIKE_A_CHARACTER.test(before);
+}
+
 /**
  * Proper nouns the user wrote that match no character. These are what turn a
  * silent substitution into an explicit "I could not find Yuri".
@@ -449,9 +494,13 @@ const NOT_A_NAME = new Set(
 function unmatchedProperNouns(prompt: string, matchedSurfaces: Set<string>): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
+  const quoted = quotedRanges(prompt);
   // Sequences of capitalized words, so "Cute Girl" is one reference, not two.
   for (const match of prompt.matchAll(/\b[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+)*\b/g)) {
     const surface = match[0];
+    // Words inside quotes are the creator's dialogue text, not references to
+    // anyone: 'a bubble saying "Hello Yuri"' names no one.
+    if (quoted.some(([start, end]) => match.index >= start && match.index < end)) continue;
     const key = normalizeReference(surface);
     if (seen.has(key) || matchedSurfaces.has(key)) continue;
     // A run of capitalized words is only ignored when EVERY word is a stopword,
@@ -527,11 +576,31 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
       }
       continue;
     }
-    if (authorizedNames.has(normalizeReference(surface))) continue;
-    // With no characters in the project at all, an unmatched capitalized word
-    // is far more likely to be prose than a reference to something missing.
-    if (projectCharacters.length === 0 && !creation.allowed) continue;
-    entities.push(toEntity(surface, resolution));
+    /**
+     * GROUNDING IS NOT A CREATION GATE.
+     *
+     * A name the creator introduced in this very prompt ("a new robot named
+     * Kumo") used to be skipped here, on the theory that creation was handled
+     * elsewhere. Nothing handled it, so the entity vanished and the plan had
+     * no one to act. An introduced name is a REQUIREMENT TO CREATE, and the
+     * only way downstream stages can fulfil it is if it is on this list.
+     */
+    if (authorizedNames.has(normalizeReference(surface))) {
+      entities.push({ ...toEntity(surface, resolution), promptIndex: at >= 0 ? at : undefined });
+      continue;
+    }
+    /**
+     * An unmatched capitalized word is only a CHARACTER when the sentence
+     * treats it as one. In a project with no characters yet there is nothing to
+     * corroborate against, so the sentence has to say so itself — through a
+     * descriptor ("the bad guy Roach Man") or by having them do something
+     * ("Roach Man punches"). Without that, a capitalized word is prose, and
+     * creating a character from it would put a stranger in the creator's
+     * library. This used to drop the name unconditionally, which is why the
+     * brief's own example produced nothing at all in a fresh project.
+     */
+    if (projectCharacters.length === 0 && !creation.allowed && !hasCharacterFrame(input.prompt, surface)) continue;
+    entities.push({ ...toEntity(surface, resolution), promptIndex: at >= 0 ? at : undefined });
   }
 
   /**
@@ -588,12 +657,51 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
 
   entities.sort((a, b) => (a.promptIndex ?? Number.MAX_SAFE_INTEGER) - (b.promptIndex ?? Number.MAX_SAFE_INTEGER));
 
+  /**
+   * Decide what each unmatched reference MEANS before deciding whether to stop.
+   *
+   * Grounding prefers what already exists; it is not a creation gate. A
+   * self-identifying reference ("Roach Man", "a cockroach superhero") becomes a
+   * requirement to create. A pointing reference ("her sister", "the teacher")
+   * that the project cannot answer is the only thing that blocks, because
+   * inventing an answer to it would put a character in the creator's manga that
+   * they never wrote.
+   */
+  for (const entity of entities) {
+    if (entity.status === "resolved" && entity.characterId) {
+      entity.resolution = {
+        status: "existing",
+        kind: "character",
+        entityId: entity.characterId,
+        name: entity.name ?? entity.surface,
+      };
+      continue;
+    }
+    const resolution = resolveUnmatched({
+      surface: entity.surface,
+      kind: "character",
+      ambiguous: entity.status === "ambiguous",
+      ambiguityReason: entity.reason,
+    });
+    /**
+     * "Kumo" is the name; "a new robot named Kumo" is the character. The bare
+     * proper noun is what the prompt scanner sees, but the phrase around it is
+     * what an artist would need in order to draw them, so the description keeps
+     * the whole introduction.
+     */
+    if (resolution.status === "create") {
+      const phrase = introducingPhrase(input.prompt, resolution.proposedName);
+      if (phrase) resolution.description = phrase;
+    }
+    entity.resolution = resolution;
+  }
+
   const blocking = entities
-    .filter((entity) => entity.status !== "resolved")
+    .filter((entity) => entity.resolution?.status === "unresolved")
     .map((entity) =>
-      entity.status === "ambiguous"
-        ? entity.reason ?? `"${entity.surface}" is ambiguous.`
-        : `Could not resolve "${entity.surface}" to a character in this project.`,
+      entity.resolution?.status === "unresolved"
+        ? entity.resolution.reason
+        : `Could not resolve "${entity.surface}".`,
     );
 
   return {
@@ -604,6 +712,20 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
     sceneCharacterIds,
     blocking,
   };
+}
+
+/**
+ * The noun phrase that introduced a name, if the creator wrote one.
+ *
+ * "Yuri hugs a new robot named Kumo" → "a new robot named Kumo".
+ */
+function introducingPhrase(prompt: string, name: string): string | undefined {
+  const pattern = new RegExp(
+    `\\b(?:a|an|the|this)\\s+(?:[\\w'\u2019-]+\\s+){0,4}?(?:named|called)\\s+["\u201c']?${escapeRegex(name)}`,
+    "i",
+  );
+  const hit = pattern.exec(prompt);
+  return hit?.[0]?.replace(/["\u201c']$/, "").trim();
 }
 
 function toEntity(surface: string, resolution: CharacterResolution): GroundedEntity {
@@ -645,12 +767,36 @@ export function groundingContext(report: GroundingReport): string[] {
   for (const entity of resolvedEntities) {
     lines.push(`- "${entity.surface}" → character ${entity.characterId} (${entity.name})`);
   }
-  for (const entity of report.entities.filter((e) => e.status !== "resolved")) {
+  /**
+   * What the planner is told about everyone else.
+   *
+   * This block is the direct cause of the refusal this architecture exists to
+   * remove. It used to say "CHARACTER CREATION: FORBIDDEN for this run" for
+   * every prompt that did not contain a creation verb, and the model dutifully
+   * answered "Roach Man does not exist … creating new characters is forbidden
+   * for this run" — the runtime never even ran. A character the creator
+   * introduced is not a forbidden creation; they are a character who will
+   * exist by the time these steps run, and the planner must compose with them.
+   */
+  const beingCreated = report.entities.filter((entity) => entity.resolution?.status === "create");
+  for (const entity of beingCreated) {
+    const resolution = entity.resolution as Extract<EntityResolution, { status: "create" }>;
+    lines.push(
+      `- "${entity.surface}" → NEW CHARACTER "${resolution.proposedName}" (${resolution.description}). ` +
+        "They are being created and drawn BEFORE your steps run, so plan with them exactly as with an existing " +
+        `character: refer to them as "${resolution.proposedName}". Do NOT refuse, and do NOT substitute anyone else.`,
+    );
+  }
+  for (const entity of report.entities.filter((e) => e.resolution?.status === "unresolved")) {
     lines.push(`- "${entity.surface}" → UNRESOLVED. Do not substitute another character and do not create one.`);
   }
+  const authorized = [
+    ...report.creation.requestedNames,
+    ...beingCreated.map((entity) => (entity.resolution as Extract<EntityResolution, { status: "create" }>).proposedName),
+  ];
   lines.push(
-    report.creation.allowed
-      ? `CHARACTER CREATION: AUTHORIZED for this run${report.creation.requestedNames.length > 0 ? ` (${report.creation.requestedNames.join(", ")})` : ""}.`
+    authorized.length > 0 || report.creation.allowed
+      ? `CHARACTER CREATION: AUTHORIZED for this run${authorized.length > 0 ? ` (${[...new Set(authorized)].join(", ")})` : ""}.`
       : "CHARACTER CREATION: FORBIDDEN for this run. create_character and reference generation will be rejected by the runtime.",
   );
   return lines;

@@ -275,12 +275,20 @@ describe("groundPrompt", () => {
     expect(report.creation.allowed).toBe(false);
   });
 
-  it("blocks the run when a named character does not exist", () => {
+  it("treats an unknown NAME as a character to create, never as a substitution", () => {
     const base = fixture();
     const report = groundPrompt({ doc: withoutYuri(base), prompt: "Yuri walks in." });
-    expect(report.entities).toContainEqual(expect.objectContaining({ surface: "Yuri", status: "not-found" }));
-    expect(report.blocking).toHaveLength(1);
-    expect(report.creation.allowed).toBe(false);
+    const yuri = report.entities.find((entity) => entity.surface === "Yuri");
+
+    // The library does not recognise her — but a name is self-identifying, so
+    // the answer is "create Yuri", not "the request cannot be fulfilled".
+    expect(yuri?.status).toBe("not-found");
+    expect(yuri?.resolution).toMatchObject({ status: "create", kind: "character", proposedName: "Yuri" });
+    expect(report.blocking).toEqual([]);
+
+    // The safety property that actually mattered: she is never silently
+    // resolved to somebody else who does exist.
+    expect(yuri?.characterId).toBeUndefined();
   });
 
   it("does not block a name the user explicitly asked to create", () => {
@@ -290,11 +298,22 @@ describe("groundPrompt", () => {
     expect(report.creation).toMatchObject({ allowed: true, requestedNames: ["Hana"] });
   });
 
-  it("blocks the same name when creation was not requested", () => {
+  it("still blocks a reference that POINTS at project data it cannot answer", () => {
     const { doc } = fixture();
-    const report = groundPrompt({ doc, prompt: "Hana enters the room." });
-    expect(report.blocking).toHaveLength(1);
-    expect(report.creation.allowed).toBe(false);
+    // "her sister" means nothing without a relationship; inventing one would put
+    // a character in the creator's manga that they never wrote.
+    const report = groundPrompt({ doc, prompt: "Yuri hugs her sister." });
+    const sister = report.entities.find((entity) => entity.surface.includes("sister"));
+    expect(sister?.resolution?.status).toBe("unresolved");
+    expect(report.blocking.length).toBeGreaterThan(0);
+  });
+
+  it("names a new character from the words the creator actually used", () => {
+    const { doc } = fixture();
+    const report = groundPrompt({ doc, prompt: "The bad guy Roach Man punching to the camera" });
+    const roach = report.entities.find((entity) => /roach/i.test(entity.surface));
+    expect(roach?.resolution).toMatchObject({ status: "create", proposedName: "Roach Man" });
+    expect(report.blocking).toEqual([]);
   });
 
   it("does not mistake manga vocabulary for character names", () => {
@@ -324,15 +343,17 @@ describe("validateGroundedPlan", () => {
     expect(result.plan.steps[0].args.characterId).toBe(yuri);
   });
 
-  it("rejects create_character when creation was not requested (§5/§6)", () => {
+  it("rejects create_character for a name the creator never typed (§5/§6)", () => {
     const base = fixture();
     const doc = withoutYuri(base);
     const grounding = groundPrompt({ doc, prompt: "Yuri walks in." });
     const result = validateGroundedPlan({
       plan: planFor([
-        { tool: "create_character", args: { name: "Yuri", appearance: "a girl" } },
-        { tool: "generate_character_asset", args: { characterName: "Yuri", kind: "reference" } },
-        { tool: "place_character", args: { panel: 1, characterName: "Yuri" } },
+        // The prompt introduced Yuri. It said nothing whatsoever about Kenji —
+        // a planner inventing a supporting cast is still refused.
+        { tool: "create_character", args: { name: "Kenji", appearance: "a boy" } },
+        { tool: "generate_character_asset", args: { characterName: "Kenji", kind: "reference" } },
+        { tool: "place_character", args: { panel: 1, characterName: "Kenji" } },
       ]),
       doc,
       grounding,
@@ -340,7 +361,7 @@ describe("validateGroundedPlan", () => {
     });
     expect(result.plan.steps).toHaveLength(0);
     expect(result.blocked).toBe(true);
-    expect(result.rejected[0].error).toContain("not requested");
+    expect(result.rejected[0].error).toContain("authorized for");
   });
 
   it("allows create_character only for the name the user asked for", () => {
@@ -420,7 +441,18 @@ describe("validateGroundedPlan", () => {
     expect(result.rejected[0].error).toContain("does not exist");
   });
 
-  it("blocks the whole run rather than executing the steps around a bad reference", () => {
+  /**
+   * The reported production bug: "Yuri walks past Cute Girl" composed a panel
+   * containing ONLY Cute Girl, because the step naming Yuri failed on its own
+   * while the rest of the run carried on.
+   *
+   * The run used to be blocked outright. It no longer is — a proper name the
+   * library has never heard of is a character the creator is introducing, so
+   * Yuri is created rather than refused. What must NEVER happen either way is
+   * the original bug: a panel that silently contains one of the two people the
+   * sentence named. So the assertion is about the participants, not the verdict.
+   */
+  it("never composes a panel missing one of the characters the sentence named", () => {
     const base = fixture();
     const doc = withoutYuri(base);
     const grounding = groundPrompt({ doc, prompt: "Yuri walks past Cute Girl." });
@@ -433,9 +465,18 @@ describe("validateGroundedPlan", () => {
       grounding,
       panelCount: 4,
     });
-    // Cute Girl alone would have succeeded — and would have been the only
-    // character in the panel, which is exactly the reported production bug.
-    expect(result.blocked).toBe(true);
+
+    // Neither participant is dropped: either both survive, or nothing runs.
+    const placed = result.plan.steps
+      .filter((step) => step.tool === "place_character")
+      .map((step) => String(step.args.characterName).toLowerCase());
+    if (!result.blocked) {
+      expect(placed).toContain("yuri");
+      expect(placed).toContain("cute girl");
+      // And Yuri is going to exist by the time that step runs.
+      expect(result.authorizedCreationNames).toContain("yuri");
+    }
+    expect(result.rejected.map((entry) => entry.error).join(" ")).not.toContain("Cute Girl");
   });
 });
 
@@ -544,16 +585,19 @@ describe("agent run: existing character references are sacred", () => {
     expect(asset.metadata?.characterId).toBe(base.yuri);
   });
 
-  it("a removed character produces NOT_FOUND, no creation, and no generation", async () => {
+  it("a removed character is re-created under her own name, never substituted", async () => {
     const base = fixture();
     const doc = withoutYuri(base);
     seedStore(doc);
     const grounding = groundPrompt({ doc, prompt: "Yuri walks in." });
 
-    expect(grounding.blocking).toHaveLength(1);
-    expect(grounding.blocking[0]).toContain("Yuri");
+    expect(grounding.blocking).toEqual([]);
+    expect(grounding.entities.find((e) => e.surface === "Yuri")?.resolution).toMatchObject({
+      status: "create",
+      proposedName: "Yuri",
+    });
 
-    // Even if a planner ignores that, validation refuses to execute anything.
+    // Creating HER is authorized; nothing here may reach another character.
     const validated = validateGroundedPlan({
       plan: planFor([
         { tool: "create_character", args: { name: "Yuri" } },
@@ -564,8 +608,10 @@ describe("agent run: existing character references are sacred", () => {
       grounding,
       panelCount: 4,
     });
-    expect(validated.blocked).toBe(true);
-    expect(validated.plan.steps).toHaveLength(0);
+    expect(validated.blocked).toBe(false);
+    expect(validated.creationAuthorized).toBe(true);
+    expect(validated.authorizedCreationNames).toContain("yuri");
+    // Still exactly two characters until the run actually executes.
     expect(Object.keys(useEditorStore.getState().doc!.characters)).toHaveLength(2);
     expect(generationCalls).toHaveLength(0);
   });

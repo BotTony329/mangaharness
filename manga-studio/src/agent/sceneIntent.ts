@@ -110,10 +110,29 @@ const TOWARD_CAMERA =
   /\b(?:to|toward|towards|into|at)\s+(?:the\s+)?(?:camera|viewer|screen|us|front)\b|\btoward\s+(?:the\s+)?reader\b/i;
 const AWAY_FROM_CAMERA = /\b(?:away from|into the distance|to the back|off into)\b/i;
 
-const MOVEMENT_VERBS = ["run", "runs", "running", "walk", "walks", "walking", "dash", "dashes", "rush", "rushes", "charge", "charges", "approach", "approaches", "flee", "flees"];
-const SHOUT_VERBS = ["shout", "shouts", "shouting", "yell", "yells", "yelling", "scream", "screams", "screaming", "call", "calls", "calling", "cry out"];
-const WHISPER_VERBS = ["whisper", "whispers", "whispering", "murmur", "murmurs"];
-const SPEAK_VERBS = ["say", "says", "saying", "speak", "speaks", "tell", "tells", "reply", "replies", "answer", "answers"];
+export const MOVEMENT_VERBS = ["run", "runs", "running", "walk", "walks", "walking", "dash", "dashes", "rush", "rushes", "charge", "charges", "approach", "approaches", "flee", "flees"];
+/**
+ * Physical actions that are a POSE, not locomotion.
+ *
+ * "Punching to the camera" is the brief's own example, and it used to derive
+ * no action at all: the beat fell through to the default standing pose, so a
+ * character with a perfectly good punching asset was asked to generate one.
+ * Locomotion is separate because only locomotion changes where the actor IS.
+ */
+export const ACTION_VERBS = [
+  "punch", "punches", "punching", "kick", "kicks", "kicking", "throw", "throws", "throwing",
+  "grab", "grabs", "grabbing", "push", "pushes", "pushing", "pull", "pulls", "pulling",
+  "swing", "swings", "swinging", "slash", "slashes", "slashing", "block", "blocks", "blocking",
+  "dodge", "dodges", "dodging", "wave", "waves", "waving", "point", "points", "pointing",
+  "reach", "reaches", "reaching", "sit", "sits", "sitting", "stand", "stands", "standing",
+  "jump", "jumps", "jumping", "crouch", "crouches", "crouching", "kneel", "kneels", "kneeling",
+  "fall", "falls", "falling", "lean", "leans", "leaning", "bow", "bows", "bowing",
+  "salute", "salutes", "saluting", "clap", "claps", "clapping", "dance", "dances", "dancing",
+];
+
+export const SHOUT_VERBS = ["shout", "shouts", "shouting", "yell", "yells", "yelling", "scream", "screams", "screaming", "call", "calls", "calling", "cry out"];
+export const WHISPER_VERBS = ["whisper", "whispers", "whispering", "murmur", "murmurs"];
+export const SPEAK_VERBS = ["say", "says", "saying", "speak", "speaks", "tell", "tells", "reply", "replies", "answer", "answers"];
 
 /**
  * Chinese has no word boundaries, so these are matched as substrings rather
@@ -160,6 +179,26 @@ const POSE_WORDS: Record<string, string> = {
   jump: "jumping", jumps: "jumping", jumping: "jumping",
   stand: "standing", stands: "standing", standing: "standing",
   point: "pointing", points: "pointing", pointing: "pointing",
+  punch: "punching", punches: "punching", punching: "punching",
+  kick: "kicking", kicks: "kicking", kicking: "kicking",
+  throw: "throwing", throws: "throwing", throwing: "throwing",
+  grab: "grabbing", grabs: "grabbing", grabbing: "grabbing",
+  push: "pushing", pushes: "pushing", pushing: "pushing",
+  pull: "pulling", pulls: "pulling", pulling: "pulling",
+  swing: "swinging", swings: "swinging", swinging: "swinging",
+  slash: "slashing", slashes: "slashing", slashing: "slashing",
+  block: "blocking", blocks: "blocking", blocking: "blocking",
+  dodge: "dodging", dodges: "dodging", dodging: "dodging",
+  wave: "waving", waves: "waving", waving: "waving",
+  reach: "reaching", reaches: "reaching", reaching: "reaching",
+  crouch: "crouching", crouches: "crouching", crouching: "crouching",
+  kneel: "kneeling", kneels: "kneeling", kneeling: "kneeling",
+  fall: "falling", falls: "falling", falling: "falling",
+  lean: "leaning", leans: "leaning", leaning: "leaning",
+  bow: "bowing", bows: "bowing", bowing: "bowing",
+  salute: "saluting", salutes: "saluting", saluting: "saluting",
+  clap: "clapping", claps: "clapping", clapping: "clapping",
+  dance: "dancing", dances: "dancing", dancing: "dancing",
 };
 
 function has(fragment: string, words: string[]): string | undefined {
@@ -325,6 +364,25 @@ function beatsFor(fragment: string, doc: ProjectDocument, subjectId: ID | undefi
        * ends up nearer the viewer, which the stage system expresses as depth
        * and framing rather than as an arbitrary scale bump.
        */
+      direction: TOWARD_CAMERA.test(fragment) || ZH_TOWARD_CAMERA.test(fragment)
+        ? "toward_camera"
+        : AWAY_FROM_CAMERA.test(fragment)
+          ? "away_from_camera"
+          : "unspecified",
+      source: fragment,
+    });
+  }
+
+  /**
+   * A physical action the actor performs in place. Skipped when the fragment
+   * already produced movement or an interaction, because those carry the pose.
+   */
+  const physical = has(fragment, ACTION_VERBS);
+  if (physical && !movement && !zhMovement && !interaction) {
+    out.push({
+      type: "action",
+      actor: subjectId,
+      action: POSE_WORDS[physical] ?? physical,
       direction: TOWARD_CAMERA.test(fragment) || ZH_TOWARD_CAMERA.test(fragment)
         ? "toward_camera"
         : AWAY_FROM_CAMERA.test(fragment)

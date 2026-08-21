@@ -17,6 +17,8 @@ import { resolveSubject, type SubjectResolution } from "@/agent/subject";
 import { deriveSceneIntent, describeIntent, type SceneIntent } from "@/agent/sceneIntent";
 import { buildSequencePlan, compileSequencePlan, describeSequencePlan, type SequencePlan } from "@/agent/sequencePlan";
 import { describeCameraIntent } from "@/agent/cameraIntent";
+import { deriveAssetRequirements, type RequirementReport } from "@/agent/assetRequirements";
+import { fulfilRequirements } from "@/agent/fulfilRequirements";
 import type { AgentPlan } from "@/agent/tools/schemas";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -25,6 +27,7 @@ import { useUiStore } from "@/editor/uiStore";
 import {
   AlertIcon,
   CheckIcon,
+  GenerateIcon,
   CloseIcon,
   DoneIcon,
   PendingIcon,
@@ -74,6 +77,7 @@ export function AgentPanel() {
   const [subject, setSubject] = useState<SubjectResolution | null>(null);
   const [intent, setIntent] = useState<SceneIntent | null>(null);
   const [sequence, setSequence] = useState<SequencePlan | null>(null);
+  const [requirements, setRequirements] = useState<RequirementReport | null>(null);
   const [runScope, setRunScope] = useState<{ label: string; demotionReason?: string } | null>(null);
   const [guards, setGuards] = useState<RunGuards | null>(null);
   const [assetTrace, setAssetTrace] = useState<string[]>([]);
@@ -139,6 +143,7 @@ export function AgentPanel() {
       setIntent(null);
       setSubject(null);
       setSequence(null);
+      setRequirements(null);
 
       // A reference we could not ground stops the run here — before the model
       // is paid for, before anything is generated, before anything is mutated.
@@ -193,6 +198,21 @@ export function AgentPanel() {
       scope = scopeForPanels(scope, plan.allocation.panelNumbers, plan.needsPanelLevel);
       setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
       setSequence(plan);
+      /**
+       * What this request NEEDS, before anything is spent.
+       *
+       * A missing asset is a requirement, not a failure. Deriving it here means
+       * the creator sees "Roach Man — not in the library, create the character"
+       * in the plan rather than discovering afterwards that the run refused.
+       */
+      const requirementReport = deriveAssetRequirements({
+        doc: state.doc,
+        plan,
+        newCharacters: resolvedSubject.newCharacters,
+      });
+      setRequirements(requirementReport);
+      setActivity((current) => [...current, "Asset requirements"]);
+
       const compiled = compileSequencePlan(plan, state.doc);
       const deterministic = compiled.length > 0 && (plan.requiredPanelCount > 1 || plan.beats.some((beat) => beat.camera));
       setActivity((current) => [...current, "Panel allocation"]);
@@ -266,7 +286,7 @@ export function AgentPanel() {
         setPhase("confirm");
         return;
       }
-      await execute(validated.plan, runGuards, plan);
+      await execute(validated.plan, runGuards, plan, requirementReport);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent failed");
       setPhase("error");
@@ -275,8 +295,39 @@ export function AgentPanel() {
     }
   };
 
-  const execute = async (planToRun: AgentPlan, runGuards?: RunGuards, sequencePlan?: SequencePlan | null) => {
+  const execute = async (
+    planToRun: AgentPlan,
+    runGuards?: RunGuards,
+    sequencePlan?: SequencePlan | null,
+    requirementReport?: RequirementReport | null,
+  ) => {
     setPhase("executing");
+
+    /**
+     * Assets first, page second.
+     *
+     * Generated library assets survive a failed composition — they were paid
+     * for, and a retry must not pay twice — while the page itself is what the
+     * transaction rolls back. Doing this inside the transaction would discard
+     * a character the creator now owns.
+     */
+    const report = requirementReport ?? requirements;
+    if (report && report.generationCount > 0) {
+      setStatusLine("Making the assets this needs…");
+      try {
+        const fulfilment = await fulfilRequirements(report.requirements);
+        if (fulfilment.created.length > 0) {
+          setActivity((current) => [...current, `Created ${fulfilment.created.map((c) => c.name).join(", ")}`]);
+        }
+      } catch (cause) {
+        // The truth: what could not be MADE, never "it does not exist".
+        setError(cause instanceof Error ? cause.message : "The assets this needs could not be generated.");
+        setStatusLine(null);
+        setPhase("error");
+        return;
+      }
+    }
+
     setActivity((current) => [...current, "Asset search", "Composition"]);
     setStatusLine("Composing…");
     const summary = await executePlan(
@@ -413,16 +464,27 @@ export function AgentPanel() {
             {grounding.entities.map((entity) => (
               <li key={entity.surface} className="flex items-start gap-1.5">
                 <span className="mt-0.5 shrink-0">
-                  {entity.status === "resolved" ? (
+                  {entity.resolution?.status === "existing" ? (
                     <CheckIcon size={12} strokeWidth={2.25} className="text-[var(--success)]" />
+                  ) : entity.resolution?.status === "create" ? (
+                    <GenerateIcon size={12} strokeWidth={2.25} className="text-[var(--accent-text)]" />
                   ) : (
                     <CloseIcon size={12} strokeWidth={2.25} className="text-[var(--danger)]" />
                   )}
                 </span>
-                <span className={entity.status === "resolved" ? "text-zinc-300" : "text-red-300"}>
-                  {entity.status === "resolved" ? (
+                <span
+                  className={
+                    entity.resolution?.status === "unresolved" ? "text-red-300" : "text-zinc-300"
+                  }
+                >
+                  {entity.resolution?.status === "existing" ? (
                     <>
                       {entity.surface} → existing Character &ldquo;{entity.name}&rdquo;
+                    </>
+                  ) : entity.resolution?.status === "create" ? (
+                    <>
+                      {entity.resolution.proposedName}
+                      <span className="block text-[10px] text-[var(--text-muted)]">New character</span>
                     </>
                   ) : (
                     <>
@@ -486,6 +548,24 @@ export function AgentPanel() {
             in the wrong panel and a dropped framing instruction both look like
             "the Agent ignored me".
           */}
+          {/*
+            What this will make. Shown before execution because "not in the
+            library" is a plan step here, not a refusal — the creator should see
+            what they are about to be given, and what it costs.
+          */}
+          {requirements && requirements.requirements.length > 0 && (
+            <div className="mt-1.5">
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Assets{requirements.generationCount > 0 ? ` · ${requirements.generationCount} to generate` : " · all in the library"}
+              </p>
+              <ul className="mt-0.5 space-y-0.5 text-[10px] text-[var(--text-secondary)]">
+                {requirements.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {sequence && doc && (
             <div className="mt-1.5">
               <p className="text-[10px] text-[var(--text-muted)]">
