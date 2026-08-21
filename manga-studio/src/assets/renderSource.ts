@@ -14,7 +14,14 @@ export function assetRenderUrl(asset: SourceAsset | undefined): string | undefin
   if (!asset) return undefined;
   if (requiresTransparency(asset.category)) {
     if (!assetSatisfiesTransparencyContract(asset)) return undefined;
-    return asset.processedImageUrl ?? asset.storageUrl;
+    /**
+     * Never `processedImageUrl ?? storageUrl` for a processed asset: the raw
+     * source is the contaminated one. The only images reaching `storageUrl`
+     * here are pre-pipeline documents, which carry no processing state at all
+     * and are grandfathered rather than blanked out of old projects.
+     */
+    if (asset.processedImageUrl) return asset.processedImageUrl;
+    return asset.processingStatus === undefined ? asset.storageUrl : undefined;
   }
   return asset.processedImageUrl && asset.processingStatus === "ready" && asset.hasAlpha
     ? asset.processedImageUrl

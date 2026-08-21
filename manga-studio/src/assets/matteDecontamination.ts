@@ -302,3 +302,189 @@ function nearestColor(color: Rgb, candidates: Rgb[]): Rgb {
 function clampChannel(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
+
+// ─── Decontaminating an alpha channel we did not create ────────────────────
+
+/**
+ * Estimate the matte colour a provider composited against, from its own output.
+ *
+ * When the background flood produces the alpha we already know the matte: it is
+ * whatever we keyed. But a provider that returns a transparent PNG hands us an
+ * alpha channel with no such record — and its anti-aliased edges are still
+ * blends, because the model rendered the subject over *something* before
+ * cutting it out. Measured on the real pipeline, a black-hair edge arrives as
+ * RGB [41,18,49] at alpha 234 where the true ink is [22,20,30].
+ *
+ * The matte is recoverable by inverting the same equation. For a rim pixel with
+ * known coverage `a` and a clean opaque neighbour `F`:
+ *
+ *     M = (Csrc − a·F) / (1 − a)
+ *
+ * One pixel's estimate is noisy; the median across the whole rim is not.
+ */
+export function estimateMatteFromAlpha(
+  rgba: Buffer,
+  width: number,
+  height: number,
+): { matte: Rgb; samples: number } | null {
+  const reds: number[] = [];
+  const greens: number[] = [];
+  const blues: number[] = [];
+  const foregroundReds: number[] = [];
+  const foregroundGreens: number[] = [];
+  const foregroundBlues: number[] = [];
+
+  /**
+   * Which alpha values to trust.
+   *
+   * Real anti-aliasing does NOT produce a smooth spread of coverage: measured
+   * on a 1px edge, alpha clusters near the extremes (≈20 and ≈234) with almost
+   * nothing between. A "mid-coverage only" window therefore finds no samples at
+   * all — which is exactly why the first attempt at this silently declined.
+   *
+   * Low-alpha pixels are also the BEST estimators, not the worst: at a=0.08 the
+   * divisor (1−a) is 0.92, so quantisation barely moves the answer, and the
+   * pixel is almost pure matte. High-alpha pixels divide by ~0.08 and amplify
+   * noise. So the well-conditioned end is preferred, and the noisy end is only
+   * consulted when a shape offers nothing better.
+   */
+  const collect = (maxAlpha: number) => {
+    reds.length = 0;
+    greens.length = 0;
+    blues.length = 0;
+    foregroundReds.length = 0;
+    foregroundGreens.length = 0;
+    foregroundBlues.length = 0;
+
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const offset = (y * width + x) * 4;
+        const alpha = rgba[offset + 3];
+        if (alpha < MATTE_SAMPLE_MIN_ALPHA || alpha > maxAlpha) continue;
+
+        const neighbour = nearestOpaque(rgba, width, height, x, y);
+        if (!neighbour) continue;
+
+        const a = alpha / 255;
+        const inverse = 1 - a;
+        const estimate: Rgb = [
+          (rgba[offset] - a * neighbour[0]) / inverse,
+          (rgba[offset + 1] - a * neighbour[1]) / inverse,
+          (rgba[offset + 2] - a * neighbour[2]) / inverse,
+        ];
+        // A wildly out-of-gamut estimate means the model does not hold here.
+        if (estimate.some((channel) => channel < -60 || channel > 315)) continue;
+
+        reds.push(estimate[0]);
+        greens.push(estimate[1]);
+        blues.push(estimate[2]);
+        foregroundReds.push(neighbour[0]);
+        foregroundGreens.push(neighbour[1]);
+        foregroundBlues.push(neighbour[2]);
+      }
+    }
+    return reds.length;
+  };
+
+  if (collect(WELL_CONDITIONED_MAX_ALPHA) < MIN_MATTE_SAMPLES) {
+    if (collect(MATTE_SAMPLE_MAX_ALPHA) < MIN_MATTE_SAMPLES) return null;
+  }
+  const matte: Rgb = [
+    clampChannel(median(reds)),
+    clampChannel(median(greens)),
+    clampChannel(median(blues)),
+  ];
+
+  /**
+   * Two ways this must decline rather than guess.
+   *
+   * A genuinely clean cutout produces estimates scattered around the artwork's
+   * own colours, so the "matte" would sit right on top of the foreground —
+   * decontaminating against that would rewrite real pixels. And a wide spread
+   * means the estimates never agreed on anything, so there is no single matte.
+   */
+  const foreground: Rgb = [
+    median(foregroundReds),
+    median(foregroundGreens),
+    median(foregroundBlues),
+  ];
+  if (colorDistance(matte, foreground) < MIN_MATTE_SEPARATION) return null;
+
+  const spread =
+    (medianAbsoluteDeviation(reds, matte[0]) +
+      medianAbsoluteDeviation(greens, matte[1]) +
+      medianAbsoluteDeviation(blues, matte[2])) /
+    3;
+  if (spread > MAX_MATTE_SPREAD) return null;
+
+  return { matte, samples: reds.length };
+}
+
+/**
+ * Decontaminate an image whose alpha came from somewhere else.
+ *
+ * Used for provider cutouts and for sources that arrive with native alpha —
+ * both of which previously bypassed decontamination entirely, which is what
+ * left the purple rim on generated colour characters in production.
+ *
+ * Returns null when no consistent matte is detectable, which is the correct
+ * answer for an already-clean cutout: there is nothing to recover.
+ */
+export function decontaminateExistingAlpha(
+  rgba: Buffer,
+  width: number,
+  height: number,
+): (DecontaminationStats & { matte: Rgb }) | null {
+  const estimate = estimateMatteFromAlpha(rgba, width, height);
+  if (!estimate) return null;
+
+  // Fully transparent pixels ARE the background here; there was no flood.
+  const background = new Uint8Array(width * height);
+  for (let pixel = 0; pixel < background.length; pixel += 1) {
+    background[pixel] = rgba[pixel * 4 + 3] === 0 ? 1 : 0;
+  }
+
+  const stats = decontaminateMatteEdges({
+    rgba,
+    width,
+    height,
+    matteColors: [estimate.matte],
+    background,
+  });
+  return { ...stats, matte: estimate.matte };
+}
+
+/** Ignore all-but-invisible pixels, whose colour is pure noise. */
+const MATTE_SAMPLE_MIN_ALPHA = 6;
+/** Below this the (1−a) divisor stays large, so the estimate is stable. */
+const WELL_CONDITIONED_MAX_ALPHA = 128;
+/** The noisy end, used only when a shape offers nothing better. */
+const MATTE_SAMPLE_MAX_ALPHA = 247;
+const MIN_MATTE_SAMPLES = 24;
+/** Below this the "matte" is indistinguishable from the artwork itself. */
+const MIN_MATTE_SEPARATION = 60;
+/** Above this the estimates never agreed, so there is no single matte. */
+const MAX_MATTE_SPREAD = 52;
+
+/** Nearest fully opaque neighbour's colour, searched outward. */
+function nearestOpaque(rgba: Buffer, width: number, height: number, cx: number, cy: number): Rgb | null {
+  for (let radius = 1; radius <= 3; radius += 1) {
+    for (let y = Math.max(0, cy - radius); y <= Math.min(height - 1, cy + radius); y += 1) {
+      for (let x = Math.max(0, cx - radius); x <= Math.min(width - 1, cx + radius); x += 1) {
+        const offset = (y * width + x) * 4;
+        if (rgba[offset + 3] === 255) return [rgba[offset], rgba[offset + 1], rgba[offset + 2]];
+      }
+    }
+  }
+  return null;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function medianAbsoluteDeviation(values: number[], centre: number): number {
+  return median(values.map((value) => Math.abs(value - centre)));
+}
+

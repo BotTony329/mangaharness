@@ -14,6 +14,7 @@ import {
   type BackgroundRemovalProvider,
 } from "./backgroundRemoval";
 import { describeContamination, detectColorContamination } from "./colorContamination";
+import { decontaminateExistingAlpha } from "./matteDecontamination";
 
 export interface AssetProcessingResult {
   sourceHasAlpha: boolean;
@@ -71,12 +72,22 @@ export async function processAssetImage(
     if (!validation.valid) return failed(validation.reason);
     const contamination = guardMonochrome(decoded.data, width, height, options);
     if (contamination) return contamination;
-    return {
+    /**
+     * An alpha channel we did not create still needs decontaminating.
+     *
+     * A provider that "supports native transparency" renders the subject over
+     * something and keys it, so its anti-aliased edges arrive as blends with
+     * that matte — measured at RGB [41,18,49] for black ink whose true colour
+     * is [22,20,30]. This path used to return here with no derivative at all,
+     * and `processAndStoreAsset` then pointed `processedImageUrl` at the raw
+     * source, which is how the purple rim reached production.
+     */
+    return cleanExistingAlpha(decoded.data, width, height, {
       sourceHasAlpha: true,
-      hasAlpha: true,
       backgroundRemoved: false,
-      processingStatus: "ready",
-    };
+      processingMethod: "native-alpha",
+      processingProvider: "provider",
+    });
   }
 
   const shouldRemove = options.forceBackgroundRemoval || category === "character" || category === "prop";
@@ -152,19 +163,54 @@ export async function validateTransparentImageBytes(
   if (!validation.valid) return failed(validation.reason);
   const contamination = guardMonochrome(decoded.data, width, height, options);
   if (contamination) return contamination;
+  // A cutout from an image-edit model or a background-removal service carries
+  // the same contaminated rim, for the same reason. Same treatment.
+  return cleanExistingAlpha(decoded.data, width, height, {
+    sourceHasAlpha: false,
+    backgroundRemoved: true,
+    processingMethod,
+    processingProvider,
+  });
+}
+
+/**
+ * Decontaminate an externally produced alpha channel and encode the result.
+ *
+ * ALWAYS returns a derivative, even when no matte is detectable. That matters:
+ * a transparency-requiring asset with no `processedImageUrl` used to be stored
+ * with its raw source aliased in that field, so "no derivative" silently meant
+ * "render the untouched provider bytes".
+ */
+async function cleanExistingAlpha(
+  rgba: Buffer,
+  width: number,
+  height: number,
+  meta: {
+    sourceHasAlpha: boolean;
+    backgroundRemoved: boolean;
+    processingMethod: string;
+    processingProvider: string;
+  },
+): Promise<AssetProcessingResult> {
+  const working = Buffer.from(rgba);
+  const cleaned = decontaminateExistingAlpha(working, width, height);
   try {
     return {
-      sourceHasAlpha: false,
+      sourceHasAlpha: meta.sourceHasAlpha,
       hasAlpha: true,
-      backgroundRemoved: true,
+      backgroundRemoved: meta.backgroundRemoved,
       processingStatus: "ready",
-      processedData: await sharp(decoded.data, { raw: { width, height, channels: 4 } }).png().toBuffer(),
+      processedData: await sharp(working, { raw: { width, height, channels: 4 } }).png().toBuffer(),
       processedMimeType: "image/png",
-      processingMethod,
-      processingProvider,
+      // The method records whether a matte was actually found and removed, so a
+      // clean provider cutout is distinguishable from one we had to repair.
+      processingMethod: cleaned
+        ? `${meta.processingMethod}+decontaminated`
+        : meta.processingMethod,
+      processingProvider: meta.processingProvider,
     };
   } catch {
-    return failed("Provider cutout could not be normalized as PNG");
+    return failed("The transparent derivative could not be encoded");
   }
 }
 

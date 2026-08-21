@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { processAssetImage } from "./postProcessor";
+import { processAssetImage, validateTransparentImageBytes } from "./postProcessor";
 import type { Rgb } from "./backgroundRemoval";
 
 const MAGENTA: Rgb = [255, 0, 255];
@@ -327,5 +327,151 @@ describe("decontamination guardrails", () => {
     expect(output.decontamination!.recoveredPixels).toBeGreaterThan(0);
     // Only the rim is touched, never the bulk of the image.
     expect(output.decontamination!.recoveredPixels).toBeLessThan(info.width * info.height * 0.2);
+  });
+});
+
+// ─── Externally produced alpha: the paths that bypassed decontamination ────
+
+/**
+ * What a provider that "supports native transparency" actually returns when it
+ * rendered the subject over a screen and keyed its own background: correct
+ * ALPHA, but edge RGB still blended with the matte. This shape reaches the
+ * pipeline through two doors — the native-alpha early return and the
+ * provider-cutout validator — and neither used to decontaminate.
+ */
+async function providerAlphaPng(fixture: Fixture): Promise<Buffer> {
+  const { size } = fixture;
+  const matte = fixture.matte ?? MAGENTA;
+  const rgba = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const a = fixture.coverage(x, y);
+      const fg = fixture.color(x, y);
+      const offset = (y * size + x) * 4;
+      for (let c = 0; c < 3; c += 1) rgba[offset + c] = Math.round(a * fg[c] + (1 - a) * matte[c]);
+      rgba[offset + 3] = Math.round(a * 255);
+    }
+  }
+  return sharp(rgba, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
+}
+
+async function decodePng(png: Buffer, size: number): Promise<Buffer> {
+  const { data } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  expect(data.length).toBe(size * size * 4);
+  return data;
+}
+
+/** A softer edge, so the fixture spans a realistic range of coverages. */
+function softSquare(fg: Rgb, size = 96, half = 26): Fixture {
+  const centre = size / 2;
+  return {
+    size,
+    coverage(x, y) {
+      const d = Math.max(Math.abs(x + 0.5 - centre), Math.abs(y + 0.5 - centre));
+      if (d <= half - 1) return 1;
+      if (d >= half + 1.5) return 0;
+      return Math.max(0, Math.min(1, (half + 1.5 - d) / 2.5));
+    },
+    color: () => fg,
+  };
+}
+
+describe("provider-supplied alpha", () => {
+  it.each(SINGLE_COLOUR_CASES)("$name: the native-alpha path decontaminates and emits a derivative", async ({ fg }) => {
+    const fixture = softSquare(fg);
+    const png = await providerAlphaPng(fixture);
+    const result = await processAssetImage(png, "character", {});
+
+    expect(result.processingStatus).toBe("ready");
+    expect(result.sourceHasAlpha).toBe(true);
+    /**
+     * A derivative must ALWAYS exist for a transparency-requiring asset. When
+     * it did not, `processAndStoreAsset` aliased `processedImageUrl` to the raw
+     * source and the canvas rendered untouched provider bytes — the production
+     * purple-fringe path.
+     */
+    expect(result.processedData).toBeDefined();
+
+    const rgba = await decodePng(result.processedData!, fixture.size);
+    const halo = measureHalo(rgba, fixture);
+    expect(halo.worstExcess, `worst at ${JSON.stringify(halo.worstAt)}`).toBeLessThanOrEqual(HALO_TOLERANCE);
+    expect(pixel(rgba, fixture.size, fixture.size / 2, fixture.size / 2)).toEqual([...fg, 255]);
+  });
+
+  it.each(SINGLE_COLOUR_CASES)("$name: the provider-cutout path decontaminates too", async ({ fg }) => {
+    const fixture = softSquare(fg);
+    const png = await providerAlphaPng(fixture);
+    const result = await validateTransparentImageBytes(png, "image-edit", "test-provider", {});
+
+    expect(result.processingStatus).toBe("ready");
+    expect(result.processedData).toBeDefined();
+    const rgba = await decodePng(result.processedData!, fixture.size);
+    const halo = measureHalo(rgba, fixture);
+    expect(halo.worstExcess, `worst at ${JSON.stringify(halo.worstAt)}`).toBeLessThanOrEqual(HALO_TOLERANCE);
+  });
+
+  it("records in the method whether a matte was actually removed", async () => {
+    const contaminated = await processAssetImage(await providerAlphaPng(softSquare([12, 12, 16])), "character", {});
+    expect(contaminated.processingMethod).toContain("decontaminated");
+  });
+
+  it("leaves a genuinely clean cutout alone rather than inventing a matte", async () => {
+    // Straight alpha with NO contamination: RGB is the true colour everywhere.
+    const fixture = softSquare([150, 200, 235]);
+    const size = fixture.size;
+    const rgba = Buffer.alloc(size * size * 4);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const a = fixture.coverage(x, y);
+        const offset = (y * size + x) * 4;
+        const fg = fixture.color(x, y);
+        for (let c = 0; c < 3; c += 1) rgba[offset + c] = fg[c];
+        rgba[offset + 3] = Math.round(a * 255);
+      }
+    }
+    const png = await sharp(rgba, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
+    const before = await decodePng(png, size);
+    const result = await processAssetImage(png, "character", {});
+
+    expect(result.processedData).toBeDefined();
+    expect(result.processingMethod).not.toContain("decontaminated");
+    // Byte-identical: nothing was "recovered" against a phantom matte.
+    expect(await decodePng(result.processedData!, size)).toEqual(before);
+  });
+
+  it("keeps legitimately magenta clothing on the provider-alpha path", async () => {
+    const PURPLE: Rgb = [150, 60, 190];
+    const fixture = softSquare(PURPLE);
+    const result = await processAssetImage(await providerAlphaPng(fixture), "character", {});
+    const rgba = await decodePng(result.processedData!, fixture.size);
+
+    expect(pixel(rgba, fixture.size, fixture.size / 2, fixture.size / 2)).toEqual([...PURPLE, 255]);
+    const halo = measureHalo(rgba, fixture);
+    expect(halo.worstExcess).toBeLessThanOrEqual(HALO_TOLERANCE);
+    // Still purple at the edge — recovered, not desaturated.
+    const edge = pixel(rgba, fixture.size, fixture.size / 2 + 25, fixture.size / 2);
+    expect(magentaness([edge[0], edge[1], edge[2]])).toBeGreaterThan(40);
+  });
+
+  it("cleans a monochrome character keyed off a white matte", async () => {
+    const INK: Rgb = [15, 15, 18];
+    const fixture: Fixture = { ...softSquare(INK), matte: WHITE };
+    const result = await processAssetImage(await providerAlphaPng(fixture), "character", {});
+    const rgba = await decodePng(result.processedData!, fixture.size);
+
+    expect(pixel(rgba, fixture.size, fixture.size / 2, fixture.size / 2)).toEqual([...INK, 255]);
+    // Over black, an unrecovered white matte shows a bright rim.
+    const edge = pixel(rgba, fixture.size, fixture.size / 2 + 25, fixture.size / 2);
+    const coverage = fixture.coverage(fixture.size / 2 + 25, fixture.size / 2);
+    expect(composite(edge, [0, 0, 0])[0]).toBeLessThanOrEqual(coverage * INK[0] + 14);
+  });
+
+  it("stores straight alpha, not premultiplied, through the whole encode path", async () => {
+    // Premultiplication anywhere would scale RGB by alpha; straight alpha keeps
+    // a half-transparent saturated pixel's colour exactly.
+    const raw = Buffer.from([200, 40, 90, 128, 200, 40, 90, 255, 0, 0, 0, 0, 255, 255, 255, 64]);
+    const png = await sharp(raw, { raw: { width: 2, height: 2, channels: 4 } }).png().toBuffer();
+    const back = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect([...back.data]).toEqual([...raw]);
   });
 });

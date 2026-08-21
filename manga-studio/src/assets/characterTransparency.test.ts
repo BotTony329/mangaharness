@@ -160,7 +160,7 @@ function visibleTilePixels(r: { rgba: Buffer; width: number; height: number }, t
 
 describe("character transparency contract", () => {
   // ── 1 ──────────────────────────────────────────────────────────────────
-  it("accepts a true RGBA character asset without re-encoding it", async () => {
+  it("accepts a true RGBA character asset and still emits its own derivative", async () => {
     const c = canvas();
     fillTransparent(c);
     drawFigure(c);
@@ -169,7 +169,11 @@ describe("character transparency contract", () => {
     expect(result.processingStatus).toBe("ready");
     expect(result.sourceHasAlpha).toBe(true);
     expect(result.hasAlpha).toBe(true);
-    expect(result.processedData).toBeUndefined();
+    // Never "no derivative": that is what let the raw source be rendered.
+    expect(result.processedData).toBeDefined();
+    // A clean source is passed through unchanged — decontamination declines
+    // when there is no matte to detect rather than inventing one.
+    expect(result.processingMethod).not.toContain("decontaminated");
   });
 
   // ── 2 ──────────────────────────────────────────────────────────────────

@@ -376,3 +376,23 @@ Overlapping panel content was effectively unreachable. Selection was Konva's own
 **The Layers panel is a projection**, not a second tree: `panelLayers()` is the same function without a point filter, so list order is render order by construction. Locked rows stay fully interactive there, because that is the surface that unlocks them — refusing to select a locked layer in the list would strand it.
 
 **Effects hit-test by bounds.** They are procedurally drawn line work with no texture to sample, so a full-panel screentone does capture clicks across the panel. That is z-order behaving correctly rather than a bug, and cycling, locking and the Layers panel are the remedy.
+
+## D45 — Decontamination belongs to every alpha source, not just the one we key
+
+D43 fixed the purple fringe for images we key ourselves. Production kept showing it, because generated colour characters mostly do not take that path.
+
+**Two paths bypassed decontamination entirely.** `processAssetImage` returns early when the source already carries useful alpha, and `validateTransparentImageBytes` — used by the image-edit provider and by dedicated background-removal services — validated and re-encoded without touching RGB. Decontamination lived only inside the built-in flood, which is the single path D43 tested.
+
+**The bypass became visible through storage, not rendering.** The native-alpha branch returned no `processedData`, and `processAndStoreAsset` then did `processedImageUrl = source.url`. Every contract check passed — status ready, alpha present, derivative URL present — while that URL pointed at the untouched provider file. The renderer was correct; the field had been aliased to the contaminated original.
+
+**Measured on the real path:** black hair edge arrived as `[41,18,49] @ α=234` where the true ink is `[22,20,30]`; magenta excess on white was 25 for hair, 32 for trousers, 14 for the shirt. Byte-identical before and after processing. The opaque-magenta path, by contrast, already produced exact `[22,20,30]`.
+
+**A provider's alpha carries no record of what it was keyed against**, so the matte is now inferred from the provider's own output by inverting the same equation: `M = (Csrc − a·F) / (1 − a)` over the rim, median across all samples.
+
+**The first attempt at that silently declined**, and the reason is worth recording: real anti-aliasing does not spread coverage evenly. Measured on a 1px edge, alpha clusters near the extremes — ≈20 and ≈234 — with almost nothing between, so a "mid-coverage only" sampling window found no samples at all. Low-alpha pixels are also the *best* estimators rather than the worst: at a=0.08 the divisor is 0.92, so quantisation barely moves the answer and the pixel is nearly pure matte. Sampling now prefers that well-conditioned end.
+
+**It declines rather than guesses** when the inferred matte sits on top of the artwork's own colours, or when the estimates never agreed — both of which mean a genuinely clean cutout, where "recovering" anything would rewrite real pixels.
+
+**Premultiplication was audited and ruled out.** A half-transparent saturated pixel round-trips through sharp's PNG encode/decode byte-identical; the pipeline is straight alpha throughout.
+
+**Two obsolete tests changed.** Both asserted `processedData` is undefined for an RGBA source — "no re-encoding needed". That assumption is precisely what let the raw source be rendered, so a transparency-requiring asset now always carries a real derivative or fails outright.

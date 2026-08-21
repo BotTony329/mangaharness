@@ -4,7 +4,7 @@ import type { BackgroundRemovalProvider } from "./backgroundRemoval";
 import { processAssetImage } from "./postProcessor";
 
 describe("asset post processor", () => {
-  it("preserves a transparent source image without re-encoding it", async () => {
+  it("produces a derivative for a transparent source instead of aliasing the raw file", async () => {
     const source = await sharp({
       create: { width: 40, height: 40, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
     })
@@ -20,7 +20,13 @@ describe("asset post processor", () => {
       backgroundRemoved: false,
       processingStatus: "ready",
     });
-    expect(result.processedData).toBeUndefined();
+    /**
+     * A transparency-requiring asset must ALWAYS carry a real derivative.
+     * Returning none used to make `processAndStoreAsset` point
+     * `processedImageUrl` at the untouched provider file, which is how a
+     * contaminated edge reached the canvas while every contract check passed.
+     */
+    expect(result.processedData).toBeDefined();
   });
 
   it("removes only edge-connected white while preserving enclosed white artwork", async () => {

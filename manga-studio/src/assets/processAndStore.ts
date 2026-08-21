@@ -1,6 +1,7 @@
 import type { AssetCategory } from "@/domain/types";
 import { putObject } from "@/storage/objectStore";
 import { defaultAssetPostProcessor, type AssetPostProcessor, type AssetProcessingResult } from "./postProcessor";
+import { requiresTransparency } from "./characterAssetContract";
 
 export interface StoredProcessedAsset {
   sourceUrl: string;
@@ -62,7 +63,15 @@ export async function processAndStoreAsset(input: {
         processingReason: "Transparent derivative storage failed; the original source was preserved",
       };
     }
-  } else if (result.sourceHasAlpha) {
+  } else if (result.sourceHasAlpha && !requiresTransparency(input.category)) {
+    /**
+     * Aliasing the derivative to the raw source is only safe for categories
+     * that are NOT composited as cut-outs. For a character or prop it meant
+     * `processedImageUrl` pointed at untouched provider bytes, so the canvas
+     * rendered a contaminated edge while every contract check passed — the
+     * production purple-fringe path. Those categories now always carry a real,
+     * decontaminated derivative or fail outright.
+     */
     processedImageUrl = source.url;
   }
   return {
