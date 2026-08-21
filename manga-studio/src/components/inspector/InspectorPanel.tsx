@@ -90,9 +90,30 @@ export function InspectorPanel() {
   );
 }
 
+/**
+ * Three questions, three tabs (§P1.5).
+ *
+ * The Inspector had become one long scroll where "what does this character
+ * look like", "where is it" and "who is it acting with" were interleaved, so
+ * every task meant hunting. The tabs are the questions a creator actually
+ * asks; nothing was removed, and the selection stays put when switching.
+ */
+type ItemTab = "look" | "position" | "scene";
+
+const ITEM_TABS: { id: ItemTab; label: string }[] = [
+  { id: "look", label: "Look" },
+  { id: "position", label: "Position" },
+  { id: "scene", label: "Scene" },
+];
+
 function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }) {
   const dispatch = (command: DomainCommand) => useEditorStore.getState().dispatch(command);
+  const doc = useEditorStore((state) => state.doc);
+  const advanced = useUiStore((state) => state.advancedMode);
+  const [tab, setTab] = useState<ItemTab>("look");
   const id = item.id;
+  const isCharacter = item.kind === "asset" && Boolean(asset?.metadata?.characterId);
+  const isPuppet = Boolean(doc && item.kind === "asset" && isPuppetInstance(doc, item.id));
 
   return (
     <div className="space-y-4 p-3 text-xs">
@@ -100,7 +121,21 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         {item.kind === "asset" ? (asset?.name ?? "Asset") : item.kind === "bubble" ? "Speech bubble" : "Effect"}
       </SectionTitle>
 
-      {item.kind === "asset" && asset && (
+      <div className="flex border-b border-zinc-800">
+        {ITEM_TABS.map((entry) => (
+          <button
+            key={entry.id}
+            className={`flex-1 px-2 py-1.5 text-[11px] ${
+              tab === entry.id ? "border-b-2 border-indigo-500 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "look" && item.kind === "asset" && asset && (
         <>
           {/* Opened from a placed instance, so the editor can offer to change
               only THIS panel rather than the reusable asset. */}
@@ -140,7 +175,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         </>
       )}
 
-      {item.kind === "bubble" && (
+      {tab === "look" && item.kind === "bubble" && (
         <>
           <div>
             <Label>Text</Label>
@@ -181,7 +216,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         </>
       )}
 
-      {item.attachment && (
+      {tab === "scene" && item.attachment && (
         <div className="rounded border border-indigo-900/60 bg-indigo-950/20 p-2">
           <p className="text-[11px] text-indigo-300">
             Attached to {attachmentLabel(item.attachment.targetItemId)} — it moves when they move.
@@ -195,6 +230,8 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         </div>
       )}
 
+      {tab === "position" && (
+        <>
       <div>
         <Label>Opacity {Math.round(item.opacity * 100)}%</Label>
         <input
@@ -275,6 +312,27 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           ))}
         </div>
       </div>
+      {item.kind === "asset" && <InstanceStageControls item={item} />}
+        </>
+      )}
+
+      {tab === "scene" && item.kind === "asset" && (
+        <>
+          {isCharacter ? (
+            <>
+              {/* Interactions sit with the actor, because that is where a
+                  creator is when they decide two characters should do
+                  something together. */}
+              <InteractionControls item={item} />
+              {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
+            </>
+          ) : (
+            !item.attachment && (
+              <Hint>Scene relationships are for characters. This object can be attached to one from its layer menu.</Hint>
+            )
+          )}
+        </>
+      )}
 
       <div className="flex gap-2 pt-1">
         <button
@@ -302,9 +360,6 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
   // A puppet character edits locally; a legacy flat one keeps the older
   // skeleton-plus-regeneration path (§21).
   const isPuppet = Boolean(doc && isPuppetInstance(doc, item.id));
-  // The skeleton pose editor authors a request that ends in regeneration; it is
-  // an Advanced tool, not the normal way to move a character.
-  const advanced = useUiStore((state) => state.advancedMode);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>();
   const [error, setError] = useState<string>();
@@ -412,11 +467,6 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
           </div>
         ))}
       </div>
-      <InstanceStageControls item={item} />
-      {/* Interactions sit with the actor, because that is where a creator is
-          when they decide two characters should do something together. */}
-      <InteractionControls item={item} />
-      {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
       {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
       {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}
       {review && (

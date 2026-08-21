@@ -47,6 +47,12 @@ export function recordAssetState(doc: ProjectDocument, asset: SourceAsset): Char
   const characterId = metadata?.characterId;
   if (!characterId || !doc.characters[characterId]) return undefined;
   if (metadata?.characterAssetRole === "canonical") return undefined;
+  /**
+   * A panel-only image (a joint interaction render, a one-off composite) shows
+   * this character inside someone else's scene. Registering it as a state would
+   * let "place Yuri" return a picture of Yuri mid-hug with another character.
+   */
+  if (metadata?.characterAssetRole === "panel-only") return undefined;
   if (asset.category !== "character") return undefined;
 
   const candidate = {

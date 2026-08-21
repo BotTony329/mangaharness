@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "manga-studio",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "manga-studio", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

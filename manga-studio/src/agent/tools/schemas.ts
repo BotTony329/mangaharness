@@ -251,6 +251,33 @@ export const toolSchemas = {
     targetCharacterId: characterId,
   }),
 
+  /**
+   * Coordinated multi-character action. NOT two independent pose requests:
+   * the interaction owns the geometry between the participants, and a tightly
+   * coupled one is drawn once with both identity references.
+   */
+  create_interaction: z.object({
+    panel: panelIndex,
+    interaction: z.enum([
+      "beside",
+      "face_to_face",
+      "look_at",
+      "hold_hands",
+      "hug",
+      "high_five",
+      "hand_object",
+      "lean_on",
+      "walk_together",
+      "sit_together",
+    ]),
+    subjectCharacterName: z.string().min(1).max(80),
+    subjectCharacterId: characterId,
+    targetCharacterName: z.string().min(1).max(80),
+    targetCharacterId: characterId,
+    /** Expression per participant, e.g. {"Yuri":"smile"}. */
+    expressions: z.record(z.string().max(80), z.string().max(60)).optional(),
+  }),
+
   attach_bubble: z.object({
     panel: panelIndex,
     characterName: z.string().max(80),
@@ -352,6 +379,7 @@ const PANEL_TOOLS = new Set<ToolName>([
   "set_puppet_joint",
   "place_manga_effect",
   "generate_manga_effect",
+  "create_interaction",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -411,5 +439,6 @@ Available tools (call only these, with exactly these argument shapes):
 - attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
 - place_manga_effect {panel, query, category?, targetCharacterName?, text?} — search the Manga Language Library and place the best existing match. ALWAYS try this before generating an effect: the library already contains bubbles, speed/focus lines, tones, emotion marks and SFX, plus everything the creator uploaded or generated earlier. Naming a character attaches the effect so it follows them.
 - generate_manga_effect {description, category, name?, panel?, targetCharacterName?} — create a NEW manga-language asset with AI and add it to the library. Plan this ONLY when the library genuinely has no suitable asset; the runtime rejects it when a match already exists. Say in the step reason what is missing.
+- create_interaction {panel, interaction, subjectCharacterName, targetCharacterName, expressions?} — make two characters do something together (hug, hold hands, look at, walk together…). ALWAYS use this for a multi-character action. Never plan two separate pose or generation steps to fake one: an interaction owns the geometry between the participants, and a hug is drawn once using both characters as references. Expressions may be set for each participant in the same step.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).
 `.trim();

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { LAYOUT_PRESETS } from "@/domain/layouts";
 import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { useUiStore } from "@/editor/uiStore";
+import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
 import { exportCurrentPagePng } from "@/export/exportPage";
 import { getActiveStyleProfile } from "@/styles/profiles";
 
@@ -16,6 +16,21 @@ const BUBBLE_TYPES: { type: BubbleType; label: string }[] = [
   { type: "shout", label: "Shout bubble" },
   { type: "whisper", label: "Whisper bubble" },
   { type: "narration", label: "Narration box" },
+];
+
+/**
+ * One place to start any generation (§P1.6).
+ *
+ * Generation used to begin in four unrelated places — a button per library
+ * shelf — so "make a new thing" meant first knowing which shelf the thing
+ * belongs on. The shelf buttons remain for people already browsing there; this
+ * is the single entry point that does not require knowing the answer first.
+ */
+const GENERATE_TARGETS: { key: GeneratorRequest["assetType"]; label: string }[] = [
+  { key: "character", label: "Character" },
+  { key: "background", label: "Scene / background" },
+  { key: "prop", label: "Object / prop" },
+  { key: "manga-effect", label: "Manga effect" },
 ];
 
 const EFFECT_KINDS: { kind: EffectKind; label: string }[] = [
@@ -36,6 +51,7 @@ export function TopBar() {
   const selection = useEditorStore((s) => s.selection);
   const openSettings = useUiStore((s) => s.openSettings);
   const openArtStyle = useUiStore((s) => s.openArtStyle);
+  const openGenerator = useUiStore((s) => s.openGenerator);
   const [exporting, setExporting] = useState(false);
 
   if (!doc) return null;
@@ -108,6 +124,12 @@ export function TopBar() {
         ))}
       </select>
 
+      <Dropdown
+        label="+ Generate ✦"
+        accent
+        items={GENERATE_TARGETS.map((target) => ({ key: target.key, label: target.label }))}
+        onPick={(key) => openGenerator({ assetType: key as GeneratorRequest["assetType"] })}
+      />
       <Dropdown label="+ Bubble" items={BUBBLE_TYPES.map((b) => ({ key: b.type, label: b.label }))} onPick={(k) => addBubbleToPanel(k as BubbleType)} />
       {/* Quick access to the most-used built-ins only. The full catalogue —
           including uploads and generated effects — lives in the Manga FX shelf,

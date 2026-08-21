@@ -31,6 +31,7 @@ import { BubbleTextEditor } from "./BubbleTextEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ShapeEditOverlay } from "./ShapeEditOverlay";
 import { PerspectiveOverlay } from "./PerspectiveOverlay";
+import { StageOverlay } from "./StageOverlay";
 import { usesStagePlacement } from "@/domain/stageOps";
 import { PoseEditOverlay } from "./PoseEditOverlay";
 import { PuppetOverlay } from "./PuppetOverlay";
@@ -518,6 +519,12 @@ export function CanvasStage() {
   const looseItems = doc.workspaceOrder.map((id) => doc.workspaceItems[id]).filter(Boolean);
   // Only the selected actor gets handles, but any actor can be a drop target,
   // so every puppet on the page needs an overlay.
+  /** The selected actor, when they are standing on a stage that has a floor. */
+  const stagedSelection = (() => {
+    const item = selection.itemId ? doc.items[selection.itemId] : undefined;
+    if (item?.kind !== "asset") return null;
+    return usesStagePlacement(doc, item.id) ? item : null;
+  })();
   const puppetInstances = page.panelIds
     .flatMap((panelId) => doc.panels[panelId]?.itemIds ?? [])
     .map((itemId) => doc.items[itemId])
@@ -544,6 +551,19 @@ export function CanvasStage() {
         onMouseDown={(e) => {
           const native = e.evt as MouseEvent;
           setLayerMenu(null);
+          /**
+           * A press that lands on an overlay handle belongs to that handle.
+           *
+           * Without this the stage re-resolved selection under every handle:
+           * grabbing a vanishing point or a depth handle selected the panel
+           * beneath it, which unmounted the handle mid-drag. The gesture died
+           * on the first pixel of movement and looked like a dead control.
+           */
+          const target = e.target as unknown as { draggable?: () => boolean };
+          if (typeof target.draggable === "function" && target.draggable()) {
+            panHandlers.onMouseDown(e);
+            return;
+          }
           if (!spaceHeld && native.button === 0) {
             const handled = selectAtPointer(native.clientX, native.clientY, native.altKey, native.shiftKey);
             if (!handled) {
@@ -612,6 +632,18 @@ export function CanvasStage() {
               />
             ) : null;
           })}
+          {/* The floor the selected actor is standing on, and its depth handle.
+              Only for an instance that is actually staged — drawing a ground
+              plane under a free-floating sticker would be a lie. */}
+          {stagedSelection && (
+            <StageOverlay
+              doc={doc}
+              page={page}
+              panel={doc.panels[stagedSelection.panelId]!}
+              instance={stagedSelection}
+              scale={view.scale}
+            />
+          )}
           {shapeEditPanel && <ShapeEditOverlay doc={doc} page={page} panel={shapeEditPanel} scale={view.scale} />}
           {/* Puppet direct manipulation: handles for the selected actor, and a
               face highlight for whichever actor a drag is currently over. */}

@@ -37,7 +37,15 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
   const bounds = panelBoundsPx(doc, panel);
   const localPoints = polygon.map((p) => ({ x: p.x - bounds.x, y: p.y - bounds.y }));
   const flat = localPoints.flatMap((p) => [p.x, p.y]);
-  const items = panel.itemIds.map((id) => doc.items[id]).filter(Boolean) as PanelItem[];
+  /**
+   * A hidden layer must actually disappear — from the canvas AND the export,
+   * which walk this same list. The Layers panel already offered the eye toggle
+   * and a composite interaction retires the sprites it replaces by hiding them;
+   * both were silently ignored here, so "hidden" only ever meant "unselectable".
+   */
+  const items = panel.itemIds
+    .map((id) => doc.items[id])
+    .filter((item): item is PanelItem => Boolean(item) && item.visible !== false);
 
   return (
     <>

@@ -59,8 +59,17 @@ export interface AssetGenerationMetadata {
   view?: string;
   /** Canonical identity image that anchored this full-state render. */
   canonicalReferenceAssetId?: ID;
-  /** Canonical images establish identity; state images are selectable renders. */
-  characterAssetRole?: "canonical" | "state";
+  /**
+   * What this image IS to the character, which decides whether the resolver may
+   * return it as their current look.
+   *
+   *   canonical   — the identity reference every generation is anchored on
+   *   state       — the render of one semantic state (pose/expression/outfit)
+   *   variation   — the same state, redrawn better; may replace the state render
+   *   panel-only  — bound to one panel's context (a joint render, a one-off
+   *                 composite) and never resolvable as "what Yuri looks like"
+   */
+  characterAssetRole?: "canonical" | "state" | "variation" | "panel-only";
   /** State-graph lineage: the node this render was generated FROM. */
   parentStateId?: ID;
   /** What changed relative to that parent. */
@@ -236,8 +245,16 @@ export interface CharacterStateRecord {
   referenceAssetId?: ID;
   /** The character's canonical identity image at generation time. */
   canonicalReferenceAssetId?: ID;
-  /** The render produced for this state; absent while only requested. */
+  /**
+   * The render currently PREFERRED for this state; absent while only requested.
+   *
+   * A cosmetic local edit replaces this rather than adding a state node: fixing
+   * a malformed hand produces better pixels for a state that already exists, and
+   * the fixed image is the one every later placement should use.
+   */
   assetId?: ID;
+  /** Earlier renders of this same state, newest last. Kept for lineage and undo. */
+  supersededAssetIds?: ID[];
   delta?: CharacterStateDelta;
   pose: string;
   expression: string;

@@ -59,10 +59,62 @@ interface EditorState {
   /** Group many commits into one undo entry (used for agent runs). */
   beginTransaction(): void;
   endTransaction(): void;
+  /**
+   * Discard everything done since `beginTransaction` and restore the snapshot.
+   *
+   * Without this an Agent run that failed halfway committed its partial work:
+   * a destroyed panel stayed destroyed. Rollback is what makes "preserve
+   * existing work" enforceable rather than aspirational.
+   */
+  abortTransaction(): void;
 
   undo(): void;
   redo(): void;
   markSaved(): void;
+}
+
+/**
+ * Roll the PAGE back without throwing away images the creator paid for, or the
+ * record of what was attempted.
+ *
+ * A rejected run must leave the composition exactly as it was — but images
+ * already generated cost real money and real time, and discarding them would
+ * mean a retry pays for them twice. Library assets are orphan-safe: nothing on
+ * the restored page points at them, and the creator can drag them in by hand.
+ *
+ * State records come back with their asset so a later run can still find the
+ * cached pose, but only when the character they belong to survived the
+ * rollback — a state record pointing at a character that no longer exists is
+ * exactly the dangling reference the rollback was meant to prevent.
+ *
+ * The generation log survives unconditionally. It is append-only diagnostics,
+ * and erasing the reason a run failed is precisely the wrong thing to do at the
+ * moment the creator most wants to know it.
+ */
+function preserveRunArtifacts(snapshot: ProjectDocument, attempted: ProjectDocument): ProjectDocument {
+  const restored: ProjectDocument = { ...snapshot, generationHistory: attempted.generationHistory };
+  const newAssetIds = Object.keys(attempted.assets).filter((id) => !snapshot.assets[id]);
+  if (newAssetIds.length === 0) return restored;
+
+  const assets = { ...snapshot.assets };
+  for (const id of newAssetIds) {
+    const asset = attempted.assets[id];
+    const owner = asset.metadata?.characterId;
+    if (owner && !snapshot.characters[owner]) continue;
+    assets[id] = asset;
+  }
+
+  const characterStates = { ...snapshot.characterStates };
+  for (const [id, record] of Object.entries(attempted.characterStates)) {
+    if (snapshot.characterStates[id]) continue;
+    // Only records that actually carry a surviving render are worth keeping;
+    // a record still awaiting its image describes work that never happened.
+    if (!record.assetId || !assets[record.assetId]) continue;
+    if (!snapshot.characters[record.characterId]) continue;
+    characterStates[id] = record;
+  }
+
+  return { ...restored, assets, characterStates };
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -160,6 +212,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { doc, inTransaction } = get();
     if (!doc || inTransaction) return;
     set({ inTransaction: true, pendingSnapshot: doc });
+  },
+
+  abortTransaction() {
+    const { pendingSnapshot, inTransaction, doc } = get();
+    if (!inTransaction || !pendingSnapshot) {
+      set({ inTransaction: false, pendingSnapshot: null });
+      return;
+    }
+    // History is untouched: a rolled-back run never happened, so it must not
+    // occupy an undo slot the creator would have to step through.
+    set({
+      doc: doc ? preserveRunArtifacts(pendingSnapshot, doc) : pendingSnapshot,
+      inTransaction: false,
+      pendingSnapshot: null,
+      selection: {},
+    });
   },
 
   endTransaction() {

@@ -207,23 +207,43 @@ export function AgentPanel() {
       },
       runGuards ?? guards ?? { creationAuthorized: false, authorizedCreationNames: [] },
     );
-    setActivity((current) => [...current, "Validation", "Done"]);
-    const unresolved = summary.validationIssues.filter((issue) => !issue.corrected);
-    setStatusLine(
-      summary.failed === 0 && unresolved.length === 0
-        ? "Done. Everything stays editable — one Undo reverts the whole run."
-        : `Done with ${summary.failed} failed step${summary.failed !== 1 ? "s" : ""} and ${unresolved.length} validation warning${unresolved.length !== 1 ? "s" : ""}.`,
-    );
+    setActivity((current) => [...current, "Validation"]);
+
     if (summary.validationIssues.length > 0) {
       setSteps((current) => [
         ...current,
         ...summary.validationIssues.map((issue) => ({
           label: `Validation · ${issue.message}`,
-          status: issue.corrected ? "done" as const : "failed" as const,
-          detail: issue.corrected ? "Automatically corrected" : undefined,
+          status: issue.severity === "info" || issue.corrected ? ("done" as const) : ("failed" as const),
+          detail: issue.corrected ? "Automatically corrected" : issue.severity === "fatal" ? "Blocking" : undefined,
         })),
       ]);
     }
+
+    /**
+     * A run that was rolled back is not "done with warnings" — nothing landed.
+     * Saying "Done" after the agent damaged or failed to build a page is how a
+     * creator loses trust in every message this panel prints, so the two
+     * outcomes get visibly different endings.
+     */
+    if (summary.rolledBack) {
+      setError(
+        `${summary.abortReason ?? "The run could not be completed."} Nothing was changed — your page is exactly as it was.`,
+      );
+      setStatusLine(null);
+      setPhase("error");
+      return;
+    }
+
+    setActivity((current) => [...current, "Done"]);
+    const warnings = summary.validationIssues.filter(
+      (issue) => !issue.corrected && issue.severity !== "info",
+    );
+    setStatusLine(
+      summary.failed === 0 && warnings.length === 0
+        ? "Done. Everything stays editable — one Undo reverts the whole run."
+        : `Done with ${summary.failed} failed step${summary.failed !== 1 ? "s" : ""} and ${warnings.length} validation warning${warnings.length !== 1 ? "s" : ""}.`,
+    );
     setPhase("done");
   };
 

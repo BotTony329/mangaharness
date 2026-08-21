@@ -329,8 +329,9 @@ export interface MultiCharacterGenerationRequest {
  *
  * Participants are sorted so Yuri+Mio and Mio+Yuri share a cache entry, but the
  * ROLES are included unsorted — "Yuri hugs Mio" and "Mio hugs Yuri" are
- * different images. Outfits, view and style are included because a school
- * uniform hug is not a casual-clothes hug.
+ * different images. Outfits, view, expressions and style are included because a
+ * school uniform hug is not a casual-clothes hug, and a smiling one is not a
+ * tearful one.
  */
 export function interactionCacheKey(input: {
   participantCharacterIds: ID[];
@@ -341,6 +342,8 @@ export function interactionCacheKey(input: {
   styleProfileId?: ID;
   shot?: string;
   angle?: string;
+  /** Expression per participant, keyed by character id. */
+  expressions?: Record<ID, string>;
 }): string {
   const participants = [...input.participantCharacterIds].sort();
   const roles = Object.entries(input.roles ?? {})
@@ -356,6 +359,12 @@ export function interactionCacheKey(input: {
     `v=${input.view.trim().toLowerCase()}`,
     `s=${input.styleProfileId ?? "default"}`,
     `c=${input.shot ?? "any"}/${input.angle ?? "any"}`,
+    // A smiling hug and a crying hug are not the same drawing, so they must not
+    // share a cache entry.
+    `e=${Object.entries(input.expressions ?? {})
+      .map(([id, expression]) => `${id}:${expression.trim().toLowerCase()}`)
+      .sort()
+      .join(",")}`,
   ].join("|");
 }
 

@@ -48,6 +48,10 @@ const CHARACTER_BINDINGS: Partial<Record<ToolName, CharacterArgBinding[]>> = {
     { nameArg: "targetCharacterName", idArg: "targetCharacterId", required: false },
   ],
   set_character_slot: [{ nameArg: "characterName", idArg: "characterId", required: false }],
+  create_interaction: [
+    { nameArg: "subjectCharacterName", idArg: "subjectCharacterId", required: true },
+    { nameArg: "targetCharacterName", idArg: "targetCharacterId", required: true },
+  ],
   set_crop_mode: [{ nameArg: "characterName", idArg: "characterId", required: false }],
   add_effect: [{ nameArg: "targetCharacterName", idArg: "targetCharacterId", required: false }],
   set_character_depth: [{ nameArg: "characterName", idArg: "characterId", required: false }],

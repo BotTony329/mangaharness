@@ -232,7 +232,7 @@ describe("executePlan", () => {
     expect(validation.rejected).toHaveLength(1);
 
     const summary = await executePlan(validation.plan, () => {});
-    expect(summary).toEqual({ completed: 3, failed: 0, validationIssues: [] });
+    expect(summary).toMatchObject({ completed: 3, failed: 0, validationIssues: [], rolledBack: false });
     const after = useEditorStore.getState().doc!;
     expect(page.panelIds.slice(1).map((id) => after.panels[id].itemIds)).toEqual(untouched);
     const panelItems = after.panels[page.panelIds[0]].itemIds.map((id) => after.items[id]);
@@ -307,7 +307,7 @@ describe("executePlan", () => {
     const summary = await executePlan(plan, (_index, status, detail) => {
       if (status === "failed" && detail) details.push(detail);
     });
-    expect(summary).toEqual({ completed: 1, failed: 1, validationIssues: [] });
+    expect(summary).toMatchObject({ completed: 1, failed: 1, validationIssues: [], rolledBack: false });
     expect(details[0]).toContain("Scope violation");
     expect(useEditorStore.getState().doc!.panels[page.panelIds[1]].itemIds).toHaveLength(0);
   });
@@ -357,7 +357,7 @@ describe("executePlan", () => {
       steps: [{ tool: "place_character", args: { panel: 1, characterName: "Yuri", pose: "backflip" } }],
     }, scope);
     const summary = await executePlan(plan, () => {});
-    expect(summary).toEqual({ completed: 1, failed: 0, validationIssues: [] });
+    expect(summary).toMatchObject({ completed: 1, failed: 0, validationIssues: [], rolledBack: false });
     const after = useEditorStore.getState().doc!;
     expect(after.generationHistory).toHaveLength(1);
     const generated = Object.values(after.assets).find((asset) => asset.metadata?.pose === "backflip");
@@ -411,7 +411,10 @@ describe("executePlan", () => {
     });
 
     expect(summary.completed).toBe(0);
-    expect(summary.failed).toBe(2);
+    // The composition step is never attempted: once the artwork it was going to
+    // place has failed to generate, continuing would compose around a hole.
+    expect(summary.failed).toBe(1);
+    expect(summary.rolledBack).toBe(true);
     const after = useEditorStore.getState().doc!;
     // A character whose background could not be removed never becomes a
     // library asset: an un-keyed image in the library is one drag away from

@@ -525,3 +525,75 @@ the asset's own dimensions.
 records `provenance.localEdit` and deliberately does not create a
 `CharacterStateRecord` — registering a node for every pixel fix would fill the
 state graph with entries indistinguishable from one another.
+
+## D54 — An Agent run either lands whole or does not land
+
+`executePlan` snapshots the document, executes, validates, and only then commits;
+anything fatal restores the snapshot. Before this, per-step failures were caught
+and swallowed and `endTransaction` committed unconditionally, so a run that
+wrecked a finished page reported "Done with 1 warning" — the failure that
+prompted the rule.
+
+A failed AI_GENERATION step stops the run rather than continuing. The artwork the
+remaining steps were going to place does not exist; composing around a hole
+produces a page that is wrong in a way the creator has to unpick by hand.
+
+**Rollback restores the PAGE, not the library.** Images already generated cost
+real money and real time, so new assets, their state records and the generation
+log survive the rollback; only the composition is restored. A retry must not pay
+for the same image twice, and erasing the record of why a run failed at exactly
+the moment the creator wants to know is the wrong instinct.
+
+## D55 — Validation issues have severity
+
+`CompositionIssue` carried only `corrected: boolean`, so "Character is completely
+obscured by a higher layer" and "recentred a character" weighed the same and both
+appeared beside a success message. `severity: info | warning | fatal` is what lets
+a run refuse to commit.
+
+Fatal: a required participant missing, a participant fully obscured, an
+interaction rendered without one of its people, a scope violation, an
+unauthorized character, and existing items disappearing from a panel the run was
+only meant to add to.
+
+## D56 — One interaction service, two callers
+
+`domain/interactionService.ts` owns capability evaluation, cache reuse, the joint
+render and placement. The Inspector calls `renderInteraction` then
+`placeInteractionRender` so it can preview first; the Agent calls
+`executeInteraction`, which does both. Two pipelines would drift until a hug
+meant different things depending on how it was asked for.
+
+A joint render RETIRES the sprites it replaces by hiding them, because the
+composite already contains both people. Hidden rather than deleted: undo and
+"discard" both restore the panel, and the creator can bring one back from Layers.
+This also exposed that `visible: false` was never honoured by the renderer — the
+Layers eye toggle had been decorative.
+
+## D57 — A cosmetic repair replaces the render it improved
+
+Fixing a malformed hand in "Yuri, standing" produces better pixels for a state
+that already exists, so it does not create a state node — but the node must now
+point at the repaired image, or every later "place Yuri standing" quietly
+reintroduces the defect the creator just paid to fix. The superseded image is
+kept for lineage, and when the CANONICAL image is repaired the identity anchor
+moves too, so future generations are not anchored on the broken hand.
+
+`characterAssetRole` gains `variation` and `panel-only`. A panel-only image — a
+joint interaction render — is never resolvable as "what this character looks
+like": otherwise "place Yuri" could return a picture of Yuri mid-hug with
+somebody else.
+
+## D58 — A second character does not land on the first
+
+Every fit placement centres on the panel, so "place Yuri, place Mio" put one
+exactly behind the other: a valid document that renders as one character. New
+placements now pick the emptiest slot across the panel. Existing items are never
+moved — a run asked to add someone may not rearrange what the creator composed.
+
+## D59 — Overlay handles own their press
+
+The stage re-resolved selection on every mousedown, including presses that landed
+on a depth handle or a vanishing point, which selected the panel underneath and
+unmounted the handle mid-drag. The gesture died on the first pixel of movement
+and read as a dead control. A press on a draggable node now belongs to that node.

@@ -11,7 +11,20 @@ export type CompositionIssueCode =
   /** A step asked for one character and the document ended up with another. */
   | "identity-mismatch"
   /** A persistent Character appeared that the user never asked for. */
-  | "unauthorized-character-creation";
+  | "unauthorized-character-creation"
+  /** A coordinated action rendered without one of the people in it. */
+  | "interaction-participant-missing"
+  /** Existing artwork vanished during a run that was only meant to add. */
+  | "unexpected-deletion";
+
+/**
+ * How badly wrong is this?
+ *
+ * The Agent used to report "Character is completely obscured by a higher layer"
+ * and "Done" in the same breath, because every issue was equally weightless.
+ * Severity is what lets a run refuse to commit.
+ */
+export type IssueSeverity = "info" | "warning" | "fatal";
 
 export interface CompositionIssue {
   code: CompositionIssueCode;
@@ -19,6 +32,31 @@ export interface CompositionIssue {
   itemId?: ID;
   message: string;
   corrected: boolean;
+  severity: IssueSeverity;
+}
+
+/**
+ * Issues that make a result visually wrong rather than merely imperfect.
+ *
+ * A corrected issue is never fatal — the harness already fixed it.
+ */
+const FATAL_CODES: CompositionIssueCode[] = [
+  "required-character-missing",
+  "character-obscured",
+  "scope-integrity",
+  "identity-mismatch",
+  "unauthorized-character-creation",
+  "interaction-participant-missing",
+  "unexpected-deletion",
+];
+
+export function severityFor(code: CompositionIssueCode, corrected: boolean): IssueSeverity {
+  if (corrected) return "info";
+  return FATAL_CODES.includes(code) ? "fatal" : "warning";
+}
+
+export function hasFatalIssue(issues: CompositionIssue[]): boolean {
+  return issues.some((issue) => issue.severity === "fatal");
 }
 
 export interface CompositionRequirements {
@@ -39,37 +77,50 @@ export function validateAndCorrectComposition(
     const scene = next.scenes[panelId];
     const rect = panelPxRect(next, panelId);
     if (requirements.requireBackground && !scene?.backgroundAssetId) {
-      issues.push({ code: "background-missing", panelId, message: "Required background is missing", corrected: false });
+      issues.push({ code: "background-missing", panelId, message: "Required background is missing", corrected: false , severity: severityFor("background-missing", false) });
     }
     for (const characterId of requirements.requiredCharacterIds ?? []) {
       if (!scene?.characters.some((entry) => entry.characterId === characterId)) {
-        issues.push({ code: "required-character-missing", panelId, message: `Required Character ${characterId} is missing`, corrected: false });
+        issues.push({ code: "required-character-missing", panelId, message: `Required Character ${characterId} is missing`, corrected: false, severity: severityFor("required-character-missing", false) });
       }
     }
+    /**
+     * Hidden layers are excluded on both sides of these checks. A deliberately
+     * hidden sprite is not "obscured" — that is what the creator asked for —
+     * and it cannot hide anything else either, because it does not render.
+     */
     const characterItems = panel.itemIds
       .map((id) => next.items[id])
-      .filter((item): item is AssetInstance => item?.kind === "asset" && Boolean(item.characterState));
+      .filter(
+        (item): item is AssetInstance =>
+          item?.kind === "asset" && item.visible !== false && Boolean(item.characterState),
+      );
     for (const item of characterItems) {
       const visibleRatio = intersectionArea(itemRect(item), { x: 0, y: 0, width: rect.width, height: rect.height }) /
         Math.max(1, item.width * item.height);
       if (visibleRatio < 0.18) {
         item.cx = rect.width / 2;
         item.cy = rect.height / 2;
-        issues.push({ code: "character-outside-panel", panelId, itemId: item.id, message: "Character was mostly outside the panel and was recentered", corrected: true });
+        issues.push({ code: "character-outside-panel", panelId, itemId: item.id, message: "Character was mostly outside the panel and was recentered", corrected: true , severity: severityFor("character-outside-panel", true) });
       }
       const sizeRatio = (item.width * item.height) / Math.max(1, rect.width * rect.height);
       if (sizeRatio < 0.025) {
         const scale = Math.sqrt(0.12 / Math.max(sizeRatio, 0.0001));
         item.width *= scale;
         item.height *= scale;
-        issues.push({ code: "character-too-small", panelId, itemId: item.id, message: "Character was extremely small and was enlarged", corrected: true });
+        issues.push({ code: "character-too-small", panelId, itemId: item.id, message: "Character was extremely small and was enlarged", corrected: true , severity: severityFor("character-too-small", true) });
       }
       const index = panel.itemIds.indexOf(item.id);
       const obscured = panel.itemIds.slice(index + 1).some((otherId) => {
         const other = next.items[otherId];
-        return other?.kind === "asset" && other.opacity >= 0.95 && contains(itemRect(other), itemRect(item));
+        return (
+          other?.kind === "asset" &&
+          other.visible !== false &&
+          other.opacity >= 0.95 &&
+          contains(itemRect(other), itemRect(item))
+        );
       });
-      if (obscured) issues.push({ code: "character-obscured", panelId, itemId: item.id, message: "Character is completely obscured by a higher layer", corrected: false });
+      if (obscured) issues.push({ code: "character-obscured", panelId, itemId: item.id, message: "Character is completely obscured by a higher layer", corrected: false , severity: severityFor("character-obscured", false) });
     }
   }
   if (issues.some((issue) => issue.corrected)) touch(next);
@@ -94,7 +145,7 @@ export function validateScopeIntegrity(
     const siblingsChanged = [...otherIds].some((id) => JSON.stringify(before.items[id]) !== JSON.stringify(after.items[id]));
     const membershipChanged = JSON.stringify(beforePanel?.itemIds) !== JSON.stringify(afterPanel?.itemIds);
     if (siblingsChanged || membershipChanged) {
-      issues.push({ code: "scope-integrity", panelId: allowedPanelId, message: "Content outside the selected object changed", corrected: false });
+      issues.push({ code: "scope-integrity", panelId: allowedPanelId, message: "Content outside the selected object changed", corrected: false , severity: severityFor("scope-integrity", false) });
     }
   }
   const page = before.pages[scope.pageId];
@@ -105,7 +156,7 @@ export function validateScopeIntegrity(
     const beforeItems = beforePanel?.itemIds.map((id) => before.items[id]);
     const afterItems = afterPanel?.itemIds.map((id) => after.items[id]);
     if (JSON.stringify({ panel: beforePanel, items: beforeItems }) !== JSON.stringify({ panel: afterPanel, items: afterItems })) {
-      issues.push({ code: "scope-integrity", panelId, message: "A panel outside the authoritative scope changed", corrected: false });
+      issues.push({ code: "scope-integrity", panelId, message: "A panel outside the authoritative scope changed", corrected: false , severity: severityFor("scope-integrity", false) });
     }
   }
   return issues;

@@ -30,6 +30,7 @@ import type {
   SceneFacing,
   ScenePosition,
   MangaLanguageCategory,
+  InteractionType,
   CameraAngle,
   CameraLens,
   PerspectiveType,
@@ -42,6 +43,8 @@ import { findUnreadyCharacterAsset, requireCharacter, requestedCharacterState, r
 import { hasExactState } from "./planValidation";
 import { normalizeReference } from "./grounding";
 import { bestLanguageAsset } from "@/language/library";
+import { executeInteraction } from "@/domain/interactionService";
+import { charactersInAsset } from "@/domain/interactions";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
 import { isPuppetInstance, puppetForInstance } from "@/domain/puppetOps";
 import { canRepresentView } from "@/puppet/capability";
@@ -50,6 +53,7 @@ import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
+import { executionClass } from "./capabilityRouter";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
 
@@ -63,6 +67,10 @@ export interface ExecutionSummary {
   completed: number;
   failed: number;
   validationIssues: CompositionIssue[];
+  /** True when nothing was committed and the document was restored. */
+  rolledBack: boolean;
+  /** Why the run was abandoned, when it was. */
+  abortReason?: string;
 }
 
 export function describeStep(step: AgentPlan["steps"][number]): string {
@@ -125,6 +133,8 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Add ${args.query} to panel ${args.panel}${args.targetCharacterName ? ` on ${args.targetCharacterName}` : ""}`;
     case "generate_manga_effect":
       return `Generate manga ${args.category}: ${String(args.description).slice(0, 40)}`;
+    case "create_interaction":
+      return `${args.subjectCharacterName} + ${args.targetCharacterName}: ${String(args.interaction).replace(/_/g, " ")} in panel ${args.panel}`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
     case "set_character_pose_rig": {
@@ -185,6 +195,17 @@ export async function executePlan(
 
   activeGuards = guards;
   createdCharacterIds = [];
+
+  /**
+   * Snapshot → execute → validate → commit OR roll back.
+   *
+   * The previous shape committed unconditionally: per-step failures were
+   * swallowed, validation ran after the fact, and a run that wrecked a composed
+   * panel reported "Done with 1 warning". Existing work is now preserved by
+   * default — a run either lands whole or does not land at all.
+   */
+  let rolledBack = false;
+  let abortReason: string | undefined;
   store.beginTransaction();
   try {
     for (let i = 0; i < plan.steps.length; i++) {
@@ -195,15 +216,38 @@ export async function executePlan(
         onProgress(i, "done", completedDetail(plan.steps[i].tool));
       } catch (error) {
         failed += 1;
-        onProgress(i, "failed", error instanceof Error ? error.message : "Step failed");
+        const message = error instanceof Error ? error.message : "Step failed";
+        onProgress(i, "failed", message);
+        /**
+         * A failed GENERATION step means the artwork the rest of the plan was
+         * going to place does not exist. Continuing would compose around a
+         * hole; stop and restore.
+         */
+        if (executionClass(plan.steps[i].tool) === "AI_GENERATION") {
+          abortReason = message;
+          break;
+        }
       }
     }
-    validationIssues = validatePlanResult(plan, before);
+
+    if (!abortReason) {
+      validationIssues = validatePlanResult(plan, before);
+      const fatal = validationIssues.find((issue) => issue.severity === "fatal");
+      if (fatal) abortReason = fatal.message;
+    }
+  } catch (error) {
+    abortReason = error instanceof Error ? error.message : "The run could not be completed";
   } finally {
-    useEditorStore.getState().endTransaction();
+    if (abortReason) {
+      useEditorStore.getState().abortTransaction();
+      rolledBack = true;
+    } else {
+      useEditorStore.getState().endTransaction();
+    }
     activeGuards = DENY_ALL_CREATION;
   }
-  return { completed, failed, validationIssues };
+
+  return { completed, failed, validationIssues, rolledBack, abortReason };
 }
 
 function runningDetail(tool: ToolName): string | undefined {
@@ -274,6 +318,8 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doSetPuppetExpression(args);
     case "set_puppet_joint":
       return doSetPuppetJoint(args);
+    case "create_interaction":
+      return doCreateInteraction(args);
     case "place_manga_effect":
       return doPlaceMangaEffect(args);
     case "generate_manga_effect":
@@ -776,6 +822,73 @@ function doRemoveItems(args: { panel: number; kind?: "asset" | "bubble" | "effec
 }
 
 
+
+/**
+ * Coordinated multi-character action (P0.3/P0.4).
+ *
+ * Delegates to the SAME service the Inspector's Hug button uses, so the Agent
+ * cannot acquire a different notion of what a hug is. The service decides
+ * whether the action is local placement, a shared anchor, or one joint render
+ * carrying both identity references — and performs the real provider call.
+ *
+ * Never satisfied by overlapping two existing sprites.
+ */
+async function doCreateInteraction(args: {
+  panel: number;
+  interaction: InteractionType;
+  subjectCharacterName: string;
+  subjectCharacterId?: ID;
+  targetCharacterName: string;
+  targetCharacterId?: ID;
+  expressions?: Record<string, string>;
+}): Promise<void> {
+  const panelId = panelIdByNumber(args.panel);
+  const doc = currentDoc();
+  const subject = requireCharacter(doc, {
+    characterId: args.subjectCharacterId,
+    characterName: args.subjectCharacterName,
+  });
+  const target = requireCharacter(doc, {
+    characterId: args.targetCharacterId,
+    characterName: args.targetCharacterName,
+  });
+  if (subject.id === target.id) throw new Error("An interaction needs two different characters");
+
+  // Expressions arrive keyed by NAME; resolve each through the same grounding
+  // resolver so "Yuri" cannot quietly become someone else here either.
+  const expressions: Record<ID, string> = {};
+  for (const [name, expression] of Object.entries(args.expressions ?? {})) {
+    const character = requireCharacter(doc, { characterName: name });
+    expressions[character.id] = expression.trim().toLowerCase();
+  }
+
+  const outcome = await executeInteraction({
+    panelId,
+    participantIds: [subject.id, target.id],
+    type: args.interaction,
+    expressions,
+  });
+
+  lastLanguageAction = outcome.reusedCache
+    ? `Reused an existing ${args.interaction.replace(/_/g, " ")} render`
+    : outcome.generationCalls > 0
+      ? `Drawn once using both ${subject.name} and ${target.name} as references`
+      : `Arranged locally — no generation`;
+
+  /**
+   * Post-condition: a joint render must actually contain both participants.
+   * A composite that lost someone is a fatal outcome, not a warning.
+   */
+  if (outcome.assetId) {
+    const participants = charactersInAsset(currentDoc(), outcome.assetId);
+    for (const id of [subject.id, target.id]) {
+      if (!participants.includes(id)) {
+        throw new Error(`The generated interaction does not contain ${currentDoc().characters[id]?.name ?? id}`);
+      }
+    }
+  }
+}
+
 // ─── Manga Language Library: SEARCH → REUSE → GENERATE → PLACE (§12) ────────
 
 /**
@@ -958,7 +1071,83 @@ function validateIdentityPostConditions(
         panelId,
         message: `${after.characters[characterId]?.name ?? characterId} was requested in panel ${panelNumber} but is not there`,
         corrected: false,
+        severity: "fatal",
       });
+    }
+  }
+
+  /**
+   * An interaction must be VISIBLE, not merely recorded.
+   *
+   * `create_interaction` succeeds if the document gained an Interaction record,
+   * but a hug nobody can see in the panel is a failed hug. Both participants
+   * must be represented — either as their own instances (local/synchronized) or
+   * inside one joint render that provenance says contains them both.
+   */
+  for (const step of plan.steps) {
+    if (step.tool !== "create_interaction") continue;
+    const panelNumber = step.args.panel;
+    const panelId = typeof panelNumber === "number" ? page?.panelIds[panelNumber - 1] : undefined;
+    if (!panelId) continue;
+    const present = new Set(
+      (after.panels[panelId]?.itemIds ?? []).flatMap((itemId) => {
+        const item = after.items[itemId];
+        if (item?.kind !== "asset") return [];
+        const owner = item.characterState?.characterId;
+        return owner ? [owner] : charactersInAsset(after, item.sourceAssetId);
+      }),
+    );
+    for (const key of ["subjectCharacterId", "targetCharacterId"] as const) {
+      const characterId = step.args[key];
+      if (typeof characterId !== "string" || present.has(characterId)) continue;
+      issues.push({
+        code: "interaction-participant-missing",
+        panelId,
+        message: `${after.characters[characterId]?.name ?? characterId} is missing from the ${String(step.args.interaction).replace(/_/g, " ")} in panel ${panelNumber}`,
+        corrected: false,
+        severity: "fatal",
+      });
+    }
+  }
+
+  /**
+   * Nothing that already existed may vanish unless removal was the request.
+   *
+   * This is the failure that prompted the rule: a run asked to add an
+   * interaction wiped a finished panel and still reported success. Additive
+   * work must stay additive, inside the target panel as well as outside it.
+   */
+  const removalRequested = plan.steps.some(
+    (step) => step.tool === "remove_items" || step.tool === "set_page_layout",
+  );
+  if (!removalRequested) {
+    for (const panelId of page?.panelIds ?? []) {
+      const survivors = new Set(after.panels[panelId]?.itemIds ?? []);
+      const lost = (before.panels[panelId]?.itemIds ?? []).filter((id) => !survivors.has(id));
+      /**
+       * A composite interaction legitimately retires the individual sprites it
+       * replaced; those characters are still on the page, inside the joint
+       * render. Anything else that disappeared was destroyed.
+       */
+      const destroyed = lost.filter((itemId) => {
+        const item = before.items[itemId];
+        if (item?.kind !== "asset") return true;
+        const owner = item.characterState?.characterId ?? before.assets[item.sourceAssetId]?.metadata?.characterId;
+        if (!owner) return true;
+        return !(after.panels[panelId]?.itemIds ?? []).some((survivorId) => {
+          const survivor = after.items[survivorId];
+          return survivor?.kind === "asset" && charactersInAsset(after, survivor.sourceAssetId).includes(owner);
+        });
+      });
+      if (destroyed.length > 0) {
+        issues.push({
+          code: "unexpected-deletion",
+          panelId,
+          message: `${destroyed.length} existing item${destroyed.length !== 1 ? "s" : ""} disappeared from a panel this run was only meant to add to`,
+          corrected: false,
+          severity: "fatal",
+        });
+      }
     }
   }
 
@@ -974,6 +1163,7 @@ function validateIdentityPostConditions(
       panelId: plan.targetScope?.panelId ?? page?.panelIds[0] ?? "",
       message: `A new Character "${after.characters[id]?.name ?? id}" was created without authorization`,
       corrected: false,
+      severity: "fatal",
     });
   }
   return issues;

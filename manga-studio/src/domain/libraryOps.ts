@@ -87,9 +87,49 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
    * are indistinguishable from one another and mean nothing to a creator.
    * Visual edit lineage lives in `provenance.localEdit`, not in the graph.
    */
-  if (asset.provenance?.localEdit?.intent !== "cosmetic") recordAssetState(next, asset);
+  if (asset.provenance?.localEdit?.intent === "cosmetic") {
+    promoteVariation(next, asset);
+  } else {
+    recordAssetState(next, asset);
+  }
   touch(next);
   return { doc: next, assetId: asset.id };
+}
+
+/**
+ * A cosmetic edit REPLACES the render it improved.
+ *
+ * Fixing a malformed hand in "Yuri, standing" produces better pixels for a
+ * state that already exists. Without this the state graph still points at the
+ * broken original, so every later "place Yuri standing" quietly reintroduces
+ * the very defect the creator just paid to fix — the edit would only ever
+ * apply to the one instance they were looking at.
+ *
+ * The superseded image is kept, not deleted: it is still referenced by any
+ * instance already placed from it, and lineage is what makes the change
+ * reversible.
+ */
+function promoteVariation(doc: ProjectDocument, asset: SourceAsset): void {
+  const parentId = asset.provenance?.localEdit?.parentAssetId;
+  const characterId = asset.metadata?.characterId;
+  if (!parentId || !characterId) return;
+  const record = Object.values(doc.characterStates).find(
+    (candidate) => candidate.characterId === characterId && candidate.assetId === parentId,
+  );
+  if (!record) return;
+  record.supersededAssetIds = [...(record.supersededAssetIds ?? []), parentId];
+  record.assetId = asset.id;
+  doc.assets[asset.id].metadata = { ...doc.assets[asset.id].metadata, characterAssetRole: "variation" };
+  /**
+   * The character's identity anchor follows the repair too. Generating future
+   * poses from an image with a broken hand would propagate the defect into
+   * everything drawn afterwards.
+   */
+  const character = doc.characters[characterId];
+  if (character?.canonicalReferenceAssetId === parentId) {
+    character.canonicalReferenceAssetId = asset.id;
+    character.referenceAssetId = asset.id;
+  }
 }
 
 function assetTypeFromInput(input: NewAssetInput): SourceAsset["type"] {

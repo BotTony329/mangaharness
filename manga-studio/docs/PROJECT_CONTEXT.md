@@ -186,52 +186,58 @@ migration.
 
 ## Last Completed Work
 
-**V3.4 — Asset Detail Editor and generative local editing.**
-Selection mask in image space, outside-mask compositor with inward feather,
-`/api/assets/edit` reusing the existing `editImage` provider capability,
-non-destructive variation provenance, and the Asset/Instance/Replace boundary.
+**V3.5 — MVP completion / debt closure.** See `docs/MVP_COMPLETION_AUDIT.md` for
+the item-by-item classification.
 
-**Tests:** 718 passing / 57 files. Typecheck clean, lint clean, production build
-clean.
+- **Agent runs are transactional.** `executePlan` snapshots, executes, validates,
+  then commits OR rolls back. A failed generation stops the run instead of
+  composing around a hole. Rollback keeps images already paid for and the
+  generation log — it restores the PAGE, not the library.
+- **Validation has severity.** `IssueSeverity` = info / warning / fatal; any
+  fatal aborts. The panel says what was restored instead of "Done with 1 warning".
+- **`create_interaction`** reaches the Agent, through the same
+  `domain/interactionService` the Inspector uses — capability check, cache reuse,
+  one joint render carrying BOTH identity references, provenance, placement.
+- **Execution classes.** `agent/capabilityRouter.ts` answers whether a tool can
+  spend a generation; an unclassified tool is treated as generative.
+- **Golden regression.** `src/agent/goldenRun.test.ts` — panels the request never
+  named come back byte-identical, or the run did not commit.
+- **Cosmetic variations replace the render they improved** (`promoteVariation`),
+  so a repaired hand reaches every later placement.
+- **Ground plane + depth handle** on canvas, **Inspector tabs**
+  (Look / Position / Scene), **one `+ Generate`** entry point.
+
+**Tests:** 749 passing / 59 files. Typecheck, lint and production build clean.
 
 ## Known Bugs / UX Problems
 
-- **The Inspector is long.** Interactions sit below the fold for a selected
-  character — verified in the browser, the Hug button needed scrolling. The
-  Inspector needs collapsible sections or a tab strip.
-- Camera/Stage has no dedicated mode; it is discoverable only by selecting a
-  panel and scrolling the Inspector.
-- No on-canvas depth handle — depth is a slider only.
-- Agent cannot create interactions; the domain layer can.
-- Joint interaction generation is wired to the UI but has not been exercised
-  against a live provider.
+- No path has been exercised against a live provider in this environment
+  (`/api/generate` → 503, `/api/assets/edit` → 422). Joint generation, local
+  editing and character generation are IMPLEMENTED — PROVIDER-INTEGRATION
+  UNVERIFIED.
+- No corner-pin. Konva has no perspective transform; it needs the same mesh work
+  as P2, and an affine-only version would misrepresent itself.
 - Objects cannot be attached to a character's hand from the UI.
-- Assets generated before the white policy still carry a magenta matte until
-  "Fix transparency" is run on that character.
+- Assets generated before the white-background policy still carry a magenta
+  matte until "Fix transparency" is run on that character.
 - Three-point perspective renders guides but has no distinct projection
   consequence beyond two-point.
-- Local editing has never run against a live image-edit provider; only the
-  capability-error path was exercised in the browser.
-- The Asset Detail Editor offers one result per Generate, not 2-4 candidates.
-- A cosmetic variation can become the preferred render for that semantic state
-  on FUTURE placements (newest wins in the resolver). Existing instances are
-  never touched.
+- Local editing on a composite (two-character) asset treats it as one image;
+  there is no per-participant escalation.
+- Placing into a snap-enabled panel does not auto-stage the new instance; the
+  creator still presses "Place on Stage".
 
 ## Next Recommended Work
 
-0. **Run the local edit against a real image-edit provider.** Every part of the
-   path is unit- and browser-tested except the provider round trip; identity
-   preservation inside the mask is unproven in practice.
-1. **Agent interaction tool** — `create_interaction` + capability-aware
-   execution, so "让豆包抱住friend" runs as one interaction. Highest value: the
-   domain layer is finished and unreachable from the Agent.
-2. **Camera / Stage mode** — one entry point revealing horizon, VPs, ground and
-   depth handles; removes the biggest discoverability gap.
-3. **On-canvas depth handle** — direct manipulation instead of a slider.
-4. **Object → hand attachment** — connect Objects to the existing puppet
-   attachment sockets.
-5. **Live joint-generation run** — exercise the hug path against a real provider
-   and check identity preservation.
+1. **Run every generation path against a real provider** — character state,
+   joint interaction, local edit. Everything else about them is tested; identity
+   preservation in practice is not.
+2. **Composite/local-edit escalation** — editing a hug should be able to fall
+   back to regenerating the interaction rather than inpainting the composite.
+3. **Object → hand attachment** — connect Objects to the existing puppet sockets.
+4. **Mesh deformation + corner-pin** (P2), which unblock real perspective
+   placement of flat artwork.
+5. **Auto-stage on drop** into a snap-enabled panel.
 
 ## Important Files / Modules
 

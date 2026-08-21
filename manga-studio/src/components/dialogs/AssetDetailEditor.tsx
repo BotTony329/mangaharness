@@ -423,6 +423,17 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
               {busy ? "Generating…" : "Generate ✦"}
             </button>
             <p className="mt-1 text-[10px] text-zinc-600">✦ uses one AI generation.</p>
+            {/*
+              An honest limit, stated before the creator spends a generation on
+              it. Everything outside the selection is copied from the original
+              byte-for-byte — which is the guarantee that makes local editing
+              safe, and also the reason it cannot change what shows THROUGH a
+              partly transparent area.
+            */}
+            <p className="mt-1 text-[10px] leading-4 text-zinc-600">
+              Works on solid areas. Glass, smoke and wispy hair edges keep whatever was behind them, because
+              everything outside your selection is preserved exactly.
+            </p>
           </div>
 
           {error && <p className="rounded border border-red-900/60 bg-red-950/30 p-2 text-[11px] text-red-300">{error}</p>}

@@ -54,12 +54,22 @@ export function placeAsset(
     cropModeTransform(cropMode, asset, panelRect.width, panelRect.height) ??
     fitTransform(asset.width, asset.height, panelRect.width, panelRect.height);
 
+  /**
+   * A second character dropped into a panel must not land on the first.
+   *
+   * Every fit placement centres on the panel, so "place Yuri, place Mio" put
+   * one exactly behind the other — a valid document that renders as one
+   * character. The creator's own drop point always wins; only the automatic
+   * position is nudged, and only away from characters already standing there.
+   */
+  const cx = options.at?.x ?? clearCenterX(next, panelId, transform, panelRect.width);
+
   const item: AssetInstance = {
     id: newId(),
     kind: "asset",
     panelId,
     sourceAssetId,
-    cx: options.at?.x ?? transform.cx,
+    cx,
     cy: options.at?.y ?? transform.cy,
     width: transform.width,
     height: transform.height,
@@ -73,6 +83,67 @@ export function placeAsset(
   syncPanelScene(next, panelId);
   touch(next);
   return { doc: next, itemId: item.id };
+}
+
+/**
+ * Pick a horizontal position that leaves the characters already in this panel
+ * visible.
+ *
+ * Existing items are never moved — a run asked to add someone may not rearrange
+ * work the creator already composed. Candidates are evenly spaced across the
+ * panel and scored by how much they cover what is already there; the default
+ * centre is tried first and kept whenever the panel is effectively empty.
+ */
+function clearCenterX(
+  doc: ProjectDocument,
+  panelId: ID,
+  transform: { cx: number; cy: number; width: number; height: number },
+  panelWidth: number,
+): number {
+  const occupants = (doc.panels[panelId]?.itemIds ?? [])
+    .map((id) => doc.items[id])
+    .filter((item): item is AssetInstance => {
+      if (item?.kind !== "asset") return false;
+      // Backgrounds are meant to sit underneath everything.
+      return doc.assets[item.sourceAssetId]?.category !== "background";
+    });
+  if (occupants.length === 0) return transform.cx;
+
+  const half = transform.width / 2;
+  const candidates = [transform.cx];
+  const slots = occupants.length + 1;
+  for (let slot = 1; slot <= slots; slot += 1) {
+    candidates.push(Math.min(panelWidth - half, Math.max(half, (panelWidth * slot) / (slots + 1))));
+  }
+
+  let best = transform.cx;
+  let bestOverlap = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const rect = {
+      x: candidate - half,
+      y: transform.cy - transform.height / 2,
+      width: transform.width,
+      height: transform.height,
+    };
+    let overlap = 0;
+    for (const occupant of occupants) {
+      const other = {
+        x: occupant.cx - occupant.width / 2,
+        y: occupant.cy - occupant.height / 2,
+        width: occupant.width,
+        height: occupant.height,
+      };
+      const w = Math.max(0, Math.min(rect.x + rect.width, other.x + other.width) - Math.max(rect.x, other.x));
+      const h = Math.max(0, Math.min(rect.y + rect.height, other.y + other.height) - Math.max(rect.y, other.y));
+      overlap += w * h;
+    }
+    if (overlap < bestOverlap) {
+      bestOverlap = overlap;
+      best = candidate;
+      if (overlap === 0) break;
+    }
+  }
+  return best;
 }
 
 export function addBubble(
