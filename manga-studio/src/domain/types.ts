@@ -9,6 +9,7 @@
 
 import type { EffectParams } from "./effects";
 import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
+import type { MangaPuppet, PuppetInstanceState } from "@/puppet/model";
 
 // ─── Shared primitives ──────────────────────────────────────────────────────
 
@@ -141,6 +142,8 @@ export interface Character {
   appearance?: string;
   personalityNotes?: string;
   defaultOutfit?: string;
+  /** Compiled puppet, when this character has one. Absent = legacy PNG states. */
+  puppetId?: ID;
   /** Canonical identity reference sent with every generation for this character. */
   referenceAssetId?: ID;
   /** Stable v3 name. referenceAssetId remains as a legacy compatibility alias. */
@@ -394,6 +397,16 @@ export interface AssetInstance extends PanelItemBase {
    * as before — depth never becomes mandatory for an existing instance.
    */
   stage?: InstanceStage;
+  /**
+   * Local puppet configuration (D36). When present the renderer draws an
+   * articulated actor instead of the flat source image; everything else about
+   * the instance — transform, stage, framing, panel membership, z-order — is
+   * unchanged, which is why puppets inherit the whole camera stage for free.
+   *
+   * Absent means a legacy flattened character, which keeps working exactly as
+   * before.
+   */
+  puppet?: PuppetInstanceState;
 }
 
 export type GroundAnchor = "feet" | "center" | "custom";
@@ -546,6 +559,8 @@ export interface ProjectDocument {
   scenes: Record<ID, PanelScene>;
   /** The character state graph: semantic nodes with reference lineage. */
   characterStates: Record<ID, CharacterStateRecord>;
+  /** Reusable puppet models, shared across every instance of a character. */
+  puppets: Record<ID, MangaPuppet>;
   items: Record<ID, PanelItem>;
   /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
   workspaceItems: Record<ID, WorkspaceItem>;
@@ -553,4 +568,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;

@@ -16,6 +16,8 @@ import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
 import { PoseEditControls } from "./PoseEditControls";
+import { PuppetControls } from "./PuppetControls";
+import { isPuppetInstance } from "@/domain/puppetOps";
 import { InstanceStageControls } from "./InstanceStageControls";
 import type { ReorderDirection } from "@/domain/itemOps";
 import type { DomainCommand } from "@/domain/commands";
@@ -243,6 +245,9 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
 
 function CharacterStateControls({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((state) => state.doc);
+  // A puppet character edits locally; a legacy flat one keeps the older
+  // skeleton-plus-regeneration path (§21).
+  const isPuppet = Boolean(doc && isPuppetInstance(doc, item.id));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>();
   const [error, setError] = useState<string>();
@@ -328,7 +333,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
         ))}
       </div>
       <InstanceStageControls item={item} />
-      <PoseEditControls item={item} />
+      {isPuppet ? <PuppetControls item={item} /> : <PoseEditControls item={item} />}
       {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
       {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}
       {review && (

@@ -102,6 +102,7 @@ export function createProjectDocument(name: string, layout: LayoutPresetId = "fo
     panels,
     scenes,
     characterStates: {},
+    puppets: {},
     items: {},
     workspaceItems: {},
     workspaceOrder: [],

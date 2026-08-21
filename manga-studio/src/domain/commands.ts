@@ -33,6 +33,17 @@ import { validateAndCorrectComposition, type CompositionIssue, type CompositionR
 import type { PoseCalibration } from "@/characters/poseRig";
 import { setStateCalibration } from "./characterStateOps";
 import { frameSubject, resolveShotType } from "./staging";
+import {
+  attachPuppetToInstance,
+  detachPuppetFromInstance,
+  registerPuppet,
+  resetPuppetPose,
+  setPuppetAttachment,
+  setPuppetExpression,
+  setPuppetJoint,
+  setPuppetPartOverride,
+} from "./puppetOps";
+import type { MangaPuppet, PuppetJoint, PuppetPartType } from "@/puppet/model";
 import type { CameraPatch } from "./camera";
 import type { PerspectivePatch } from "./perspective";
 import {
@@ -121,7 +132,16 @@ export type DomainCommand =
   | { type: "set-state-calibration"; stateId: ID; calibration?: PoseCalibration }
   | { type: "set-panel-focal-item"; panelId: ID; itemId?: ID }
   | { type: "set-panel-auto-depth-order"; panelId: ID; enabled: boolean }
-  | { type: "place-on-stage"; instanceId: ID; at: Point };
+  | { type: "place-on-stage"; instanceId: ID; at: Point }
+  // ── Manga Puppet: local, generation-free character edits (D36) ──
+  | { type: "register-puppet"; puppet: MangaPuppet }
+  | { type: "attach-puppet"; instanceId: ID; puppetId: ID }
+  | { type: "detach-puppet"; instanceId: ID }
+  | { type: "set-puppet-expression"; instanceId: ID; expressionId: string }
+  | { type: "set-puppet-joint"; instanceId: ID; joint: PuppetJoint; degrees: number }
+  | { type: "reset-puppet-pose"; instanceId: ID }
+  | { type: "set-puppet-part"; instanceId: ID; partType: PuppetPartType; partId?: ID }
+  | { type: "set-puppet-attachment"; instanceId: ID; attachmentId: ID; attached: boolean };
 
 export interface CommandResult {
   doc: ProjectDocument;
@@ -269,6 +289,22 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       return { doc: setPanelAutoDepthOrder(doc, command.panelId, command.enabled) };
     case "place-on-stage":
       return { doc: placeOnStage(doc, command.instanceId, command.at) };
+    case "register-puppet":
+      return { doc: registerPuppet(doc, command.puppet) };
+    case "attach-puppet":
+      return { doc: attachPuppetToInstance(doc, command.instanceId, command.puppetId) };
+    case "detach-puppet":
+      return { doc: detachPuppetFromInstance(doc, command.instanceId) };
+    case "set-puppet-expression":
+      return { doc: setPuppetExpression(doc, command.instanceId, command.expressionId) };
+    case "set-puppet-joint":
+      return { doc: setPuppetJoint(doc, command.instanceId, command.joint, command.degrees) };
+    case "reset-puppet-pose":
+      return { doc: resetPuppetPose(doc, command.instanceId) };
+    case "set-puppet-part":
+      return { doc: setPuppetPartOverride(doc, command.instanceId, command.partType, command.partId) };
+    case "set-puppet-attachment":
+      return { doc: setPuppetAttachment(doc, command.instanceId, command.attachmentId, command.attached) };
     case "set-state-calibration": {
       const next = cloneDoc(doc);
       setStateCalibration(next, command.stateId, command.calibration);

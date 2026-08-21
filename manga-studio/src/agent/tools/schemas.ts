@@ -168,6 +168,28 @@ export const toolSchemas = {
     groundY: z.number().min(0).max(1).optional().describe("Ground contact line in the panel"),
   }),
 
+  // ── Manga Puppet: local, instant, generation-free (§17) ──
+  set_puppet_expression: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80).optional(),
+    expression: z.string().min(1).max(60),
+  }),
+
+  set_puppet_joint: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80).optional(),
+    joint: z.enum([
+      "head",
+      "shoulderLeft",
+      "elbowLeft",
+      "wristLeft",
+      "shoulderRight",
+      "elbowRight",
+      "wristRight",
+    ]),
+    degrees: z.number().min(-180).max(180),
+  }),
+
   set_focal_character: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).describe("The subject camera framing works around"),
@@ -280,6 +302,8 @@ const PANEL_TOOLS = new Set<ToolName>([
   "attach_bubble",
   "set_character_pose_rig",
   "set_focal_character",
+  "set_puppet_expression",
+  "set_puppet_joint",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -324,6 +348,8 @@ Available tools (call only these, with exactly these argument shapes):
 - compose_character {panel, characterName, pose?, expression?, outfit?, view?, framing?, position?, facing?, depth?, role?, generateIfMissing?} — preferred scene-aware placement. Resolve or generate the semantic Character state, then compose it with explicit shot, position, facing, depth, and narrative role.
 - reuse_scene_background {sourcePanel, targetPanel} — reuse the exact same background asset and continuity metadata; never regenerate a merely similar location.
 - add_scene_relationship {panel, subjectCharacterName, action, targetCharacterName?} — record semantic action/interaction in the panel scene graph.
+- set_puppet_expression {panel, characterName?, expression} — change a puppet character's face LOCALLY and instantly. Prefer this over any generation tool whenever the character has a puppet: it changes nothing but the face, costs nothing, and is immediate.
+- set_puppet_joint {panel, characterName?, joint, degrees} — rotate one joint of a puppet character locally and instantly. Prefer this over regenerating a pose. Fails with a clear reason when the puppet cannot hold the rotation, and only then should you fall back to generation.
 - set_character_slot {panel?, characterName?, pose?, expression?, outfit?, view?, generateIfMissing?} — change the selected character's semantic state. Unspecified fields MUST remain unchanged ("make her cry" changes expression only; "run angrily" changes pose and expression). The shared resolver reuses an exact full-state cache hit or generates the missing combination, then swaps it without changing composition.
 - set_crop_mode {panel, characterName?, category?, mode: "fit"|"fill"|"upper-body"|"face"|"custom"} — reframe an already-placed instance. "upper-body" = medium shot, "fill" = full-bleed. Close-ups come from crop modes, never from regenerating.
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.

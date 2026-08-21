@@ -259,3 +259,29 @@ Two ground models had been built without noticing they disagreed. `projectInstan
 Resolved by making the floor recede **only when a horizon exists**: with perspective active the plane has depth in it and a distant character's feet sit higher in frame; with perspective off there is no horizon to recede along and the flat line is correct. A Phase 5 test asserting both characters share one screen y encoded the flat model and now asserts the stronger property — each character's feet land exactly on the ground plane at its own depth.
 
 Changing the horizon now restages the panel, for the same reason a camera change does: the horizon *is* the floor.
+
+## D39 — Manga Puppet becomes the primary editable character representation
+
+*(The brief suggested numbering this D36; that number is already taken by the Character-Rig-2.0 record, so this is D39.)*
+
+Until now a character was a flattened generated PNG with a semantic skeleton drawn on top. Changing an expression or a limb therefore required regenerating the whole character.
+
+**The reason for the pivot is not that generation quality is poor.** It is structural:
+
+> A semantic skeleton over a flattened raster has no authority over the pixels. Direct manipulation is therefore illusory unless the render representation is itself articulated.
+
+Every workaround we built confirmed it. Phase 3 gave the rig joints, but Apply had to regenerate. Phase 4 added calibration because the generic skeleton never matched the artwork — a problem that only exists because the skeleton and the pixels are separate things. Descriptors, lineage, nearest-state references and delta prompts are all machinery for asking a model to redraw something the editor could not change itself. The representation was the bug.
+
+**`MangaPuppet` is a hierarchy of textured parts with anchors and pivots.** Rotating an upper arm carries the forearm and hand because that relationship is computed in `transforms.ts`, not baked into pixels. An expression is a set of replacement facial parts, so applying one *cannot* reach a torso, a transform, an outfit or a panel — the guarantee is structural rather than a promise in a comment.
+
+**The puppet rides on `AssetInstance` rather than becoming a new item kind.** `kind === "asset"` appears in twelve-plus files across agent context, scope, executor, composition validation, canvas and commands; a new kind would fork all of them and silently exclude puppets from depth, camera, framing, z-order and export. An instance is still "a character in a panel with a transform" — only rasterization changes, so the entire Phase 5.5 camera stage applies to puppets with no new code.
+
+**Renderer: extend Konva, no new dependency.** Nested `Group`s compose transforms, child order gives per-part z-order, clipping already works, and events bubble to the outer group so clicking an eye selects the actor. PixiJS was considered and rejected: there is no evidence WebGL is needed for tens of parts.
+
+**Capability is explicit, never silent.** `canApplyJoint` refuses a rotation past its limit with a reason and a fallback recommendation instead of distorting. `PartReadiness.hiddenRegionComplete` is honest about the occlusion problem: the fixture's upper arms were cut from a flat drawing, so a large shoulder swing reports `approximate` quality rather than rendering a hole where the torso should be.
+
+**The AI path is demoted, not deleted.** The state graph, lineage, nearest-state resolver and reference selection become *more* valuable as the fallback for what the puppet genuinely cannot represent — a back view, a crouch without legs, extreme foreshortening. `PoseIntent` descriptors still describe those requests. What changes is that they are no longer the default route for a face change.
+
+**Semantic state, puppet parameters and generated lineage are three different things** (§14). `CharacterState` stays semantic (walking, shocked, school uniform). `PuppetInstanceState` is how that state is currently rendered locally. Only generation creates graph nodes — a five-degree elbow move must not litter the lineage with meaningless ancestry.
+
+Legacy flattened characters keep working untouched. Migration v9 → v10 is purely additive: no asset is reinterpreted as puppet parts, and no character gains a puppet it did not have.

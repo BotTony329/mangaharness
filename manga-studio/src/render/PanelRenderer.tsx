@@ -5,6 +5,7 @@ import { panelBoundsPx, panelPolygonPx } from "@/domain/coords";
 import type { ID, Panel, PanelItem, Point, ProjectDocument } from "@/domain/types";
 import { assetRenderUrl } from "@/assets/renderSource";
 import { AssetNode } from "./AssetNode";
+import { PuppetNode } from "./PuppetNode";
 import { BubbleNode } from "./BubbleNode";
 import { EffectNode } from "./EffectNode";
 
@@ -97,7 +98,24 @@ function renderItem(
   interaction: PanelInteraction,
 ) {
   switch (item.kind) {
-    case "asset":
+    case "asset": {
+      // An articulated actor when the instance carries a puppet; otherwise the
+      // legacy flattened render, unchanged (§21).
+      const puppet = item.puppet ? doc.puppets[item.puppet.puppetId] : undefined;
+      if (puppet) {
+        return (
+          <PuppetNode
+            key={item.id}
+            doc={doc}
+            item={item}
+            puppet={puppet}
+            interactive={interactive}
+            onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
+            onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
+            onDragEnd={() => interaction.onItemDragEnd?.(item.id)}
+          />
+        );
+      }
       return (
         <AssetNode
           key={item.id}
@@ -109,6 +127,7 @@ function renderItem(
           onDragEnd={() => interaction.onItemDragEnd?.(item.id)}
         />
       );
+    }
     case "bubble":
       return (
         <BubbleNode

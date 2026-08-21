@@ -37,6 +37,8 @@ import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/s
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
+import { isPuppetInstance } from "@/domain/puppetOps";
+import type { PuppetJoint } from "@/puppet/model";
 import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
@@ -108,6 +110,10 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Move ${args.characterName ?? "character"} to the ${args.placement ?? `depth ${args.depth}`} of panel ${args.panel}`;
     case "set_focal_character":
       return `Focus panel ${args.panel} on ${args.characterName}`;
+    case "set_puppet_expression":
+      return `Set ${args.characterName ?? "character"} to ${args.expression} (instant)`;
+    case "set_puppet_joint":
+      return `Rotate ${args.characterName ?? "character"} ${args.joint} to ${args.degrees}° (instant)`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
     case "set_character_pose_rig": {
@@ -211,6 +217,10 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doSetCharacterPoseRig(args);
     case "set_focal_character":
       return doSetFocalCharacter(args);
+    case "set_puppet_expression":
+      return doSetPuppetExpression(args);
+    case "set_puppet_joint":
+      return doSetPuppetJoint(args);
     case "remove_items":
       return doRemoveItems(args);
   }
@@ -799,4 +809,43 @@ function doSetFocalCharacter(args: { panel: number; characterName: string }): vo
   const panelId = panelIdByNumber(args.panel);
   const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
   dispatch({ type: "set-panel-focal-item", panelId, itemId: instance.id });
+}
+
+// ─── Manga Puppet: the Agent uses the SAME local operations as the GUI (§17) ──
+
+/**
+ * Change a puppet character's face.
+ *
+ * The Agent reaches for this instead of generate/compose whenever a puppet
+ * exists, so "make Yuri shocked" swaps a face rather than redrawing a person.
+ * The error names the fallback explicitly rather than silently generating.
+ */
+function doSetPuppetExpression(args: { panel: number; characterName?: string; expression: string }): void {
+  const panelId = panelIdByNumber(args.panel);
+  const doc = currentDoc();
+  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  if (!isPuppetInstance(doc, instance.id)) {
+    throw new Error(
+      `${args.characterName ?? "That character"} has no puppet, so the face cannot be changed locally. Use set_character_slot to generate the expression instead.`,
+    );
+  }
+  const expressionId = args.expression.trim().toLowerCase();
+  dispatch({ type: "set-puppet-expression", instanceId: instance.id, expressionId });
+}
+
+function doSetPuppetJoint(args: {
+  panel: number;
+  characterName?: string;
+  joint: PuppetJoint;
+  degrees: number;
+}): void {
+  const panelId = panelIdByNumber(args.panel);
+  const doc = currentDoc();
+  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  if (!isPuppetInstance(doc, instance.id)) {
+    throw new Error(
+      `${args.characterName ?? "That character"} has no puppet, so the pose cannot be adjusted locally. Use set_character_pose_rig to generate the pose instead.`,
+    );
+  }
+  dispatch({ type: "set-puppet-joint", instanceId: instance.id, joint: args.joint, degrees: args.degrees });
 }

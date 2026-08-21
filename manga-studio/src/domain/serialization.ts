@@ -235,6 +235,14 @@ const MIGRATIONS: Record<number, Migration> = {
     }
     return { ...doc, schemaVersion: 9 };
   },
+  /**
+   * v9 → v10: optional puppet support.
+   *
+   * Purely additive. No existing asset is reinterpreted as puppet parts and no
+   * character gains a puppet, so a project without one behaves exactly as
+   * before — a flat character is a flat character until someone compiles it.
+   */
+  9: (doc) => ({ ...doc, puppets: doc.puppets ?? {}, schemaVersion: 10 }),
 };
 
 function migrate(input: unknown): ProjectDocument {
@@ -262,6 +270,7 @@ function assertDocumentShape(doc: ProjectDocument): void {
   if (missing.length > 0) throw new Error(`Corrupt project document: missing ${missing.join(", ")}`);
   if (!Array.isArray(doc.generationHistory)) doc.generationHistory = [];
   if (typeof doc.characterStates !== "object" || doc.characterStates === null) doc.characterStates = {};
+  if (typeof doc.puppets !== "object" || doc.puppets === null) doc.puppets = {};
   if (typeof doc.workspaceItems !== "object" || doc.workspaceItems === null) doc.workspaceItems = {};
   if (!Array.isArray(doc.workspaceOrder)) doc.workspaceOrder = [];
   if (typeof doc.scenes !== "object" || doc.scenes === null) {
