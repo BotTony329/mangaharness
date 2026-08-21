@@ -413,11 +413,15 @@ describe("executePlan", () => {
     expect(summary.completed).toBe(0);
     expect(summary.failed).toBe(2);
     const after = useEditorStore.getState().doc!;
+    // A character whose background could not be removed never becomes a
+    // library asset: an un-keyed image in the library is one drag away from
+    // painting its opaque background into a panel.
     const failedAsset = Object.values(after.assets).find((asset) => asset.metadata?.pose === "jumping");
-    expect(failedAsset).toMatchObject({ processingStatus: "failed", storageUrl: "https://example.com/generated-yuri.jpg" });
+    expect(failedAsset).toBeUndefined();
     expect(after.panels[page.panelIds[0]].itemIds).toHaveLength(0);
-    expect(failures.join(" ")).toContain("raw source has been preserved");
-    expect(failures.join(" ")).toContain("Reprocess");
+    // The attempt is still recorded so the run is auditable.
+    expect(after.generationHistory.some((record) => record.status === "failed")).toBe(true);
+    expect(failures.join(" ").toLowerCase()).toContain("background removal");
   });
 
   it("reports failed steps but keeps executing the rest", async () => {

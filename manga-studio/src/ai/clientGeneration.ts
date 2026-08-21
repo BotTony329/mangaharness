@@ -7,6 +7,10 @@
  */
 
 import type { AssetCategory, AssetGenerationMetadata, ID } from "@/domain/types";
+import {
+  BACKGROUND_REMOVAL_FAILED_MESSAGE,
+  validateCharacterTransparency,
+} from "@/assets/characterAssetContract";
 import { useEditorStore } from "@/editor/store";
 import type { GeneratedAssetType } from "./types";
 
@@ -86,8 +90,30 @@ export interface StoreGeneratedAssetInput {
   metadata?: Partial<AssetGenerationMetadata>;
 }
 
+/** Raised when a generated image cannot become a compositable layer. */
+export class CharacterTransparencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CharacterTransparencyError";
+  }
+}
+
 /** Register a generated image as a source asset + provenance history entry. */
 export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Promise<ID> {
+  // Gate BEFORE the asset exists. Creating it first and throwing afterwards
+  // left the failed image in the library, where the canvas then rendered its
+  // opaque source — the defect this contract exists to prevent.
+  const verdict = validateCharacterTransparency({
+    category: input.category,
+    processingStatus: input.result.processingStatus,
+    hasAlpha: input.result.hasAlpha,
+    processedImageUrl: input.result.processedImageUrl,
+  });
+  if (!verdict.valid) {
+    recordFailedGeneration(input.assetType, input.prompt, verdict.reason ?? BACKGROUND_REMOVAL_FAILED_MESSAGE);
+    throw new CharacterTransparencyError(verdict.reason ?? BACKGROUND_REMOVAL_FAILED_MESSAGE);
+  }
+
   const dims = await measureImage(input.result.url);
   const created = useEditorStore.getState().dispatch({
     type: "create-asset",
@@ -123,10 +149,6 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
     },
   });
   if (!created.createdId) throw new Error("Generated asset could not be registered");
-  if ((input.category === "character" || input.category === "prop") &&
-      (input.result.processingStatus !== "ready" || !input.result.hasAlpha || !input.result.processedImageUrl)) {
-    throw new Error(`${input.category === "character" ? "Character" : "Prop"} generated, but I couldn't remove the background reliably. The raw source has been preserved.`);
-  }
   return created.createdId;
 }
 

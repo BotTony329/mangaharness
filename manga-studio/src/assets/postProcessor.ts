@@ -10,10 +10,8 @@ import sharp from "sharp";
 import type { AssetCategory } from "@/domain/types";
 import {
   builtInBackgroundRemovalProvider,
-  colorDistance,
-  type BackgroundModel,
+  estimateEdgeBackground,
   type BackgroundRemovalProvider,
-  type Rgb,
 } from "./backgroundRemoval";
 
 export interface AssetProcessingResult {
@@ -89,9 +87,7 @@ export async function processAssetImage(
   const background = estimateEdgeBackground(decoded.data, width, height);
   if (!background) return failed("No stable edge-connected background was detected");
   if (options.allowLocalFallback === false) {
-    return failed(background.kind === "checkerboard"
-      ? "Opaque checkerboard detected; provider segmentation is required"
-      : "Opaque image requires foreground extraction");
+    return failed("Opaque image requires foreground extraction");
   }
   let extraction;
   try {
@@ -107,9 +103,7 @@ export async function processAssetImage(
   const output = extraction.rgba;
   const removedRatio = extraction.removedPixels / (width * height);
   if (removedRatio < 0.01 || removedRatio > 0.97) {
-    return failed(background.kind === "checkerboard"
-      ? "Opaque checkerboard detected, but no reliable foreground could be extracted"
-      : "Foreground separation was not reliable enough to replace the source");
+    return failed("Foreground separation was not reliable enough to replace the source");
   }
 
   try {
@@ -176,57 +170,6 @@ function inspectUsefulAlpha(data: Buffer, width: number, height: number): { usef
   // Reject an alpha channel that exists only as metadata or one anomalous pixel.
   const minimum = Math.max(4, Math.floor(pixels * 0.001));
   return { useful: transparent >= minimum && opaque >= minimum };
-}
-
-function estimateEdgeBackground(data: Buffer, width: number, height: number): BackgroundModel | null {
-  const samples: Rgb[] = [];
-  const bins = new Map<string, { count: number; values: Rgb[] }>();
-  const add = (x: number, y: number) => {
-    const offset = (y * width + x) * 4;
-    const value: Rgb = [data[offset], data[offset + 1], data[offset + 2]];
-    samples.push(value);
-    const key = `${value[0] >> 4}:${value[1] >> 4}:${value[2] >> 4}`;
-    const bin = bins.get(key) ?? { count: 0, values: [] };
-    bin.count += 1;
-    bin.values.push(value);
-    bins.set(key, bin);
-  };
-  for (let x = 0; x < width; x += 1) {
-    add(x, 0);
-    add(x, height - 1);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    add(0, y);
-    add(width - 1, y);
-  }
-
-  const ranked = [...bins.values()].sort((a, b) => b.count - a.count);
-  const dominant = ranked[0];
-  if (!dominant || dominant.count / samples.length < 0.28) return null;
-  const color = medianColor(dominant.values);
-  const second = ranked[1];
-  const binaryEdge = Boolean(
-    second &&
-      (dominant.count + second.count) / samples.length > 0.72 &&
-      colorDistance(color, medianColor(second.values)) > 40 &&
-      countEdgeTransitions(samples) > samples.length * 0.18,
-  );
-  return binaryEdge && second
-    ? { kind: "checkerboard", colors: [color, medianColor(second.values)] }
-    : { kind: "solid", colors: [color] };
-}
-
-function medianColor(values: Rgb[]): Rgb {
-  const channel = (index: number) => values.map((value) => value[index]).sort((a, b) => a - b)[Math.floor(values.length / 2)];
-  return [channel(0), channel(1), channel(2)];
-}
-
-function countEdgeTransitions(samples: Rgb[]): number {
-  let transitions = 0;
-  for (let index = 1; index < samples.length; index += 1) {
-    if (colorDistance(samples[index - 1], samples[index]) > 32) transitions += 1;
-  }
-  return transitions;
 }
 
 function validateProcessedAlpha(data: Buffer, width: number, height: number): { valid: true } | { valid: false; reason: string } {

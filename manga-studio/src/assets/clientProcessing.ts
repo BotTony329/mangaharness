@@ -67,20 +67,3 @@ export async function removeAssetBackground(
     throw error;
   }
 }
-
-export function keepRawAsset(assetId: ID): void {
-  useEditorStore.getState().dispatch({
-    type: "set-asset-processed",
-    assetId,
-    update: {
-      processedImageUrl: undefined,
-      hasAlpha: false,
-      backgroundRemoved: false,
-      processingStatus: "raw",
-      backgroundRemovalStatus: "raw",
-      processingReason: undefined,
-      backgroundRemovalMethod: undefined,
-      backgroundRemovalProvider: undefined,
-    },
-  });
-}

@@ -20,6 +20,8 @@ export interface AssetPromptInput {
   view?: string;
   /** True when a character reference image accompanies the request. */
   hasReference?: boolean;
+  /** Provider can emit a real alpha channel; otherwise we ask for a keyable flat field. */
+  supportsNativeTransparency?: boolean;
   aspect?: "portrait" | "landscape" | "square";
   /** Provider-neutral project art direction. */
   style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
@@ -36,7 +38,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.characterDescription ?? "",
         input.description ?? "",
         "Standing neutral pose, front view, whole body visible head to feet.",
-        characterIsolationInstruction(),
+        characterIsolationInstruction(input.supportsNativeTransparency),
       );
       break;
     case "character-pose":
@@ -57,7 +59,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.outfit ? `Outfit: ${input.outfit}.` : "",
         input.view ? `Camera angle: ${input.view}.` : "",
         input.description ?? "",
-        `Whole body visible head to feet. ${characterIsolationInstruction()}`,
+        `Whole body visible head to feet. ${characterIsolationInstruction(input.supportsNativeTransparency)}`,
       );
       break;
     }
@@ -70,7 +72,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
     case "prop":
       lines.push(
         `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
-        "Single isolated object with a full visible silhouette and clean separation from the background. Prefer real alpha transparency. No scenery, floor texture, frame, text, or fake checkerboard.",
+        isolationInstruction("object", input.supportsNativeTransparency),
       );
       break;
   }
@@ -93,7 +95,7 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
       ? "Preserve identity exactly: same face, facial structure, hairstyle, body proportions, and line-art style. Follow the requested outfit while keeping the character recognizable. Do not redesign the character."
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
-    `Whole body visible head to feet. ${characterIsolationInstruction()}`,
+    `Whole body visible head to feet. ${characterIsolationInstruction(input.supportsNativeTransparency)}`,
     styleInstruction(input.style),
     aspectHint(input.aspect ?? "portrait"),
   ]
@@ -112,8 +114,40 @@ function styleInstruction(style: AssetPromptInput["style"]): string {
   return `Project art style — ${style.name}: ${style.positivePrompt}.${properties ? ` Visual properties: ${properties}.` : ""} Keep this visual language consistent across the project.`;
 }
 
-function characterIsolationInstruction(): string {
-  return "Isolated single character with a full visible silhouette and clean separation from the background. Prefer a real transparent alpha background. No scenery, environmental background, floor texture, frame, text, speech bubbles, or fake checkerboard.";
+/**
+ * The colour the extractor keys out when a provider cannot emit alpha.
+ *
+ * Magenta is chosen because it is maximally distant from ink, paper, and skin
+ * in RGB, so the perimeter flood has a wide safety margin, and because it is
+ * far rarer in manga artwork than a green screen would be.
+ */
+export const CHROMA_KEY_PROMPT_COLOR = "magenta (RGB 255, 0, 255)";
+
+/**
+ * How to ask for an isolated subject.
+ *
+ * Critically, this NEVER asks an opaque-only provider for a "transparent
+ * background", and never uses the word checkerboard. Image models cannot honour
+ * negations reliably, so naming the checkerboard conditions them to draw one;
+ * and a model with no alpha channel can only satisfy "transparent background"
+ * by painting the thing transparency looks like — the grey grid. That pairing
+ * is what produced the baked checkerboards this pipeline then failed to remove.
+ *
+ * Instead we ask for something an opaque model CAN deliver and the extractor
+ * can key deterministically: one flat, unbroken colour field.
+ */
+function isolationInstruction(subject: "character" | "object", supportsNativeTransparency = false): string {
+  const framing =
+    subject === "character"
+      ? "Isolated single character, complete unbroken silhouette, nothing cropped. No scenery, no environment, no floor, no shadow on the ground, no frame, no border, no text, no speech bubbles."
+      : "Single isolated object, complete unbroken silhouette. No scenery, no surface it rests on, no shadow on the ground, no frame, no text.";
+  return supportsNativeTransparency
+    ? `${framing} Output a PNG whose background is genuinely empty using a real alpha channel.`
+    : `${framing} Place the ${subject} on a completely flat, uniform, solid ${CHROMA_KEY_PROMPT_COLOR} background — one single unbroken colour covering every pixel behind the ${subject}, with no gradient, shading, texture, pattern, or objects.`;
+}
+
+function characterIsolationInstruction(supportsNativeTransparency = false): string {
+  return isolationInstruction("character", supportsNativeTransparency);
 }
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {

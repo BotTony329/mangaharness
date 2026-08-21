@@ -24,12 +24,26 @@ export interface CharacterGenerationProgress {
   state: CharacterState;
 }
 
-async function providerSupportsReference(): Promise<boolean> {
+interface ImageProviderCapabilities {
+  referenceImage: boolean;
+  nativeTransparency: boolean;
+}
+
+/**
+ * Capabilities decide how the prompt asks for an isolated subject. Defaulting
+ * `nativeTransparency` to false is the safe direction: it asks for a keyable
+ * flat colour field, which every provider can render, instead of asking an
+ * opaque model for alpha it cannot produce.
+ */
+async function imageProviderCapabilities(): Promise<ImageProviderCapabilities> {
   try {
     const status = await fetch("/api/provider/status").then((response) => response.json());
-    return Boolean(status?.capabilities?.referenceImage);
+    return {
+      referenceImage: Boolean(status?.capabilities?.referenceImage),
+      nativeTransparency: Boolean(status?.capabilities?.supportsTransparentBackground),
+    };
   } catch {
-    return false;
+    return { referenceImage: false, nativeTransparency: false };
   }
 }
 
@@ -51,7 +65,8 @@ export async function generateCharacterAssetForState(input: {
   const canonicalCandidate = canonicalId ? doc.assets[canonicalId] : undefined;
   const canonical = isAssetReadyForComposition(canonicalCandidate) ? canonicalCandidate : undefined;
   const compatible = role === "state" ? findCompatibleCharacterAsset(doc, character, input.state) : undefined;
-  const supportsReference = await providerSupportsReference();
+  const capabilities = await imageProviderCapabilities();
+  const supportsReference = capabilities.referenceImage;
   const useIdentityReference = role === "state" && Boolean(canonical) && supportsReference;
   const referenceAssets = supportsReference
     ? [role === "state" ? canonical : undefined, role === "state" ? compatible : undefined, style.referenceAsset].filter((asset, index, list) =>
@@ -68,6 +83,7 @@ export async function generateCharacterAssetForState(input: {
           characterDescription: characterIdentityDescription(character),
           description: [input.instruction, continuity].filter(Boolean).join(" ") || undefined,
           style: style.profile,
+          supportsNativeTransparency: capabilities.nativeTransparency,
         })
       : buildCharacterStatePrompt({
           characterName: character.name,
@@ -76,6 +92,7 @@ export async function generateCharacterAssetForState(input: {
           description: [continuity, input.instruction].filter(Boolean).join(" ") || undefined,
           hasReference: useIdentityReference,
           style: style.profile,
+          supportsNativeTransparency: capabilities.nativeTransparency,
         });
 
   const result = await callGenerateApi({

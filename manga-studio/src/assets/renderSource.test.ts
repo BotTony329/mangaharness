@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SourceAsset } from "@/domain/types";
-import { assetRenderUrl, isAssetReadyForComposition } from "./renderSource";
+import { assetPreviewUrl, assetRenderUrl, isAssetReadyForComposition } from "./renderSource";
 
 const legacyAsset = {
   id: "asset-1",
@@ -43,8 +43,12 @@ describe("asset render source", () => {
         processingStatus,
         hasAlpha: processingStatus === "failed" ? false : undefined,
       };
-      expect(assetRenderUrl(asset)).toBe(legacyAsset.storageUrl);
+      // No composition URL at all. Returning the raw source here is what
+      // painted the opaque generated background into panels and exports.
+      expect(assetRenderUrl(asset)).toBeUndefined();
       expect(isAssetReadyForComposition(asset)).toBe(false);
+      // Library chrome may still show the raw source next to a Retry control.
+      expect(assetPreviewUrl(asset)).toBe(legacyAsset.storageUrl);
     }
   });
 });

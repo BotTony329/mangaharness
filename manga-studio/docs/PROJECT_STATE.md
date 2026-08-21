@@ -1,6 +1,6 @@
 # Manga Studio — Verified Project State
 
-Last updated: 2026-08-21 (semantic transparency cascade and Background Removal BYOK)
+Last updated: 2026-08-21 (character transparency pipeline repaired — see D30)
 
 ## Current status
 
@@ -62,6 +62,16 @@ That earlier detector-only failure was replaced by the built-in connectivity mat
 
 Latest exact production failure (request `21f2a2ac-f572-4298-8e0f-e15e2910b368`) loaded the current Cute Girl source `source-b6810c8c-b3a6-4ffe-be6f-0968b6cd8cda-…jpg`, 546,997 bytes, 848×1264, SHA-256 `311ad513a4ef2203e7bb583e2028d07b76174b1cc2eb171e3a4ae482a373e34e`, and returned HTTP 422 after about one second in the processor. The JPEG has no alpha. Its light checker cells overlap the subject's white clothing, skin, grayscale shading, and anti-aliased line art, leaving no safe deterministic foreground seed. Local replay of those exact unchanged bytes reproduces the guarded failure. This is algorithmic, not a Sharp/Vercel runtime exception. The new pipeline therefore refuses threshold tuning and attempts semantic provider editing/segmentation before the local fallback.
 
+## Character transparency — resolved 2026-08-21
+
+The reported production symptom (generator preview appears transparent, "Automatic extraction was not reliable; the original was preserved", background still present after placing the asset in a panel) had three compounding causes, all now fixed and covered by regression tests that assert real alpha bytes.
+
+1. **Generation produced the checkerboard.** `promptTemplates.ts` asked for a "real transparent alpha background" and named "fake checkerboard" while the Gemini adapter declares `supportsTransparentBackground: false`. An opaque-only model can only depict transparency by painting the grid, and negations are not reliably honoured. Prompts now request a flat chroma-key field and never name the checkerboard.
+2. **Extraction could not succeed on a light grid.** The checkerboard matte required `luminance > brightestBackground + 28`; with a white tile that is 283 on an 8-bit image, so the foreground seed set was provably empty for achromatic manga art. See D30. Replaced by a single perimeter flood with segment-based seam bridging.
+3. **Failure degraded into shipping the raw image.** `generate.ts` fell back to `sourceUrl`, `storeGeneratedAsset` created the asset and only then threw, and `assetRenderUrl` fell back to `storageUrl` — so the un-keyed bitmap reached the library and the canvas. A character/prop that fails extraction now never becomes an asset, and has no composition URL at all.
+
+Measured after the fix, on a 360×520 figure with white shirt, paper-white face, and enclosed eyes: light checkerboard, chroma-key, and solid-white sources all reach `processingStatus: ready` with alpha min 0 / max 255, 76.0% transparent pixels, and 100% of background pixels preserved when composited over a detailed backdrop.
+
 ## Known limitations
 
 - Project documents are browser-local IndexedDB data; there is no authenticated cross-device project sync in the MVP.
@@ -72,7 +82,7 @@ Latest exact production failure (request `21f2a2ac-f572-4298-8e0f-e15e2910b368`)
 - Starter-pack generation is sequential and cancellation stops remaining work after the currently active provider request finishes; it does not abort a request already in flight.
 - Built-in style cards currently use reusable generated placeholder previews; `previewImage` and custom reference fields allow real preview artwork to be added without changing the style architecture.
 - Style interpretation remains provider-dependent. Semantic style prompts and negative prompts are provider-neutral; adapters may support richer style controls later.
-- The bundled extractor is deterministic rather than semantic ML and remains last-resort only. The latest exact Cute Girl proves that low-contrast light checkerboards overlapping pale manga artwork require a capable image-edit or segmentation provider. Every uncertain result fails safely and preserves the source.
+- The bundled extractor is deterministic rather than semantic ML and still runs after the provider cascade. It now handles solid, two-tone/checkerboard, and chroma-key backgrounds; enclosed foreground whites survive by connectivity rather than by threshold tuning. Genuinely ambiguous sources — a subject touching the border in a background-coloured region, or a full-bleed scene with no stable border — still fail safely, and a failed character never enters the library.
 - Whole Project scope is represented and enforced, but current agent tools still address panels on the active page; cross-page tool addressing remains future work.
 - Archived sources remain visible in panels that already use them, by design, but are excluded from new library/Agent/Character-state resolution until restored.
 - A real production Manga Agent run with the user's BYOK session is still required to record provider-side planning and generation evidence for the exact Yuri/Panel 1 prompt.

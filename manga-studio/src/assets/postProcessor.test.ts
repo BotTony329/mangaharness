@@ -55,13 +55,24 @@ describe("asset post processor", () => {
         if ((x / 4 + y / 4) % 2 === 0) paintRect(pixels, 40, x, y, 4, 4, [190, 190, 190, 255]);
       }
     }
+    // A subject the grid can actually be separated from.
+    paintRect(pixels, 40, 12, 10, 16, 20, [20, 20, 25, 255]);
     const source = await sharp(pixels, { raw: { width: 40, height: 40, channels: 4 } }).png().toBuffer();
 
     const result = await processAssetImage(source, "character");
 
-    expect(result.processingStatus).toBe("failed");
-    expect(result.hasAlpha).toBe(false);
-    expect(result.reason).toContain("checkerboard");
+    // The painted grid is never mistaken for an alpha channel …
+    expect(result.sourceHasAlpha).toBe(false);
+    // … and a LIGHT grid must still be extractable. Asserting failure here is
+    // what let the shipped regression through: the seeding rule required a
+    // luminance above 283 on an 8-bit image, so a white-tiled grid could never
+    // produce a foreground seed.
+    expect(result.processingStatus).toBe("ready");
+    expect(result.hasAlpha).toBe(true);
+    expect(result.backgroundRemoved).toBe(true);
+    const decoded = await sharp(result.processedData!).ensureAlpha().raw().toBuffer();
+    expect(alphaAt(decoded, 40, 0, 0)).toBe(0);
+    expect(alphaAt(decoded, 40, 20, 20)).toBe(255);
   });
 
   it("extracts a connected subject from a baked checkerboard and preserves internal black and white art", async () => {

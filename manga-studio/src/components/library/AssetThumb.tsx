@@ -7,9 +7,9 @@
 
 import { useState } from "react";
 import type { SourceAsset } from "@/domain/types";
-import { assetRenderUrl } from "@/assets/renderSource";
-import { keepRawAsset, removeAssetBackground } from "@/assets/clientProcessing";
-import { useUiStore } from "@/editor/uiStore";
+import { assetPreviewUrl } from "@/assets/renderSource";
+import { removeAssetBackground } from "@/assets/clientProcessing";
+import { BACKGROUND_REMOVAL_FAILED_MESSAGE, assetSatisfiesTransparencyContract, requiresTransparency } from "@/assets/characterAssetContract";
 
 interface AssetThumbProps {
   asset: SourceAsset;
@@ -26,8 +26,8 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [menuOpen, setMenuOpen] = useState(false);
-  const openSettings = useUiStore((state) => state.openSettings);
-  const canRemoveBackground = asset.category === "character" || asset.category === "prop";
+  const canRemoveBackground = requiresTransparency(asset.category);
+  const needsRetry = canRemoveBackground && !assetSatisfiesTransparencyContract(asset);
   const runRemoval = (strategy: "auto" | "image-edit" | "provider" | "local" = "auto") => {
     setBusy(true);
     setError(undefined);
@@ -53,7 +53,7 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       <div className="h-[104px] w-[104px] overflow-hidden rounded-md border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={asset.thumbnailUrl ?? assetRenderUrl(asset)}
+          src={asset.thumbnailUrl ?? assetPreviewUrl(asset)}
           alt={asset.name}
           className="h-full w-full object-contain pointer-events-none"
           draggable={false}
@@ -61,38 +61,25 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       </div>
       <p className="mt-1 truncate text-[11px] text-zinc-400">{asset.name}</p>
       {subtitle && <p className="truncate text-[10px] text-zinc-500">{subtitle}</p>}
-      {canRemoveBackground && asset.processingStatus !== "failed" && (
-        <button
-          type="button"
-          disabled={busy}
-          className="mt-1 w-full rounded border border-zinc-700 px-1 py-0.5 text-[9px] text-zinc-400 hover:border-violet-600 hover:text-violet-300 disabled:opacity-50"
-          title="Create a transparent derivative while preserving the original"
-          onClick={(event) => {
-            event.stopPropagation();
-            runRemoval();
-          }}
-        >
-          {busy ? "Removing…" : asset.hasAlpha ? "Reprocess Background" : "Remove Background"}
-        </button>
-      )}
-      {asset.processingStatus === "failed" && (
-        <div className="mt-1 space-y-1 text-[9px]">
-          <p className="font-medium text-amber-400">Needs background cleanup</p>
-          <div className="flex flex-wrap gap-1">
-            <SmallAction label={busy ? "Working…" : "Retry"} disabled={busy} onClick={() => runRemoval("auto")} />
-            <SmallAction label="Use Image AI" title="Use Image AI to Remove Background" disabled={busy} onClick={() => runRemoval("image-edit")} />
-            <SmallAction label="Choose Provider" title="Choose Background Removal Provider" disabled={busy} onClick={openSettings} />
-            {asset.backgroundRemovalProvider && (
-              <SmallAction label="Remove Again" title="Remove Background Again" disabled={busy} onClick={() => runRemoval("provider")} />
-            )}
-            <SmallAction label="Keep Raw" disabled={busy} onClick={() => keepRawAsset(asset.id)} />
-          </div>
-          {asset.processingReason && (
-            <details className="text-zinc-500">
-              <summary className="cursor-pointer">Details</summary>
-              <p className="mt-0.5 leading-3">{asset.processingReason}</p>
-            </details>
-          )}
+      {/* Extraction strategy, provider choice, and raw-vs-processed are
+          pipeline internals. The only thing a creator can usefully decide here
+          is whether to try again. */}
+      {needsRetry && (
+        <div className="mt-1 flex items-center gap-1 text-[9px]">
+          <span className="truncate text-amber-400" title={asset.processingReason}>
+            {BACKGROUND_REMOVAL_FAILED_MESSAGE}
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            className="ml-auto shrink-0 rounded border border-zinc-700 px-1 py-0.5 text-zinc-300 hover:border-violet-600 hover:text-violet-300 disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              runRemoval();
+            }}
+          >
+            {busy ? "Retrying…" : "Retry"}
+          </button>
         </div>
       )}
       {error && <p className="mt-0.5 line-clamp-2 text-[9px] text-red-400" title={error}>{error}</p>}
@@ -117,20 +104,6 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
         </div>
       )}
     </div>
-  );
-}
-
-function SmallAction({ label, title, disabled, onClick }: { label: string; title?: string; disabled: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      title={title}
-      className="rounded border border-zinc-700 px-1 py-0.5 text-zinc-400 hover:border-violet-600 hover:text-violet-300 disabled:opacity-50"
-      onClick={(event) => { event.stopPropagation(); onClick(); }}
-    >
-      {label}
-    </button>
   );
 }
 

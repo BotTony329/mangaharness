@@ -1,18 +1,41 @@
 import type { SourceAsset } from "@/domain/types";
+import { assetSatisfiesTransparencyContract, requiresTransparency } from "./characterAssetContract";
 
-/** The single URL-selection rule used by thumbnails, references, canvas, and export. */
+/**
+ * The single URL-selection rule used by thumbnails, references, canvas, and export.
+ *
+ * A character or prop that has not satisfied the transparency contract has NO
+ * renderable URL. Falling back to `storageUrl` here is what painted the opaque
+ * generated background — checkerboard included — into panels and exports:
+ * preview, library, canvas, and PNG must all resolve to the same validated
+ * derivative or to nothing at all.
+ */
 export function assetRenderUrl(asset: SourceAsset | undefined): string | undefined {
-  return asset?.processedImageUrl && asset.processingStatus === "ready" && asset.hasAlpha
+  if (!asset) return undefined;
+  if (requiresTransparency(asset.category)) {
+    if (!assetSatisfiesTransparencyContract(asset)) return undefined;
+    return asset.processedImageUrl ?? asset.storageUrl;
+  }
+  return asset.processedImageUrl && asset.processingStatus === "ready" && asset.hasAlpha
     ? asset.processedImageUrl
-    : asset?.storageUrl;
+    : asset.storageUrl;
+}
+
+/**
+ * Display-only URL for library chrome — never for compositing.
+ *
+ * A failed cutout still has a raw source worth showing beside its Retry
+ * control so the creator can see what was generated. Keeping that fallback out
+ * of `assetRenderUrl` is the whole point: the canvas and the exporter must not
+ * be able to reach it.
+ */
+export function assetPreviewUrl(asset: SourceAsset | undefined): string | undefined {
+  return assetRenderUrl(asset) ?? asset?.storageUrl;
 }
 
 /** Failed/pending cutouts remain retryable in the library but are not Agent-ready layers. */
 export function isAssetReadyForComposition(asset: SourceAsset | undefined): boolean {
   if (!asset || asset.status === "archived") return false;
-  if (asset.category !== "character" && asset.category !== "prop") return asset.status === "ready";
-  // Pre-pipeline documents did not have processing state. New and migrated
-  // assets take the strict ready + real-alpha + derivative branch.
-  if (asset.processingStatus === undefined) return asset.status === "ready";
-  return asset.processingStatus === "ready" && asset.hasAlpha === true && Boolean(asset.processedImageUrl);
+  if (!requiresTransparency(asset.category)) return asset.status === "ready";
+  return assetSatisfiesTransparencyContract(asset) && Boolean(assetRenderUrl(asset));
 }

@@ -333,7 +333,7 @@ async function doPlaceCharacter(args: {
   if (!asset) {
     const blocked = findUnreadyCharacterAsset(doc, character, resolution.desired);
     if (blocked) {
-      throw new Error(`Character asset exists, but background removal is not ready. Reprocess "${blocked.name}" before composition.`);
+      throw new Error(`Background removal failed for "${blocked.name}" — retry it in the library before composing.`);
     }
     if (args.generateIfMissing === false) {
       throw new Error(`No cached state matches ${character.name}; generation was disabled`);
@@ -384,7 +384,7 @@ async function doComposeCharacter(args: {
   if (!asset) {
     const blocked = findUnreadyCharacterAsset(doc, resolution.character, resolution.desired);
     if (blocked) {
-      throw new Error(`Character asset exists, but background removal is not ready. Reprocess "${blocked.name}" before composition.`);
+      throw new Error(`Background removal failed for "${blocked.name}" — retry it in the library before composing.`);
     }
     if (args.generateIfMissing === false) throw new Error(`No cached state matches ${resolution.character.name}; generation was disabled`);
     const assetId = await generateCharacterAssetForState({

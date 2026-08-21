@@ -18,13 +18,17 @@ import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
 import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
 import type { AssetCategory } from "@/domain/types";
+import {
+  BACKGROUND_REMOVAL_FAILED_MESSAGE,
+  validateCharacterTransparency,
+} from "@/assets/characterAssetContract";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
 import { assetRenderUrl } from "@/assets/renderSource";
 
 interface ProviderInfo {
   configured: boolean;
-  capabilities?: { referenceImage?: boolean };
+  capabilities?: { referenceImage?: boolean; supportsTransparentBackground?: boolean };
   storage?: { configured?: boolean; backend?: string };
 }
 
@@ -79,9 +83,28 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         expression: expression || undefined,
         hasReference: canUseReference,
         style: style?.profile,
+        supportsNativeTransparency: Boolean(provider?.capabilities?.supportsTransparentBackground),
       }),
-    [request.assetType, description, character, pose, expression, canUseReference, style?.profile],
+    [
+      request.assetType,
+      description,
+      character,
+      pose,
+      expression,
+      canUseReference,
+      style?.profile,
+      provider?.capabilities?.supportsTransparentBackground,
+    ],
   );
+
+  // Whether this result may become a library asset at all. Backgrounds always
+  // pass; characters and props must carry a validated transparent derivative.
+  const contract = validateCharacterTransparency({
+    category: isCharacterType ? "character" : (request.assetType as AssetCategory),
+    processingStatus: result?.processingStatus,
+    hasAlpha: result?.hasAlpha,
+    processedImageUrl: result?.processedImageUrl,
+  });
 
   const generate = async () => {
     setPhase("generating");
@@ -267,46 +290,75 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
 
         {phase === "done" && result && (
           <div>
-            <p className="mb-2 text-xs text-zinc-400">Generated result</p>
-            <div className="mb-3 grid place-items-center rounded border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px] p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={result.url} alt="Generated asset" className="max-h-[360px] rounded" />
-            </div>
-            {isCharacterType || request.assetType === "prop" ? (
-              <p className={`mb-2 text-[11px] ${result.hasAlpha ? "text-emerald-400" : "text-amber-400"}`}>
-                {result.backgroundRemoved
-                  ? "Transparent derivative ready — the checkerboard is UI-only."
-                  : result.hasAlpha
-                    ? "Provider returned useful alpha transparency."
-                    : "Automatic extraction was not reliable; the original was preserved and can be retried from the library."}
-              </p>
-            ) : null}
-            {result.referenceUsed && (
-              <p className="mb-2 text-[11px] text-zinc-500">Generated with the character reference image.</p>
+            {contract.valid ? (
+              <>
+                <p className="mb-2 text-xs text-zinc-400">Generated result</p>
+                {/* The checkerboard is a CSS backdrop BEHIND a transparent PNG.
+                    It is never part of the bitmap. `result.url` is the stored
+                    derivative, so this preview is byte-identical to what the
+                    library keeps and the canvas composites. */}
+                <div className="mb-3 grid place-items-center rounded border border-zinc-700 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:16px_16px] p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={result.url} alt="Generated asset" className="max-h-[360px] rounded" />
+                </div>
+                {result.referenceUsed && (
+                  <p className="mb-2 text-[11px] text-zinc-500">Generated with the character reference image.</p>
+                )}
+                <div className="flex justify-end gap-2 text-xs">
+                  <button
+                    className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200"
+                    onClick={() => {
+                      setResult(null);
+                      setPhase("idle");
+                    }}
+                  >
+                    Discard
+                  </button>
+                  <button
+                    className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 hover:bg-zinc-700"
+                    onClick={() => {
+                      setResult(null);
+                      generate();
+                    }}
+                  >
+                    Regenerate
+                  </button>
+                  <button className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500" onClick={addToLibrary}>
+                    Add to Library
+                  </button>
+                </div>
+              </>
+            ) : (
+              // One concise recoverable state. No raw preview: showing the
+              // un-keyed image on a checkerboard backdrop is what made a failed
+              // extraction look like a transparent asset.
+              <div className="rounded border border-amber-800/60 bg-amber-950/30 p-3">
+                <p className="mb-1 text-xs font-medium text-amber-300">{BACKGROUND_REMOVAL_FAILED_MESSAGE}</p>
+                <p className="mb-3 text-[11px] leading-4 text-zinc-400">
+                  This image could not be turned into a transparent layer, so it was not added to your library.
+                </p>
+                <div className="flex justify-end gap-2 text-xs">
+                  <button
+                    className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200"
+                    onClick={() => {
+                      setResult(null);
+                      setPhase("idle");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+                    onClick={() => {
+                      setResult(null);
+                      generate();
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
             )}
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                className="rounded px-3 py-1.5 text-zinc-400 hover:text-zinc-200"
-                onClick={() => {
-                  setResult(null);
-                  setPhase("idle");
-                }}
-              >
-                Discard
-              </button>
-              <button
-                className="rounded border border-zinc-600 bg-zinc-800 px-3 py-1.5 hover:bg-zinc-700"
-                onClick={() => {
-                  setResult(null);
-                  generate();
-                }}
-              >
-                Regenerate
-              </button>
-              <button className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500" onClick={addToLibrary}>
-                Add to Library
-              </button>
-            </div>
           </div>
         )}
       </div>

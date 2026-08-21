@@ -2,18 +2,24 @@
  * Background-removal capability boundary. Generation providers create pixels;
  * background-removal providers turn opaque character/prop sources into layers.
  *
- * The built-in provider intentionally uses bounded, deterministic pixel work
- * that runs with sharp in the Vercel Node runtime. Solid backgrounds use a
- * perimeter flood. Baked checkerboards need a different matte: their two
- * colours can also occur in black-and-white manga art, so we preserve the
- * non-background foreground seeds, close narrow line-art gaps, and retain the
- * largest isolated subject instead of deleting either colour globally.
+ * The built-in provider is a single deterministic algorithm: a perimeter flood
+ * that keys out every pixel reachable from the image border whose colour
+ * matches the estimated background model. Everything the flood cannot reach
+ * stays opaque, which is what preserves enclosed foreground whites — eyes,
+ * white clothing, paper-white skin, and the interiors of closed line art. It
+ * is deliberately NOT a global colour replacement: "make near-white
+ * transparent" would destroy exactly those regions.
+ *
+ * One flood handles every background model. A solid field, a baked
+ * transparency checkerboard, and a chroma-key screen differ only in how many
+ * colours count as background and how much tolerance is safe; the traversal is
+ * identical, so there is no second code path to drift.
  */
 
 export type Rgb = [number, number, number];
 
 export interface BackgroundModel {
-  kind: "solid" | "checkerboard";
+  kind: "solid" | "checkerboard" | "chroma-key";
   colors: Rgb[];
 }
 
@@ -24,9 +30,11 @@ export interface BackgroundRemovalInput {
   background: BackgroundModel;
 }
 
+export type BackgroundRemovalMethod = "edge-flood" | "checkerboard-matte" | "chroma-key";
+
 export interface BackgroundRemovalOutput {
   rgba: Buffer;
-  method: "edge-flood" | "checkerboard-matte";
+  method: BackgroundRemovalMethod;
   removedPixels: number;
 }
 
@@ -35,198 +43,135 @@ export interface BackgroundRemovalProvider {
   removeBackground(input: BackgroundRemovalInput): Promise<BackgroundRemovalOutput>;
 }
 
-const STRONG_BACKGROUND_DISTANCE = 32;
-const MAX_BACKGROUND_DISTANCE = 88;
+/**
+ * Tolerances per background model.
+ *
+ * `strong` — at or below this distance a pixel is unambiguously background
+ * (alpha 0). `max` — beyond this a pixel is foreground and the flood stops,
+ * so it also bounds how far the background can bleed into artwork. Between
+ * them alpha ramps, which is what keeps anti-aliased line art from acquiring a
+ * hard jagged edge.
+ */
+interface Tolerance {
+  strong: number;
+  max: number;
+}
+
+function toleranceFor(background: BackgroundModel): Tolerance {
+  // A saturated key sits far from ink, paper, and skin, so a wide band is safe
+  // and absorbs JPEG ringing around the silhouette.
+  if (background.kind === "chroma-key") return { strong: 62, max: 118 };
+  return { strong: 32, max: 88 };
+}
+
+/**
+ * Distance from a colour to the background model.
+ *
+ * Measured to the SEGMENT between background colours, not merely to each
+ * colour. Anti-aliased and JPEG-blurred pixels along a checkerboard tile seam
+ * are blends of the two tile colours, so they lie on that segment and stay
+ * within tolerance; without this the seams form walls the flood cannot cross
+ * and the background survives as a grid of unreachable squares. Widening the
+ * radius instead would bridge the seams but also swallow artwork — a mid-tone
+ * skin fill sits closer to a light tile than the tiles sit to each other.
+ */
+function distanceToModel(color: Rgb, colors: Rgb[]): number {
+  let nearest = Infinity;
+  for (const candidate of colors) nearest = Math.min(nearest, colorDistance(color, candidate));
+  for (let a = 0; a < colors.length; a += 1) {
+    for (let b = a + 1; b < colors.length; b += 1) {
+      nearest = Math.min(nearest, distanceToSegment(color, colors[a], colors[b]));
+    }
+  }
+  return nearest;
+}
+
+function distanceToSegment(point: Rgb, start: Rgb, end: Rgb): number {
+  const axis: Rgb = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
+  const lengthSquared = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+  if (lengthSquared === 0) return colorDistance(point, start);
+  const offset: Rgb = [point[0] - start[0], point[1] - start[1], point[2] - start[2]];
+  const raw = (offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2]) / lengthSquared;
+  const t = Math.max(0, Math.min(1, raw));
+  return colorDistance(point, [start[0] + axis[0] * t, start[1] + axis[1] * t, start[2] + axis[2] * t]);
+}
 
 export const builtInBackgroundRemovalProvider: BackgroundRemovalProvider = {
   id: "built-in-connectivity",
   async removeBackground(input) {
-    return input.background.kind === "checkerboard"
-      ? removeCheckerboard(input)
-      : removeSolid(input);
+    return floodKeyBackground(input);
   },
 };
 
-function removeSolid(input: BackgroundRemovalInput): BackgroundRemovalOutput {
+function methodFor(kind: BackgroundModel["kind"]): BackgroundRemovalMethod {
+  if (kind === "checkerboard") return "checkerboard-matte";
+  if (kind === "chroma-key") return "chroma-key";
+  return "edge-flood";
+}
+
+/**
+ * Flood the background inward from the image border.
+ *
+ * Only perimeter-connected pixels are considered, so a white shirt enclosed by
+ * ink keeps its alpha even though its colour matches a white background
+ * exactly. Distance is measured to the NEAREST background colour, which is why
+ * a two-tone checkerboard needs no special casing.
+ */
+function floodKeyBackground(input: BackgroundRemovalInput): BackgroundRemovalOutput {
+  const { width, height, background } = input;
   const rgba = Buffer.from(input.rgba);
-  const background = input.background.colors[0];
-  const pixelCount = input.width * input.height;
+  const { strong, max } = toleranceFor(background);
+  const pixelCount = width * height;
   const visited = new Uint8Array(pixelCount);
   const queue = new Int32Array(pixelCount);
   let head = 0;
   let tail = 0;
+
+  const distanceToBackground = (pixel: number): number => {
+    const offset = pixel * 4;
+    return distanceToModel([rgba[offset], rgba[offset + 1], rgba[offset + 2]], background.colors);
+  };
+
   const enqueue = (pixel: number) => {
     if (visited[pixel]) return;
-    const offset = pixel * 4;
-    const distance = colorDistance([rgba[offset], rgba[offset + 1], rgba[offset + 2]], background);
-    if (distance > MAX_BACKGROUND_DISTANCE) return;
+    const distance = distanceToBackground(pixel);
+    if (distance > max) return;
     visited[pixel] = 1;
     queue[tail++] = pixel;
-    const feather = Math.max(0, Math.min(1, (distance - STRONG_BACKGROUND_DISTANCE) /
-      (MAX_BACKGROUND_DISTANCE - STRONG_BACKGROUND_DISTANCE)));
-    rgba[offset + 3] = Math.round(255 * feather);
+    const ramp = Math.max(0, Math.min(1, (distance - strong) / (max - strong)));
+    rgba[pixel * 4 + 3] = Math.round(255 * ramp);
   };
-  enqueuePerimeter(input.width, input.height, enqueue);
-  while (head < tail) enqueueNeighbours(queue[head++], input.width, input.height, enqueue);
-  return { rgba, method: "edge-flood", removedPixels: tail };
-}
 
-function removeCheckerboard(input: BackgroundRemovalInput): BackgroundRemovalOutput {
-  const { width, height } = input;
-  const pixelCount = width * height;
-  const seed = new Uint8Array(pixelCount);
-  // JPEG compression perturbs tile colours; this remains well below the
-  // separation between the real production checker colours and white art.
-  const seedDistance = 54;
-  const brightestBackground = Math.max(...input.background.colors.map(luminance));
-  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    const offset = pixel * 4;
-    const color: Rgb = [input.rgba[offset], input.rgba[offset + 1], input.rgba[offset + 2]];
-    const chroma = Math.max(...color) - Math.min(...color);
-    const distant = Math.min(...input.background.colors.map((candidate) => colorDistance(color, candidate))) > seedDistance;
-    // Checker generators often add grid seams, watermarks, and compression
-    // noise in neutral midtones. Those must not become foreground seeds.
-    // Bright paper/skin or genuinely chromatic art provides safer evidence;
-    // dark linework is recovered from its spatial relationship to that seed.
-    if (distant && (luminance(color) > brightestBackground + 28 || chroma > 28)) {
-      seed[pixel] = 1;
-    }
-  }
+  enqueuePerimeter(width, height, enqueue);
+  while (head < tail) enqueueNeighbours(queue[head++], width, height, enqueue);
 
-  // Grid seams, frames, or JPEG ringing that reach the image boundary are
-  // background evidence, not part of the isolated subject.
-  clearEdgeConnected(seed, width, height);
-  const radius = Math.max(2, Math.min(8, Math.round(Math.min(width, height) * 0.006)));
-  const closed = erode(dilate(seed, width, height, radius), width, height, radius);
-  const subject = largestInteriorComponent(closed, width, height);
-  const filledSubject = fillInteriorHoles(subject, width, height);
-  // Recover dark outer ink that is indistinguishable from a dark checker tile
-  // but lies immediately beside the confidently segmented subject.
-  const matte = dilate(filledSubject, width, height, Math.max(1, Math.round(radius / 3)));
-  clearPerimeter(matte, width, height);
+  if (background.kind === "chroma-key") suppressKeySpill(rgba, pixelCount, background.colors[0]);
 
-  const rgba = Buffer.from(input.rgba);
   let removedPixels = 0;
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    const alphaOffset = pixel * 4 + 3;
-    if (matte[pixel]) rgba[alphaOffset] = 255;
-    else {
-      rgba[alphaOffset] = 0;
-      removedPixels += 1;
-    }
+    if (rgba[pixel * 4 + 3] < 128) removedPixels += 1;
   }
-  return { rgba, method: "checkerboard-matte", removedPixels };
+  return { rgba, method: methodFor(background.kind), removedPixels };
 }
 
-function clearEdgeConnected(mask: Uint8Array, width: number, height: number): void {
-  const queue = new Int32Array(width * height);
-  let head = 0;
-  let tail = 0;
-  const enqueue = (pixel: number) => {
-    if (!mask[pixel]) return;
-    mask[pixel] = 0;
-    queue[tail++] = pixel;
-  };
-  enqueuePerimeter(width, height, enqueue);
-  while (head < tail) enqueueNeighbours(queue[head++], width, height, enqueue, true);
-}
-
-function largestInteriorComponent(mask: Uint8Array, width: number, height: number): Uint8Array {
-  const seen = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let best: number[] = [];
-  for (let start = 0; start < mask.length; start += 1) {
-    if (!mask[start] || seen[start]) continue;
-    let head = 0;
-    let tail = 0;
-    let touchesEdge = false;
-    const pixels: number[] = [];
-    seen[start] = 1;
-    queue[tail++] = start;
-    while (head < tail) {
-      const pixel = queue[head++];
-      pixels.push(pixel);
-      const x = pixel % width;
-      const y = Math.floor(pixel / width);
-      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) touchesEdge = true;
-      enqueueNeighbours(pixel, width, height, (next) => {
-        if (mask[next] && !seen[next]) {
-          seen[next] = 1;
-          queue[tail++] = next;
-        }
-      }, true);
-    }
-    if (!touchesEdge && pixels.length > best.length) best = pixels;
-  }
-  const result = new Uint8Array(mask.length);
-  for (const pixel of best) result[pixel] = 1;
-  return result;
-}
-
-function fillInteriorHoles(mask: Uint8Array, width: number, height: number): Uint8Array {
-  const exterior = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let head = 0;
-  let tail = 0;
-  const enqueue = (pixel: number) => {
-    if (mask[pixel] || exterior[pixel]) return;
-    exterior[pixel] = 1;
-    queue[tail++] = pixel;
-  };
-  enqueuePerimeter(width, height, enqueue);
-  while (head < tail) enqueueNeighbours(queue[head++], width, height, enqueue, true);
-  const result = new Uint8Array(mask.length);
-  for (let pixel = 0; pixel < mask.length; pixel += 1) result[pixel] = mask[pixel] || !exterior[pixel] ? 1 : 0;
-  return result;
-}
-
-function dilate(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
-  return neighbourhood(mask, width, height, radius, true);
-}
-
-function erode(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
-  return neighbourhood(mask, width, height, radius, false);
-}
-
-/** Separable max/min filter keeps work bounded at O(width × height × radius). */
-function neighbourhood(mask: Uint8Array, width: number, height: number, radius: number, maximum: boolean): Uint8Array {
-  const horizontal = new Uint8Array(mask.length);
-  const output = new Uint8Array(mask.length);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      let value = maximum ? 0 : 1;
-      for (let dx = -radius; dx <= radius; dx += 1) {
-        const sample = x + dx;
-        const current = sample >= 0 && sample < width ? mask[y * width + sample] : 0;
-        value = maximum ? Math.max(value, current) : Math.min(value, current);
-        if (value === Number(maximum)) break;
-      }
-      horizontal[y * width + x] = value;
-    }
-  }
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      let value = maximum ? 0 : 1;
-      for (let dy = -radius; dy <= radius; dy += 1) {
-        const sample = y + dy;
-        const current = sample >= 0 && sample < height ? horizontal[sample * width + x] : 0;
-        value = maximum ? Math.max(value, current) : Math.min(value, current);
-        if (value === Number(maximum)) break;
-      }
-      output[y * width + x] = value;
-    }
-  }
-  return output;
-}
-
-function clearPerimeter(mask: Uint8Array, width: number, height: number): void {
-  for (let x = 0; x < width; x += 1) {
-    mask[x] = 0;
-    mask[(height - 1) * width + x] = 0;
-  }
-  for (let y = 0; y < height; y += 1) {
-    mask[y * width] = 0;
-    mask[y * width + width - 1] = 0;
+/**
+ * Chroma-key screens reflect onto the subject's edge, leaving a coloured
+ * fringe. Only partially transparent pixels can carry that fringe, so pulling
+ * their colour toward neutral there fixes the halo without touching artwork
+ * that is legitimately the key colour.
+ */
+function suppressKeySpill(rgba: Buffer, pixelCount: number, key: Rgb): void {
+  const keyLuminance = luminance(key);
+  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+    const offset = pixel * 4;
+    const alpha = rgba[offset + 3];
+    if (alpha === 0 || alpha === 255) continue;
+    const color: Rgb = [rgba[offset], rgba[offset + 1], rgba[offset + 2]];
+    if (colorDistance(color, key) > 150) continue;
+    const neutral = Math.round((luminance(color) + keyLuminance) / 2);
+    rgba[offset] = neutral;
+    rgba[offset + 1] = neutral;
+    rgba[offset + 2] = neutral;
   }
 }
 
@@ -246,7 +191,6 @@ function enqueueNeighbours(
   width: number,
   height: number,
   enqueue: (pixel: number) => void,
-  diagonals = false,
 ): void {
   const x = pixel % width;
   const y = Math.floor(pixel / width);
@@ -254,11 +198,6 @@ function enqueueNeighbours(
   if (x + 1 < width) enqueue(pixel + 1);
   if (y > 0) enqueue(pixel - width);
   if (y + 1 < height) enqueue(pixel + width);
-  if (!diagonals) return;
-  if (x > 0 && y > 0) enqueue(pixel - width - 1);
-  if (x + 1 < width && y > 0) enqueue(pixel - width + 1);
-  if (x > 0 && y + 1 < height) enqueue(pixel + width - 1);
-  if (x + 1 < width && y + 1 < height) enqueue(pixel + width + 1);
 }
 
 export function colorDistance(a: Rgb, b: Rgb): number {
@@ -268,6 +207,77 @@ export function colorDistance(a: Rgb, b: Rgb): number {
   return Math.sqrt(red * red + green * green + blue * blue);
 }
 
-function luminance(color: Rgb): number {
+export function luminance(color: Rgb): number {
   return color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
 }
+
+export function chroma(color: Rgb): number {
+  return Math.max(...color) - Math.min(...color);
+}
+
+/**
+ * Estimate what the background is by sampling the image border.
+ *
+ * The perimeter is walked as a real ring (top → right → bottom → left) rather
+ * than as interleaved opposite edges, because the checkerboard test counts
+ * colour transitions between ADJACENT samples. Sampling top(x) then bottom(x)
+ * alternately compares pixels on opposite sides of the image, which measures
+ * nothing about tiling.
+ */
+export function estimateEdgeBackground(data: Buffer, width: number, height: number): BackgroundModel | null {
+  const ring: Rgb[] = [];
+  const bins = new Map<string, { count: number; values: Rgb[] }>();
+  const add = (x: number, y: number) => {
+    const offset = (y * width + x) * 4;
+    const value: Rgb = [data[offset], data[offset + 1], data[offset + 2]];
+    ring.push(value);
+    const key = `${value[0] >> 4}:${value[1] >> 4}:${value[2] >> 4}`;
+    const bin = bins.get(key) ?? { count: 0, values: [] };
+    bin.count += 1;
+    bin.values.push(value);
+    bins.set(key, bin);
+  };
+  for (let x = 0; x < width; x += 1) add(x, 0);
+  for (let y = 1; y < height; y += 1) add(width - 1, y);
+  for (let x = width - 2; x >= 0; x -= 1) add(x, height - 1);
+  for (let y = height - 2; y >= 1; y -= 1) add(0, y);
+
+  const ranked = [...bins.values()].sort((a, b) => b.count - a.count);
+  const dominant = ranked[0];
+  if (!dominant) return null;
+  const primary = medianColor(dominant.values);
+  const dominantShare = dominant.count / ring.length;
+
+  // A deliberate chroma-key screen is one saturated colour over most of the
+  // border. Detected first: it is the only model whose colour cannot be
+  // confused with ink or paper, so it earns the widest tolerance.
+  if (dominantShare > 0.55 && chroma(primary) > 60) {
+    return { kind: "chroma-key", colors: [primary] };
+  }
+
+  // A two-tone border — a transparency checkerboard, but equally a tiled or
+  // split backdrop. Detection is by colour SHARE, not by spatial alternation:
+  // a 16px checker on a 400px edge produces only ~6% adjacent-sample
+  // transitions, so a tiling test rejects the very case it exists to catch,
+  // and the second tile colour then blocks the flood as an unreachable grid.
+  // Both tones being background is all the flood needs to know.
+  const second = ranked[1];
+  if (second) {
+    const secondary = medianColor(second.values);
+    const combinedShare = (dominant.count + second.count) / ring.length;
+    const secondShare = second.count / ring.length;
+    if (combinedShare > 0.7 && secondShare > 0.15 && colorDistance(primary, secondary) > 40) {
+      return { kind: "checkerboard", colors: [primary, secondary] };
+    }
+  }
+
+  if (dominantShare < 0.28) return null;
+  return { kind: "solid", colors: [primary] };
+}
+
+function medianColor(values: Rgb[]): Rgb {
+  const channel = (index: number) =>
+    values.map((value) => value[index]).sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  return [channel(0), channel(1), channel(2)];
+}
+
