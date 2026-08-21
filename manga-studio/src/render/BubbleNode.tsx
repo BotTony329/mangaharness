@@ -11,7 +11,10 @@ import { useImageElement } from "./useImageElement";
 interface BubbleNodeProps {
   item: SpeechBubbleItem;
   interactive: boolean;
+  onDragMove?: (cx: number, cy: number) => void;
   onDragEnd?: (cx: number, cy: number) => void;
+  /** True while the creator is typing in this bubble; dragging is suspended. */
+  editing?: boolean;
   onDoubleClick?: () => void;
   onTailDragEnd?: (x: number, y: number) => void;
   selected?: boolean;
@@ -26,11 +29,16 @@ interface BubbleNodeProps {
  * text layer on top, which is why an uploaded bubble shape stays editable
  * instead of baking words into an image (§8).
  */
-export function BubbleNode({ item, interactive, onDragEnd, onDoubleClick, onTailDragEnd, selected }: BubbleNodeProps) {
+export function BubbleNode({ item, interactive, onDragMove, onDragEnd, onDoubleClick, onTailDragEnd, selected, editing }: BubbleNodeProps) {
   const halfW = item.width / 2;
   const halfH = item.height / 2;
   const style = resolvedBubbleStyle(item);
   const hasTail = Boolean(item.tail) && bubbleHasTail(item.bubbleType, style);
+  /**
+   * Locked layers do not move, and text editing owns the pointer while it is
+   * open — otherwise selecting a word would drag the balloon out from under it.
+   */
+  const draggable = Boolean(interactive && !item.locked && selected && !editing);
 
   return (
     <>
@@ -46,12 +54,46 @@ export function BubbleNode({ item, interactive, onDragEnd, onDoubleClick, onTail
         rotation={item.rotation}
         opacity={item.opacity}
         visible={item.visible !== false}
-        draggable={interactive && !item.locked && Boolean(selected)}
+        draggable={draggable}
         listening={interactive && !item.locked}
         onDblClick={onDoubleClick}
         onDblTap={onDoubleClick}
+        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => onDragMove?.(e.target.x(), e.target.y())}
         onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => onDragEnd?.(e.target.x(), e.target.y())}
       >
+        {/*
+          The drag surface.
+          
+          A Konva Group has no shape of its own, so it is hit only through its
+          children — and every child here paints with `listening: false` to keep
+          the app's own alpha-aware hit testing authoritative. The result was a
+          bubble that could be selected (selection is resolved by geometry, not
+          by Konva) and then could not be grabbed, because nothing under the
+          pointer belonged to it.
+          
+          This transparent rect gives the whole bubble — body, interior and text
+          — one uniform drag target. It listens only while the bubble is
+          draggable, so it never competes with hit testing for anything else,
+          and never while the creator is typing.
+        */}
+        {draggable && (
+          <Rect
+            width={item.width}
+            height={item.height}
+            /**
+             * Invisible, but a real hit target. Konva builds its hit graph from
+             * an offscreen alpha channel, so a nearly-transparent fill is
+             * rounded away and registers as a miss — the shape must declare its
+             * hit area explicitly, exactly as EffectNode does.
+             */
+            hitFunc={(ctx, shape) => {
+              ctx.beginPath();
+              ctx.rect(0, 0, item.width, item.height);
+              ctx.closePath();
+              ctx.fillStrokeShape(shape);
+            }}
+          />
+        )}
         {style.maskAssetId ? <CustomShape item={item} style={style} /> : <BubbleShape item={item} style={style} />}
         <BubbleText item={item} style={style} />
       </Group>

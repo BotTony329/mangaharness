@@ -186,10 +186,11 @@ export function CanvasStage() {
         maybeReleaseFromPanel(itemId);
       },
       onEditBubble: (itemId) => setEditingBubbleId(itemId),
+      editingBubbleId,
       onTailMove: (itemId, x, y) => useEditorStore.getState().dispatch({ type: "update-bubble", itemId, patch: { tail: { x, y } } }),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection.itemId, select, transientDispatch, commitTransient, setShapeEditPanel],
+    [selection.itemId, editingBubbleId, select, transientDispatch, commitTransient, setShapeEditPanel],
   );
 
   /** Dragging an instance clearly off the page releases it to the workspace. */
@@ -573,10 +574,23 @@ export function CanvasStage() {
            * beneath it, which unmounted the handle mid-drag. The gesture died
            * on the first pixel of movement and looked like a dead control.
            */
-          const target = e.target as unknown as { draggable?: () => boolean };
-          if (typeof target.draggable === "function" && target.draggable()) {
-            panHandlers.onMouseDown(e);
-            return;
+          /**
+           * Walk up from the hit shape, not just the shape itself.
+           *
+           * Draggability lives on the item's GROUP, while the shape under the
+           * pointer is one of its children — a bubble's hit rect, an asset's
+           * image. Checking only the target meant the stage re-resolved
+           * selection during the press and re-rendered the node out from under
+           * Konva's drag, so the object never moved.
+           */
+          let candidate: { draggable?: () => boolean; getParent?: () => unknown } | null =
+            e.target as unknown as { draggable?: () => boolean; getParent?: () => unknown };
+          while (candidate) {
+            if (typeof candidate.draggable === "function" && candidate.draggable()) {
+              panHandlers.onMouseDown(e);
+              return;
+            }
+            candidate = (typeof candidate.getParent === "function" ? candidate.getParent() : null) as typeof candidate;
           }
           if (!spaceHeld && native.button === 0) {
             const handled = selectAtPointer(native.clientX, native.clientY, native.altKey, native.shiftKey);

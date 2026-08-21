@@ -227,8 +227,27 @@ export interface TransformPatch {
 export function updateItemTransform(doc: ProjectDocument, itemId: ID, patch: TransformPatch): ProjectDocument {
   const next = cloneDoc(doc);
   const item = requireItem(next, itemId);
+
+  /**
+   * A speech bubble is body + text + tail, and the tail is stored as an
+   * absolute point rather than an offset. Moving only `cx`/`cy` therefore left
+   * the tail behind, pointing at nothing.
+   *
+   * A bubble ATTACHED to a character keeps its semantic target: the tail should
+   * still point at whoever is speaking, and `refresh-bubble-tails` recomputes
+   * it. An unattached tail is a free point the creator placed, so it travels
+   * with the balloon.
+   */
+  const movingTail =
+    item.kind === "bubble" && item.tail && !item.attachment
+      ? { dx: (patch.cx ?? item.cx) - item.cx, dy: (patch.cy ?? item.cy) - item.cy }
+      : null;
+
   Object.assign(item, patch);
   if (item.kind === "asset") item.cropMode = "custom";
+  if (item.kind === "bubble" && item.tail && movingTail) {
+    item.tail = { x: item.tail.x + movingTail.dx, y: item.tail.y + movingTail.dy };
+  }
   touch(next);
   return next;
 }

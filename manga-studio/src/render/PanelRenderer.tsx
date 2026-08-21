@@ -15,6 +15,8 @@ export interface PanelInteraction {
   onItemDragMove?: (itemId: ID, cx: number, cy: number) => void;
   onItemDragEnd?: (itemId: ID, cx?: number, cy?: number) => void;
   onEditBubble?: (itemId: ID) => void;
+  /** The bubble whose text is open for editing; it must not drag meanwhile. */
+  editingBubbleId?: ID | null;
   onTailMove?: (itemId: ID, x: number, y: number) => void;
   onPanelDoubleClick?: (panelId: ID) => void;
 }
@@ -140,6 +142,8 @@ function renderItem(
           item={item}
           interactive={interactive}
           selected={interaction.selectedItemId === item.id}
+          editing={interaction.editingBubbleId === item.id}
+          onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
           onDragEnd={(cx, cy) => interaction.onItemDragEnd?.(item.id, cx, cy)}
           onDoubleClick={() => interaction.onEditBubble?.(item.id)}
           onTailDragEnd={(x, y) => interaction.onTailMove?.(item.id, x, y)}
@@ -152,6 +156,7 @@ function renderItem(
           item={item}
           interactive={interactive}
           selected={interaction.selectedItemId === item.id}
+          onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
           onDragEnd={(cx, cy) => interaction.onItemDragEnd?.(item.id, cx, cy)}
         />
       );
