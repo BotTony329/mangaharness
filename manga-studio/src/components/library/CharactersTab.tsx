@@ -17,7 +17,6 @@ import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
-import { CharacterKitPanel } from "./CharacterKitPanel";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
 import { getActiveStyleProfile } from "@/styles/profiles";
@@ -30,9 +29,6 @@ import {
 export function CharactersTab() {
   const doc = useEditorStore((s) => s.doc);
   const [creating, setCreating] = useState(false);
-  // Kit is the parts-box view; Library is the existing render browser. Both
-  // read the same document, so switching never changes any state.
-  const [view, setView] = useState<"kit" | "library">("kit");
   if (!doc) return null;
 
   const characters = Object.values(doc.characters);
@@ -44,33 +40,14 @@ export function CharactersTab() {
       >
         + New Character
       </button>
-      {Object.keys(doc.characters).length > 0 && (
-        <div className="flex gap-1 rounded border border-zinc-800 bg-zinc-950 p-0.5 text-[10px]">
-          {(["kit", "library"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setView(mode)}
-              className={`flex-1 rounded px-2 py-1 ${
-                view === mode ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {mode === "kit" ? "Kit" : "Library"}
-            </button>
-          ))}
-        </div>
-      )}
       {characters.length === 0 && (
         <p className="mt-6 text-center text-xs text-zinc-600">
           Create a character, then generate poses and expressions you can reuse in every panel.
         </p>
       )}
-      {characters.map((character) =>
-        view === "kit" ? (
-          <CharacterKitPanel key={character.id} character={character} />
-        ) : (
-          <CharacterCard key={character.id} character={character} />
-        ),
-      )}
+      {characters.map((character) => (
+        <CharacterCard key={character.id} character={character} />
+      ))}
       {creating && <CreateCharacterDialog onClose={() => setCreating(false)} />}
     </div>
   );
@@ -133,8 +110,9 @@ function CharacterCard({ character }: { character: Character }) {
               Generate character reference
             </button>
           )}
+          <PuppetStatusRow character={character} />
           <div>
-            <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Character states</p>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Rendered states</p>
             <div className="flex flex-wrap gap-2">
               {stateGroups.map(({ label, variants }) => (
                 <AssetThumb
@@ -528,4 +506,42 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
 
 function title(value: string): string {
   return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/**
+ * Puppet availability for one character (§9).
+ *
+ * The left dock reports whether a puppet EXISTS and offers the on-ramp; it does
+ * not edit one. Puppet controls belong to the selected actor in the right
+ * inspector, and duplicating them here is what made the old left dock a second,
+ * competing editing surface.
+ */
+function PuppetStatusRow({ character }: { character: Character }) {
+  const doc = useEditorStore((s) => s.doc)!;
+  const openCompiler = useUiStore((s) => s.openCompiler);
+  const puppet = character.puppetId ? doc.puppets[character.puppetId] : undefined;
+  const hasCanonical = Boolean(characterReferenceId(character));
+
+  return (
+    <div className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5">
+      <span className="text-[10px] text-zinc-500">
+        Puppet:{" "}
+        {puppet ? (
+          <span className="text-fuchsia-300">
+            {Object.keys(puppet.parts).length} parts · {puppet.compilerMetadata.source}
+          </span>
+        ) : (
+          <span className="text-zinc-600">none</span>
+        )}
+      </span>
+      <button
+        className="rounded border border-fuchsia-700/70 px-2 py-0.5 text-[10px] text-fuchsia-300 hover:bg-fuchsia-950/40 disabled:opacity-40"
+        disabled={!hasCanonical}
+        title={hasCanonical ? undefined : "Generate a canonical reference first — the compiler cuts parts out of it."}
+        onClick={() => openCompiler(character.id)}
+      >
+        {puppet ? "Recompile" : "Convert to Puppet"}
+      </button>
+    </div>
+  );
 }

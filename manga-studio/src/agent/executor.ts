@@ -43,7 +43,8 @@ import { hasExactState } from "./planValidation";
 import { normalizeReference } from "./grounding";
 import { bestLanguageAsset } from "@/language/library";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
-import { isPuppetInstance } from "@/domain/puppetOps";
+import { isPuppetInstance, puppetForInstance } from "@/domain/puppetOps";
+import { canRepresentView } from "@/puppet/capability";
 import type { PuppetJoint } from "@/puppet/model";
 import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
@@ -216,6 +217,8 @@ function completedDetail(tool: ToolName): string | undefined {
   // §13: reuse and generation are both stated explicitly in the run log, so a
   // creator can always see whether an image was paid for.
   if (tool === "place_manga_effect" || tool === "generate_manga_effect") return lastLanguageAction;
+  // A puppet that had to escalate to generation says why.
+  if (tool === "set_character_slot") return lastLanguageAction;
 }
 
 // ─── Step dispatch ──────────────────────────────────────────────────────────
@@ -630,6 +633,23 @@ async function doSetCharacterSlot(
   const doc = currentDoc();
   const instance = findTargetInstance(doc, args, scope);
   if (!stateFromInstance(doc, instance)) throw new Error("The targeted instance is not a character");
+
+  /**
+   * The capability gate for puppets (V3.2 §12).
+   *
+   * A view change — "turn Yuri completely around" — is something a front-facing
+   * set of parts genuinely cannot represent. The agent must not discover that
+   * by producing something broken, so the boundary is named explicitly here and
+   * the run then takes the SANCTIONED fallback: generate the artwork. The point
+   * is that the escalation is deliberate and logged, not accidental.
+   */
+  const puppet = puppetForInstance(doc, instance);
+  if (puppet && args.view) {
+    const capability = canRepresentView(puppet, args.view);
+    if (!capability.supported) {
+      lastLanguageAction = `${capability.reason} ${capability.fallbackRecommendation ?? ""}`.trim();
+    }
+  }
   await applyCharacterStateToInstance({
     instanceId: instance.id,
     patch: { pose: args.pose, expression: args.expression, outfit: args.outfit, view: args.view },

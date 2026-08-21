@@ -18,7 +18,7 @@ import { Group, Image as KonvaImage, Rect } from "react-konva";
 import type Konva from "konva";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { resolvePartTransforms, resolveVisibleParts } from "@/puppet/transforms";
-import type { MangaPuppet } from "@/puppet/model";
+import type { MangaPuppet, SourceRect } from "@/puppet/model";
 import { useImageElement } from "./useImageElement";
 
 interface PuppetNodeProps {
@@ -85,6 +85,7 @@ export function PuppetNode({
                 key={partId}
                 doc={doc}
                 textureAssetId={part.textureAssetId}
+                sourceRect={part.sourceRect}
                 x={transform.x * unit}
                 y={transform.y * unit}
                 width={transform.size.x * unit}
@@ -132,10 +133,12 @@ export function PuppetNode({
 function PuppetPartNode({
   doc,
   textureAssetId,
+  sourceRect,
   ...geometry
 }: {
   doc: ProjectDocument;
   textureAssetId: ID;
+  sourceRect?: SourceRect;
   x: number;
   y: number;
   width: number;
@@ -151,5 +154,18 @@ function PuppetPartNode({
     // and keeps a fixture puppet visible in environments with no images.
     return <Rect {...geometry} fill="#e4e4e7" stroke="#a1a1aa" strokeWidth={1} listening={false} />;
   }
-  return <KonvaImage {...geometry} image={image} listening={false} />;
+  /**
+   * A compiled part draws only its own rectangle of the shared canonical
+   * render (V3.2 §6). Konva's crop is in source pixels, so the normalized rect
+   * is scaled by the image's natural size — the source asset is never modified.
+   */
+  const crop = sourceRect
+    ? {
+        x: sourceRect.x * image.naturalWidth,
+        y: sourceRect.y * image.naturalHeight,
+        width: sourceRect.width * image.naturalWidth,
+        height: sourceRect.height * image.naturalHeight,
+      }
+    : undefined;
+  return <KonvaImage {...geometry} image={image} crop={crop} listening={false} />;
 }

@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import type { ID, MangaLanguageCategory } from "@/domain/types";
 import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
+import type { PuppetJoint } from "@/puppet/model";
 
 export interface GeneratorRequest {
   assetType: "character" | "character-pose" | "character-expression" | "background" | "prop" | "manga-effect";
@@ -30,6 +31,28 @@ export interface GeneratorRequest {
   replaceAssetId?: ID;
 }
 
+/**
+ * A local puppet edit the creator asked for that the puppet cannot hold (§3).
+ *
+ * Surfaced as an explicit choice rather than silently distorting the artwork or
+ * silently escalating to a paid generation: local-safe operations are instant,
+ * and anything generative has to be chosen.
+ */
+export interface PuppetCapabilityPrompt {
+  instanceId: ID;
+  joint?: PuppetJoint;
+  /** What the creator asked for, before the puppet refused it. */
+  requestedDegrees?: number;
+  reason: string;
+  fallbackRecommendation?: string;
+}
+
+/** Live hover feedback while dragging an expression over the canvas (§1). */
+export interface PuppetFaceHover {
+  instanceId: ID;
+  expressionId: string;
+}
+
 interface UiState {
   generator: GeneratorRequest | null;
   /** Panel currently in shape-edit mode (double-click a panel to enter). */
@@ -46,6 +69,17 @@ interface UiState {
   calibrationDraft: PoseCalibration | null;
   /** Panel whose perspective handles are draggable (§4 "Edit Guides"). */
   guideEditPanelId: ID | null;
+  /**
+   * Puppet direct manipulation. All three are editor-only: dragging a joint
+   * writes to the document through transient dispatch, but the hover highlight
+   * and the capability prompt never do.
+   */
+  puppetFaceHover: PuppetFaceHover | null;
+  puppetCapabilityPrompt: PuppetCapabilityPrompt | null;
+  /** Instance whose joint handles are shown; null hides them. */
+  puppetHandlesInstanceId: ID | null;
+  /** Compiler wizard target character, or null when closed. */
+  compilerCharacterId: ID | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
@@ -59,6 +93,11 @@ interface UiState {
   beginCalibration(instanceId: ID, calibration: PoseCalibration): void;
   setCalibrationDraft(calibration: PoseCalibration): void;
   endCalibration(): void;
+  setPuppetFaceHover(hover: PuppetFaceHover | null): void;
+  showPuppetCapabilityPrompt(prompt: PuppetCapabilityPrompt | null): void;
+  setPuppetHandlesInstance(instanceId: ID | null): void;
+  openCompiler(characterId: ID): void;
+  closeCompiler(): void;
   openSettings(): void;
   closeSettings(): void;
   openArtStyle(): void;
@@ -73,6 +112,10 @@ export const useUiStore = create<UiState>((set) => ({
   calibrating: false,
   calibrationDraft: null,
   guideEditPanelId: null,
+  puppetFaceHover: null,
+  puppetCapabilityPrompt: null,
+  puppetHandlesInstanceId: null,
+  compilerCharacterId: null,
   settingsOpen: false,
   artStyleOpen: false,
   openGenerator: (request) => set({ generator: request }),
@@ -86,6 +129,11 @@ export const useUiStore = create<UiState>((set) => ({
     set({ poseEditInstanceId: instanceId, calibrating: true, calibrationDraft: calibration, poseDraft: null }),
   setCalibrationDraft: (calibration) => set({ calibrationDraft: calibration }),
   endCalibration: () => set({ calibrating: false, calibrationDraft: null, poseEditInstanceId: null }),
+  setPuppetFaceHover: (hover) => set({ puppetFaceHover: hover }),
+  showPuppetCapabilityPrompt: (prompt) => set({ puppetCapabilityPrompt: prompt }),
+  setPuppetHandlesInstance: (instanceId) => set({ puppetHandlesInstanceId: instanceId }),
+  openCompiler: (characterId) => set({ compilerCharacterId: characterId }),
+  closeCompiler: () => set({ compilerCharacterId: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   openArtStyle: () => set({ artStyleOpen: true }),

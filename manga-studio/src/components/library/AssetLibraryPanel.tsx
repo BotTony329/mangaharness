@@ -12,6 +12,7 @@ import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { CharactersTab } from "./CharactersTab";
 import { MangaFxTab } from "./MangaFxTab";
+import { ProjectsPanel } from "./ProjectsPanel";
 import { uploadImageFile } from "./uploadAsset";
 import { AssetDeleteDialog } from "./LifecycleDialogs";
 
@@ -31,11 +32,29 @@ const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters" | "mangafx">, AssetC
   uploads: "upload",
 };
 
+/**
+ * The left dock: navigation and asset discovery (§15).
+ *
+ * Two questions, in order — which project am I in, and what exists in it. It is
+ * deliberately NOT a second editing surface: the duplicate Pose / Face / Outfit
+ * / View matrix that used to live here has been removed, because the selected
+ * actor's controls belong to the right inspector and having both meant two
+ * paths to the same edit at different cost.
+ */
 export function AssetLibraryPanel() {
   const [tab, setTab] = useState<LibraryTab>("characters");
+  const doc = useEditorStore((s) => s.doc);
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col bg-zinc-900">
+      <ProjectsPanel />
+      {!doc ? (
+        <p className="p-3 text-center text-[11px] text-zinc-600">Open or create a project to see its assets.</p>
+      ) : (
+        <>
+      <p className="px-2 pt-2 text-[10px] uppercase tracking-wider text-zinc-500">
+        {doc.project.name} · Assets
+      </p>
       <nav className="flex border-b border-zinc-800 text-xs">
         {TABS.map((t) => (
           <button
@@ -58,6 +77,8 @@ export function AssetLibraryPanel() {
           <CategoryGrid category={TAB_CATEGORY[tab]} />
         )}
       </div>
+        </>
+      )}
     </aside>
   );
 }

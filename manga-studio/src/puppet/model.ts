@@ -93,11 +93,28 @@ export const READY: PartReadiness = {
   meshReady: false,
 };
 
+/** A normalized rectangle inside a source image (0..1 on both axes). */
+export interface SourceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface PuppetPart {
   id: ID;
   type: PuppetPartType;
   /** Texture for this part alone, with real alpha. */
   textureAssetId: ID;
+  /**
+   * The sub-rectangle of `textureAssetId` this part draws.
+   *
+   * Present when the part was cut from a shared render rather than rendered on
+   * its own — which is what Compiler v1 produces. Cropping a confirmed region
+   * out of one image is honest about what it is: no automatic segmentation is
+   * claimed, and the source image is never modified.
+   */
+  sourceRect?: SourceRect;
   maskAssetId?: ID;
   parentPartId?: ID;
   /**

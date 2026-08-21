@@ -26,7 +26,10 @@ export interface AgentContextInput {
 
 export function buildAgentContext({ doc, currentPageId, selection, scope, grounding }: AgentContextInput): string {
   const runScope = scope ?? resolveAgentScope({ doc, currentPageId, selection, prompt: "" });
-  const lines: string[] = [`PROJECT: ${doc.project.name}`];
+  // §11: the agent is always told which project it is operating in, and every
+  // list below is read from THIS document — so grounding can never resolve a
+  // character that belongs to a project the creator is not in.
+  const lines: string[] = [`PROJECT: ${doc.project.name}`, `PROJECT ID: ${doc.project.id}`];
   lines.push(scopeInstruction(runScope));
   const activeStyle = getActiveStyleProfile(doc);
   lines.push(

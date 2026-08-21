@@ -7,6 +7,7 @@ import { addAsset, addCharacter, addGenerationRecord, setAssetProcessedImage, se
 import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAssetReferences, setAssetArchived, type DeleteAssetMode, type DeleteCharacterMode } from "./assetLifecycle";
 import { addBubble, addEffect, duplicateItem, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
 import { addPage, removePage, setPageLayout } from "./pageOps";
+import { renameProject } from "./projectOps";
 import {
   addLanguageAsset,
   applyAttachments,
@@ -141,6 +142,7 @@ export type DomainCommand =
   | { type: "workspace-to-panel"; itemId: ID; panelId: ID }
   | { type: "panel-to-workspace"; instanceId: ID; at?: Point }
   | { type: "delete-workspace-instance"; itemId: ID }
+  | { type: "rename-project"; name: string }
   | { type: "set-project-style"; styleId: ID }
   | { type: "add-custom-style"; input: Omit<StyleProfile, "id" | "family"> }
   | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements }
@@ -352,6 +354,8 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
     }
     case "delete-workspace-instance":
       return { doc: removeWorkspaceItem(doc, command.itemId) };
+    case "rename-project":
+      return { doc: renameProject(doc, command.name) };
     case "set-project-style":
       return { doc: setProjectStyle(doc, command.styleId) };
     case "add-custom-style": {

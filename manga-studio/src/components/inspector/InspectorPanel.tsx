@@ -321,19 +321,38 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
     }
   };
 
-  const controls: { key: CharacterStateValueKey; label: string }[] = [
-    { key: "pose", label: "Pose" },
-    { key: "expression", label: "Expression" },
-    { key: "outfit", label: "Outfit" },
-    { key: "view", label: "View" },
-  ];
+  /**
+   * Which semantic dimensions this instance still edits through generation.
+   *
+   * A puppet owns its face and its arms locally, so showing generative Pose and
+   * Expression dropdowns beside instant puppet controls would offer two paths
+   * to the same result at wildly different cost (§4). Outfit and View remain:
+   * the puppet genuinely cannot change either, and the dropdown is honest about
+   * needing a render.
+   */
+  const controls: { key: CharacterStateValueKey; label: string }[] = isPuppet
+    ? [
+        { key: "outfit", label: "Outfit" },
+        { key: "view", label: "View" },
+      ]
+    : [
+        { key: "pose", label: "Pose" },
+        { key: "expression", label: "Expression" },
+        { key: "outfit", label: "Outfit" },
+        { key: "view", label: "View" },
+      ];
 
   return (
     <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-2.5">
       <div className="mb-2 flex items-center justify-between">
-        <Label>Character state</Label>
+        <Label>{isPuppet ? "Character" : "Character state"}</Label>
         <span className="text-[10px] text-indigo-300">{character.name}</span>
       </div>
+      {isPuppet && (
+        <p className="mb-2 text-[10px] leading-4 text-zinc-500">
+          Outfit and View still need a new render; face and pose are instant below.
+        </p>
+      )}
       <div className="space-y-2">
         {controls.map(({ key, label }) => (
           <div key={key}>
@@ -349,7 +368,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
                 <option key={value} value={value}>{title(value)}</option>
               ))}
             </select>
-            {(key === "expression" || key === "pose" || key === "outfit") && (
+            {!isPuppet && (key === "expression" || key === "pose" || key === "outfit") && (
               <StateCardRow
                 dimension={key}
                 characterId={character.id}

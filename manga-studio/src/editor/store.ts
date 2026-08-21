@@ -35,6 +35,8 @@ interface EditorState {
   dirty: boolean;
 
   loadDocument(doc: ProjectDocument): void;
+  /** Close the open project without opening another (the welcome state). */
+  closeDocument(): void;
   setCurrentPage(pageId: ID): void;
   select(selection: Selection): void;
   dispatch(command: DomainCommand): CommandResult;
@@ -70,6 +72,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       doc,
       currentPageId: firstPage?.id ?? null,
+      selection: {},
+      past: [],
+      future: [],
+      pendingSnapshot: null,
+      inTransaction: false,
+      dirty: false,
+    });
+  },
+
+  closeDocument() {
+    // History is cleared with the document: undo must never be able to step
+    // back into a project the creator has left or deleted.
+    set({
+      doc: null,
+      currentPageId: null,
       selection: {},
       past: [],
       future: [],

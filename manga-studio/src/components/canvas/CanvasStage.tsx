@@ -16,7 +16,7 @@ import { Group, Layer, Line, Rect, Stage, Transformer } from "react-konva";
 import type Konva from "konva";
 import { pageToPanelLocal, panelBoundsPx, panelPolygonPx, workspaceToPage } from "@/domain/coords";
 import { pointInPolygon } from "@/domain/geometry";
-import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
+import type { AssetInstance, ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { SOCKET_DRAG_TYPE, decodeSocketDrag, resolveSocketAt } from "@/characters/sockets";
 import { LANGUAGE_DRAG_TYPE } from "@/language/library";
@@ -33,6 +33,11 @@ import { ShapeEditOverlay } from "./ShapeEditOverlay";
 import { PerspectiveOverlay } from "./PerspectiveOverlay";
 import { usesStagePlacement } from "@/domain/stageOps";
 import { PoseEditOverlay } from "./PoseEditOverlay";
+import { PuppetOverlay } from "./PuppetOverlay";
+import { puppetForInstance } from "@/domain/puppetOps";
+import { canApplyExpression } from "@/puppet/capability";
+import { EXPRESSION_DRAG_TYPE } from "@/puppet/dragTypes";
+import { faceDropTarget, isOverFace, toPuppetUnits } from "@/puppet/interaction";
 import { useViewport, type Viewport } from "./useViewport";
 
 export function CanvasStage() {
@@ -49,6 +54,8 @@ export function CanvasStage() {
   const calibrationDraft = useUiStore((s) => s.calibrationDraft);
   const guideEditPanelId = useUiStore((s) => s.guideEditPanelId);
   const setShapeEditPanel = useUiStore((s) => s.setShapeEditPanel);
+  const puppetFaceHover = useUiStore((s) => s.puppetFaceHover);
+  const setPuppetFaceHover = useUiStore((s) => s.setPuppetFaceHover);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -279,12 +286,78 @@ export function CanvasStage() {
     [page, pointerToWorkspace, panelAtWorkspacePoint, select],
   );
 
+  /**
+   * Resolve a pointer position to the puppet actor whose FACE is under it.
+   *
+   * Uses the puppet's real head geometry under its current pose, not a
+   * percentage band, so a tilted head moves its own drop target.
+   */
+  const puppetFaceAt = useCallback(
+    (clientX: number, clientY: number): AssetInstance | null => {
+      if (!doc || !page) return null;
+      const workspacePoint = pointerToWorkspace(clientX, clientY);
+      const panelId = panelAtWorkspacePoint(workspacePoint);
+      if (!panelId) return null;
+      const local = pageToPanelLocal(workspaceToPage(workspacePoint, page), panelBoundsPx(doc, doc.panels[panelId]));
+      for (const itemId of [...(doc.panels[panelId]?.itemIds ?? [])].reverse()) {
+        const item = doc.items[itemId];
+        if (item?.kind !== "asset" || !item.puppet) continue;
+        const puppet = puppetForInstance(doc, item);
+        if (!puppet) continue;
+        if (isOverFace(faceDropTarget(puppet, item.puppet.pose), toPuppetUnits(item, local))) return item;
+      }
+      return null;
+    },
+    [doc, page, pointerToWorkspace, panelAtWorkspacePoint],
+  );
+
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      // Only expression drags produce face feedback; an asset drag must not
+      // light up a face it cannot be dropped onto.
+      if (!e.dataTransfer.types.includes(EXPRESSION_DRAG_TYPE)) return;
+      const host = puppetFaceAt(e.clientX, e.clientY);
+      const current = useUiStore.getState().puppetFaceHover;
+      if (host?.id === current?.instanceId) return;
+      setPuppetFaceHover(host ? { instanceId: host.id, expressionId: "" } : null);
+    },
+    [puppetFaceAt, setPuppetFaceHover],
+  );
+
   // ── Library drag & drop: into a panel, or anywhere on the workspace ───────
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const socketPayload = e.dataTransfer.getData(SOCKET_DRAG_TYPE);
       if (socketPayload && onSocketDrop(socketPayload, e.clientX, e.clientY)) return;
+      /**
+       * Expression drop (§1): a LOCAL face swap.
+       *
+       * This writes one string onto the instance. It replaces no asset, makes
+       * no provider request, and creates no CharacterState render — the whole
+       * point of the puppet representation.
+       */
+      const expressionId = e.dataTransfer.getData(EXPRESSION_DRAG_TYPE);
+      if (expressionId) {
+        setPuppetFaceHover(null);
+        const host = puppetFaceAt(e.clientX, e.clientY);
+        if (!host) return;
+        const puppet = doc ? puppetForInstance(doc, host) : undefined;
+        const capability = puppet ? canApplyExpression(puppet, expressionId) : undefined;
+        if (!capability?.supported) {
+          useUiStore.getState().showPuppetCapabilityPrompt({
+            instanceId: host.id,
+            reason: capability?.reason ?? "This puppet cannot show that face.",
+            fallbackRecommendation: capability?.fallbackRecommendation,
+          });
+          return;
+        }
+        useEditorStore.getState().dispatch({ type: "set-puppet-expression", instanceId: host.id, expressionId });
+        select({ itemId: host.id, panelId: host.panelId });
+        return;
+      }
+
       const languageAssetId = e.dataTransfer.getData(LANGUAGE_DRAG_TYPE);
       const assetId = e.dataTransfer.getData("application/x-asset-id");
       if ((!assetId && !languageAssetId) || !doc || !page) return;
@@ -322,7 +395,7 @@ export function CanvasStage() {
       const placed = useEditorStore.getState().dispatch({ type: "add-instance", panelId, assetId, at: isBackground ? undefined : local });
       if (placed.createdId) select({ itemId: placed.createdId, panelId });
     },
-    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, select, onSocketDrop],
+    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, select, onSocketDrop, puppetFaceAt, setPuppetFaceHover],
   );
 
   if (!doc || !page) {
@@ -342,12 +415,19 @@ export function CanvasStage() {
         ?.poseCalibration
     : undefined;
   const looseItems = doc.workspaceOrder.map((id) => doc.workspaceItems[id]).filter(Boolean);
+  // Only the selected actor gets handles, but any actor can be a drop target,
+  // so every puppet on the page needs an overlay.
+  const puppetInstances = page.panelIds
+    .flatMap((panelId) => doc.panels[panelId]?.itemIds ?? [])
+    .map((itemId) => doc.items[itemId])
+    .filter((item): item is AssetInstance => item?.kind === "asset" && Boolean(item.puppet));
 
   return (
     <div
       ref={containerRef}
       className={`relative flex-1 overflow-hidden bg-zinc-950 ${spaceHeld ? "cursor-grab" : ""}`}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={onDragOver}
+      onDragLeave={() => setPuppetFaceHover(null)}
       onDrop={onDrop}
     >
       <Stage
@@ -413,6 +493,19 @@ export function CanvasStage() {
             ) : null;
           })}
           {shapeEditPanel && <ShapeEditOverlay doc={doc} page={page} panel={shapeEditPanel} scale={view.scale} />}
+          {/* Puppet direct manipulation: handles for the selected actor, and a
+              face highlight for whichever actor a drag is currently over. */}
+          {puppetInstances.map((instance) => (
+            <PuppetOverlay
+              key={`puppet-overlay-${instance.id}`}
+              doc={doc}
+              page={page}
+              instance={instance}
+              scale={view.scale}
+              faceHovered={puppetFaceHover?.instanceId === instance.id}
+              showHandles={selection.itemId === instance.id}
+            />
+          ))}
           {poseEditInstance && (poseDraft || calibrating) && (
             <PoseEditOverlay
               doc={doc}
