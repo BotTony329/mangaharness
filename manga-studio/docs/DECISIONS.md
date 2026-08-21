@@ -110,3 +110,37 @@ The background strategy is now ordered: validated native alpha, then a pure whit
 The chroma-key extractor is retained unchanged as the fallback, and the monochrome prompt names neither transparency nor chroma key.
 
 Because the failure is created upstream of extraction, generation is also validated after the fact: for a monochrome project style, a result whose visible pixels are meaningfully saturated is refused with "Unexpected color contamination detected" rather than promoted into the library. The threshold ignores anti-aliasing and JPEG ringing (neutral, or tinted only in the single digits) and triggers on real coloured regions.
+
+## D32 — The virtual manga stage (Phase 1 foundation)
+
+Manga Studio moves from "AI image generator plus draggable PNG canvas" to a semi-professional manga system: the creator manipulates semantic manga concepts and the harness owns the geometry. Phase 1 lands the document model and the resolvers; it deliberately does not attempt IK, a 3D renderer, mesh deformation, perspective-aware regeneration, or a professional ruler system.
+
+**Camera and perspective belong to `Panel`, not to `PanelScene`.** `scenes` is rebuilt from items during migration by `rebuildAllScenes()`, so a camera stored there could be clobbered by a rebuild. The panel is the entity; camera and perspective are its properties.
+
+**Presets own the numbers until the creator takes one over.** `PanelCamera.derivedFrom` records which angle/lens produced each derived value. Without it we would have to choose between presets that stomp manual work and presets that stop working after any advanced edit; with it, changing the lens still moves the FOV while leaving a hand-set pitch alone.
+
+**Sockets are derived, never stored.** A socket is a hit-test region over an instance. Persisting one would create a second state system beside the document and would drift the moment the instance is resized or swapped. `socketRegions()` prefers real `focusRegions` metadata and falls back to the documented upper-body heuristic, so accuracy improves without any caller changing.
+
+**Depth is optional and never fights the creator.** An instance without `stage` behaves exactly as before. The current size is interpreted as the size at the previous depth — mid-stage the first time depth is enabled — so enabling depth is a no-op while any real depth change scales relative to where the character already was. `scaleLocked` stops depth driving size once the creator resizes by hand.
+
+**Effects became typed but stayed tolerant.** Params are a discriminated union per kind; `normalizeEffectParams` coerces any legacy or unknown bag into a valid shape, so no document can fail to open because of an effect.
+
+**Bubbles store a relationship, not a baked tail.** `targetCharacterId` / `targetInstanceId` let the tail be recomputed when the speaker moves; untargeted bubbles are never repositioned, because a hand-placed tail is the creator's decision.
+
+Agent scope (§19) needed no new model — `agent/scope.ts` already resolved selected-object / selected-panel / current-page / whole-project with pre-execution `validateStepScope` and post-execution `validateScopeIntegrity`. The new semantic tools were added to `PANEL_TOOLS` so they inherit that enforcement.
+
+## D33 — Reference lineage is a V2 requirement, not a Phase 1 patch
+
+Explicit reference selection must emerge from the Character / CharacterState / StateResolver architecture rather than being bolted on as a UI picker over today's model. Phase 1 deliberately ships no reference selector.
+
+What exists now: `findExactCharacterAsset` (style-locked, full-state, cache-first) and `findCompatibleCharacterAsset` (scored, explicitly guidance-only and never returned as a semantic substitute). `AssetProvenance.canonicalReferenceAssetId` already records which canonical image anchored a render.
+
+What V2 needs before a selector can be correct:
+
+- a **state graph** rather than a flat asset list, so states relate to one another instead of only to the canonical image;
+- **reference lineage** — which reference anchored which state, transitively, so drift can be traced to its origin;
+- **nearest reusable state** selection, choosing the closest existing render as the parent of a new one rather than always re-anchoring to canonical;
+- **delta generation**, asking for the change from that parent instead of a full re-render;
+- only then a UI that exposes and lets the creator override the selected reference.
+
+Building the selector first would produce a control over a model that cannot answer "why this reference?", and it would be rewritten immediately.

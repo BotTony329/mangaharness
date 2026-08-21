@@ -1,5 +1,7 @@
 /** Constructors for domain objects. IDs are uuid v4; time is injected-able for tests. */
 
+import { createPanelCamera } from "./camera";
+import { createPanelPerspective } from "./perspective";
 import { rectToPoints } from "./geometry";
 import { LAYOUT_PRESETS } from "./layouts";
 import {
@@ -40,7 +42,15 @@ export function defaultPageWorkspacePosition(index: number, pageWidth: number): 
 }
 
 export function createPanel(pageId: ID, points: Point[]): Panel {
-  return { id: newId(), pageId, points, border: { ...DEFAULT_PANEL_BORDER }, itemIds: [] };
+  return {
+    id: newId(),
+    pageId,
+    points,
+    border: { ...DEFAULT_PANEL_BORDER },
+    itemIds: [],
+    camera: createPanelCamera(),
+    perspective: createPanelPerspective(),
+  };
 }
 
 export function createPanelFromRect(pageId: ID, rect: Rect): Panel {

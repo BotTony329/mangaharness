@@ -1,0 +1,232 @@
+"use client";
+
+/**
+ * Panel-level director controls: camera and perspective (§14/§25).
+ *
+ * Easy first — shot, angle, lens and a manga-perspective slider are the whole
+ * primary surface. Advanced numeric fields sit behind a disclosure so the
+ * professional capability exists without being the entry point.
+ *
+ * The component holds no semantic state of its own: every control reads the
+ * document and writes through a domain command, so undo works and the Agent
+ * and the human share one path.
+ */
+
+import {
+  CAMERA_ANGLES,
+  CAMERA_LENSES,
+  MANGA_PERSPECTIVE_LABELS,
+  MAX_MANGA_PERSPECTIVE,
+  SHOT_TYPES,
+  cameraMatchesPresets,
+  createPanelCamera,
+} from "@/domain/camera";
+import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
+import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
+import { useEditorStore } from "@/editor/store";
+
+export function PanelStageControls({ panelId }: { panelId: ID }) {
+  const doc = useEditorStore((state) => state.doc);
+  const dispatch = useEditorStore((state) => state.dispatch);
+  const panel = doc?.panels[panelId];
+  if (!panel) return null;
+
+  const camera = panel.camera ?? createPanelCamera();
+  const perspective = panel.perspective ?? createPanelPerspective();
+
+  return (
+    <div className="space-y-4 text-xs">
+      <section className="space-y-2">
+        <Label>Camera</Label>
+        <Row label="Shot">
+          <Select
+            value={camera.shot}
+            options={SHOT_TYPES}
+            onChange={(shot) => dispatch({ type: "set-panel-camera", panelId, patch: { shot: shot as ShotType } })}
+          />
+        </Row>
+        <Row label="Angle">
+          <Select
+            value={camera.angle}
+            options={CAMERA_ANGLES}
+            onChange={(angle) => dispatch({ type: "set-panel-camera", panelId, patch: { angle: angle as CameraAngle } })}
+          />
+        </Row>
+        <Row label="Lens">
+          <Select
+            value={camera.lens}
+            options={CAMERA_LENSES}
+            onChange={(lens) => dispatch({ type: "set-panel-camera", panelId, patch: { lens: lens as CameraLens } })}
+          />
+        </Row>
+        <div>
+          <div className="mb-1 flex justify-between text-[10px] text-zinc-500">
+            <span>Perspective</span>
+            <span className="text-zinc-400">{MANGA_PERSPECTIVE_LABELS[camera.mangaPerspectiveStrength]}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={MAX_MANGA_PERSPECTIVE}
+            step={1}
+            value={camera.mangaPerspectiveStrength}
+            className="w-full accent-indigo-500"
+            onChange={(event) =>
+              dispatch({
+                type: "set-panel-camera",
+                panelId,
+                patch: { mangaPerspectiveStrength: Number(event.target.value) },
+              })
+            }
+          />
+          <div className="flex justify-between text-[9px] text-zinc-600">
+            <span>Normal</span>
+            <span>Extreme</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <Label>Construction guides</Label>
+        <Row label="Type">
+          <Select
+            value={perspective.type}
+            options={PERSPECTIVE_TYPES}
+            onChange={(type) =>
+              dispatch({
+                type: "set-panel-perspective",
+                panelId,
+                patch: { type: type as PerspectiveType, visible: type !== "none" },
+              })
+            }
+          />
+        </Row>
+        {perspective.type !== "none" && (
+          <label className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <input
+              type="checkbox"
+              checked={perspective.visible}
+              onChange={(event) =>
+                dispatch({ type: "set-panel-perspective", panelId, patch: { visible: event.target.checked } })
+              }
+            />
+            Show guides while editing
+          </label>
+        )}
+        <p className="text-[10px] leading-4 text-zinc-600">Guides are editor-only and never appear in the exported page.</p>
+      </section>
+
+      <details className="text-[11px] text-zinc-500">
+        <summary className="cursor-pointer select-none">Advanced</summary>
+        <div className="mt-2 space-y-2">
+          {!cameraMatchesPresets(camera) && (
+            <p className="text-[10px] text-amber-400">
+              Manual values are active; preset changes will not overwrite them.
+            </p>
+          )}
+          <NumberField
+            label="Eye level"
+            value={camera.horizonY}
+            step={0.01}
+            onChange={(horizonY) => dispatch({ type: "set-panel-camera", panelId, patch: { horizonY } })}
+          />
+          <NumberField
+            label="Pitch"
+            value={camera.pitch}
+            step={1}
+            onChange={(pitch) => dispatch({ type: "set-panel-camera", panelId, patch: { pitch } })}
+          />
+          <NumberField
+            label="Roll"
+            value={camera.roll}
+            step={1}
+            onChange={(roll) => dispatch({ type: "set-panel-camera", panelId, patch: { roll } })}
+          />
+          <NumberField
+            label="Field of view"
+            value={camera.fov}
+            step={1}
+            onChange={(fov) => dispatch({ type: "set-panel-camera", panelId, patch: { fov } })}
+          />
+          <button
+            className="w-full rounded border border-zinc-700 bg-zinc-800 py-1 hover:bg-zinc-700"
+            onClick={() =>
+              dispatch({
+                type: "set-panel-camera",
+                panelId,
+                patch: { angle: camera.angle, lens: camera.lens },
+              })
+            }
+          >
+            Reset to presets
+          </button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[11px] text-zinc-400">{label}</span>
+      <div className="w-40">{children}</div>
+    </div>
+  );
+}
+
+function Select({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px]"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map((option) => (
+        <option key={option} value={option}>
+          {option.replace(/-/g, " ")}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] text-zinc-500">{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={Math.round(value * 100) / 100}
+        className="w-24 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px]"
+        onChange={(event) => {
+          const parsed = window.Number(event.target.value);
+          if (!window.Number.isNaN(parsed)) onChange(parsed);
+        }}
+      />
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return <p className="text-[10px] uppercase tracking-wider text-zinc-500">{children}</p>;
+}

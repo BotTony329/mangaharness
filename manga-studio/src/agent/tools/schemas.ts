@@ -137,7 +137,39 @@ export const toolSchemas = {
 
   add_effect: z.object({
     panel: panelIndex,
-    effectKind: z.enum(["speed-lines", "focus-lines", "screentone", "impact-burst"]),
+    effectKind: z.enum(["speed-lines", "focus-lines", "screentone", "impact-burst", "emotion"]),
+    /** Semantic attachment: the character the effect describes (§16). */
+    targetCharacterName: z.string().max(80).optional(),
+    intensity: z.number().min(0).max(1).optional(),
+  }),
+
+  // ── Virtual manga stage: the director's semantic vocabulary (§18) ──
+  set_camera: z.object({
+    panel: panelIndex,
+    shot: z.enum(["extreme-wide", "wide", "full", "medium", "close-up", "extreme-close-up"]).optional(),
+    angle: z.enum(["eye-level", "high", "low", "overhead", "dutch"]).optional(),
+    lens: z.enum(["wide", "normal", "telephoto"]).optional(),
+    mangaPerspective: z.number().int().min(0).max(3).optional().describe("0 normal, 1 subtle, 2 dramatic, 3 extreme"),
+  }),
+
+  set_perspective: z.object({
+    panel: panelIndex,
+    type: z.enum(["none", "one-point", "two-point", "three-point"]),
+    horizonY: z.number().min(0).max(1).optional().describe("Eye level: 0 top edge, 1 bottom edge"),
+  }),
+
+  set_character_depth: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80).optional(),
+    depth: z.number().min(0).max(1).describe("0 nearest the camera, 1 furthest away"),
+    groundY: z.number().min(0).max(1).optional().describe("Ground contact line in the panel"),
+  }),
+
+  attach_bubble: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80),
+    bubbleType: z.enum(["speech", "thought", "shout", "whisper", "narration"]),
+    text: z.string().min(1).max(300),
   }),
 
   remove_items: z.object({
@@ -223,6 +255,10 @@ const PANEL_TOOLS = new Set<ToolName>([
   "add_speech_bubble",
   "add_effect",
   "remove_items",
+  "set_camera",
+  "set_perspective",
+  "set_character_depth",
+  "attach_bubble",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -272,5 +308,9 @@ Available tools (call only these, with exactly these argument shapes):
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.
 - add_speech_bubble {panel, bubbleType: "speech"|"thought"|"shout"|"narration", text, position?} — add dialogue.
 - add_effect {panel, effectKind: "speed-lines"|"focus-lines"|"screentone"|"impact-burst"} — add a manga effect layer.
+- set_camera {panel, shot?, angle?, lens?, mangaPerspective?} — direct the panel. Use the semantic vocabulary (close-up, low angle) rather than moving objects to fake a shot.
+- set_perspective {panel, type, horizonY?} — establish construction guides. These are editor guides only and never appear in the exported page.
+- set_character_depth {panel, characterName?, depth, groundY?} — place a character in stage depth. 0 is nearest the camera, 1 is furthest; size follows depth automatically.
+- attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).
 `.trim();

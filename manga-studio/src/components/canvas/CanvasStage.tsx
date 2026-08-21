@@ -18,6 +18,9 @@ import { pageToPanelLocal, panelBoundsPx, panelPolygonPx, workspaceToPage } from
 import { pointInPolygon } from "@/domain/geometry";
 import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { SOCKET_DRAG_TYPE, decodeSocketDrag, resolveSocketAt } from "@/characters/sockets";
+import { acceptableSockets, patchForSocketDrop } from "@/characters/stateResolver";
+import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { useUiStore } from "@/editor/uiStore";
 import { LooseAssetNode } from "@/render/LooseAssetNode";
 import { assetRenderUrl } from "@/assets/renderSource";
@@ -206,10 +209,54 @@ export function CanvasStage() {
     }
   }, []);
 
+  /**
+   * Semantic socket drop (§5/§6): dropping an expression card on a character's
+   * face changes that character's expression. Nothing is overlaid — the state
+   * resolver decides how the new state is rendered.
+   */
+  const onSocketDrop = useCallback(
+    (raw: string, clientX: number, clientY: number): boolean => {
+      const payload = decodeSocketDrag(raw);
+      const current = useEditorStore.getState().doc;
+      if (!payload || !current || !page) return false;
+      const workspacePoint = pointerToWorkspace(clientX, clientY);
+      const panelId = panelAtWorkspacePoint(workspacePoint);
+      if (!panelId) return false;
+      const local = pageToPanelLocal(workspaceToPage(workspacePoint, page), panelBoundsPx(current, current.panels[panelId]));
+      const allowed = acceptableSockets(payload);
+
+      // Topmost instance first: later items in the stack render above earlier ones.
+      const panel = current.panels[panelId];
+      for (let index = panel.itemIds.length - 1; index >= 0; index -= 1) {
+        const item = current.items[panel.itemIds[index]];
+        if (item?.kind !== "asset") continue;
+        const asset = current.assets[item.sourceAssetId];
+        const characterId = item.characterState?.characterId ?? asset?.metadata?.characterId;
+        if (!characterId) continue;
+        if (payload.characterId && payload.characterId !== characterId) continue;
+
+        const socket = resolveSocketAt(item, local, asset?.focusRegions, allowed);
+        if (!socket) continue;
+        const patch = patchForSocketDrop(socket, payload);
+        if (!patch) continue;
+
+        select({ itemId: item.id, panelId });
+        void applyCharacterStateToInstance({ instanceId: item.id, patch }).catch(() => {
+          // Generation failures surface in the inspector, which owns that status.
+        });
+        return true;
+      }
+      return false;
+    },
+    [page, pointerToWorkspace, panelAtWorkspacePoint, select],
+  );
+
   // ── Library drag & drop: into a panel, or anywhere on the workspace ───────
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      const socketPayload = e.dataTransfer.getData(SOCKET_DRAG_TYPE);
+      if (socketPayload && onSocketDrop(socketPayload, e.clientX, e.clientY)) return;
       const assetId = e.dataTransfer.getData("application/x-asset-id");
       if (!assetId || !doc || !page) return;
       const workspacePoint = pointerToWorkspace(e.clientX, e.clientY);
@@ -225,7 +272,7 @@ export function CanvasStage() {
       const placed = useEditorStore.getState().dispatch({ type: "add-instance", panelId, assetId, at: isBackground ? undefined : local });
       if (placed.createdId) select({ itemId: placed.createdId, panelId });
     },
-    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, select],
+    [doc, page, pointerToWorkspace, panelAtWorkspacePoint, select, onSocketDrop],
   );
 
   if (!doc || !page) {

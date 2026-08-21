@@ -6,7 +6,10 @@
 
 import { defaultPageWorkspacePosition } from "./factory";
 import { rectToPoints } from "./geometry";
-import { SCHEMA_VERSION, type ProjectDocument, type Rect } from "./types";
+import { createPanelCamera } from "./camera";
+import { createPanelPerspective } from "./perspective";
+import { normalizeEffectParams } from "./effects";
+import { SCHEMA_VERSION, type EffectKind, type ProjectDocument, type Rect } from "./types";
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 import { rebuildAllScenes } from "./sceneOps";
 
@@ -171,6 +174,32 @@ const MIGRATIONS: Record<number, Migration> = {
     const migrated = { ...doc, schemaVersion: 6 } as unknown as ProjectDocument;
     if (doc.panels && doc.items && doc.assets && doc.project) rebuildAllScenes(migrated);
     return migrated as unknown as Record<string, unknown>;
+  },
+  /**
+   * v6 → v7: the virtual manga stage.
+   *
+   * Panels gain a camera and perspective guides; effect params become typed;
+   * bubbles gain a semantic speaker. Every addition is defaulted rather than
+   * inferred, so an existing project opens looking exactly as it did — the new
+   * controls simply start at neutral values instead of being absent.
+   */
+  6: (doc) => {
+    const panels = (doc.panels ?? {}) as Record<string, Record<string, unknown>>;
+    for (const panel of Object.values(panels)) {
+      panel.camera ??= createPanelCamera();
+      panel.perspective ??= createPanelPerspective();
+    }
+
+    const items = (doc.items ?? {}) as Record<string, Record<string, unknown>>;
+    for (const item of Object.values(items)) {
+      if (item.kind !== "effect") continue;
+      const kind = (item.effectKind as EffectKind) ?? "speed-lines";
+      // Legacy params were an untyped bag; normalize tolerates every shape.
+      item.effectKind = kind;
+      item.params = normalizeEffectParams(kind, item.params as Record<string, unknown> | undefined);
+    }
+
+    return { ...doc, schemaVersion: 7 };
   },
 };
 

@@ -12,6 +12,8 @@ import {
   type CharacterStatePatch,
 } from "@/characters/state";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
+import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
+import { PanelStageControls } from "./PanelStageControls";
 import type { ReorderDirection } from "@/domain/itemOps";
 import type { DomainCommand } from "@/domain/commands";
 import type { AssetInstance, BubbleType, CharacterState, CropMode, PanelItem, SourceAsset } from "@/domain/types";
@@ -35,9 +37,13 @@ export function InspectorPanel() {
 
   if (selection.panelId && doc.panels[selection.panelId]) {
     return (
-      <Hint>
-        Panel selected. Drag assets from the library into it, or use + Bubble / + Effect in the toolbar.
-      </Hint>
+      <div className="space-y-4 p-3">
+        <SectionTitle>Panel</SectionTitle>
+        <PanelStageControls panelId={selection.panelId} />
+        <p className="text-[10px] leading-4 text-zinc-600">
+          Drag assets from the library into this panel, or use + Bubble / + Effect in the toolbar.
+        </p>
+      </div>
     );
   }
   return (
@@ -307,6 +313,14 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
                 <option key={value} value={value}>{title(value)}</option>
               ))}
             </select>
+            {(key === "expression" || key === "pose" || key === "outfit") && (
+              <StateCardRow
+                dimension={key}
+                characterId={character.id}
+                values={availableCharacterStateValues(doc, character, key)}
+                active={current[key]}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -357,4 +371,46 @@ function Label({ children }: { children: React.ReactNode }) {
 
 function Hint({ children }: { children: React.ReactNode }) {
   return <p className="p-4 text-xs leading-5 text-zinc-500">{children}</p>;
+}
+
+/**
+ * Draggable semantic cards (§5/§26).
+ *
+ * Dragging a card carries only "which dimension, which value". The canvas
+ * decides whether the drop landed on a socket that accepts it, and the state
+ * resolver decides how the change is realised — nothing here places an image.
+ */
+function StateCardRow({
+  dimension,
+  characterId,
+  values,
+  active,
+}: {
+  dimension: "expression" | "pose" | "outfit";
+  characterId: string;
+  values: string[];
+  active: string;
+}) {
+  const socket = dimension === "expression" ? "face" : dimension === "pose" ? "body" : "character";
+  return (
+    <div className="mt-1 flex flex-wrap gap-1" title={`Drag onto the character's ${socket}`}>
+      {values.slice(0, 8).map((value) => (
+        <span
+          key={value}
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.setData(SOCKET_DRAG_TYPE, encodeSocketDrag({ dimension, value, characterId }));
+            event.dataTransfer.effectAllowed = "copy";
+          }}
+          className={`cursor-grab rounded-full border px-2 py-0.5 text-[10px] ${
+            value === active
+              ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
+              : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-indigo-600 hover:text-indigo-300"
+          }`}
+        >
+          {title(value)}
+        </span>
+      ))}
+    </div>
+  );
 }

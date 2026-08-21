@@ -7,6 +7,8 @@
  * with a single source of truth.
  */
 
+import type { EffectParams } from "./effects";
+
 // ─── Shared primitives ──────────────────────────────────────────────────────
 
 export type ID = string;
@@ -196,6 +198,48 @@ export interface Panel {
   border: PanelBorder;
   /** Ordered bottom → top. The layer list UI is a projection of this array. */
   itemIds: ID[];
+  /** Director controls for this panel. Absent on pre-v7 documents. */
+  camera?: PanelCamera;
+  /** Editor-only construction guides. Never rendered into the exported page. */
+  perspective?: PanelPerspective;
+}
+
+// ─── Panel camera & perspective ─────────────────────────────────────────────
+
+export type ShotType = "extreme-wide" | "wide" | "full" | "medium" | "close-up" | "extreme-close-up";
+export type CameraAngle = "eye-level" | "high" | "low" | "overhead" | "dutch";
+export type CameraLens = "wide" | "normal" | "telephoto";
+
+/**
+ * Shot/angle/lens are the primary vocabulary; the numeric fields are derived
+ * from them. `derivedFrom` records which preset produced each derived value so
+ * a preset change never overwrites a number the creator set by hand.
+ */
+export interface PanelCamera {
+  shot: ShotType;
+  angle: CameraAngle;
+  lens: CameraLens;
+  /** 0 normal … 3 extreme. Manga foreshortening intent, not optical scale. */
+  mangaPerspectiveStrength: number;
+  pitch: number;
+  yaw: number;
+  roll: number;
+  /** Eye level as a fraction of panel height (0 top … 1 bottom). */
+  horizonY: number;
+  /** Horizontal field of view in degrees. */
+  fov: number;
+  derivedFrom: { angle?: CameraAngle; lens?: CameraLens };
+}
+
+export type PerspectiveType = "none" | "one-point" | "two-point" | "three-point";
+
+/** Vanishing points are normalized to the panel box and may sit outside it. */
+export interface PanelPerspective {
+  type: PerspectiveType;
+  horizonY: number;
+  vanishingPoints: Point[];
+  visible: boolean;
+  snapEnabled: boolean;
 }
 
 // ─── Semantic panel scenes ─────────────────────────────────────────────────
@@ -267,9 +311,29 @@ export interface AssetInstance extends PanelItemBase {
   cropMode: CropMode;
   /** Present for character instances so state survives asset swaps and migration. */
   characterState?: CharacterState;
+  /**
+   * Optional semantic depth layer. Absent means pure free transform, exactly
+   * as before — depth never becomes mandatory for an existing instance.
+   */
+  stage?: InstanceStage;
 }
 
-export type BubbleType = "speech" | "thought" | "shout" | "narration";
+export type GroundAnchor = "feet" | "center" | "custom";
+
+export interface InstanceStage {
+  /** 0 = at the camera, 1 = far plane. */
+  depth: number;
+  /** Ground contact line as a fraction of panel height. */
+  groundY: number;
+  anchor: GroundAnchor;
+  /** The creator resized by hand; depth stops driving size. */
+  scaleLocked: boolean;
+}
+
+/** Semantic drop targets on a placed character (§6). Derived, never stored. */
+export type CharacterSocket = "face" | "body" | "outfit";
+
+export type BubbleType = "speech" | "thought" | "shout" | "whisper" | "narration";
 
 export interface SpeechBubbleItem extends PanelItemBase {
   kind: "bubble";
@@ -278,14 +342,24 @@ export interface SpeechBubbleItem extends PanelItemBase {
   fontSize: number;
   /** Tail target in panel-local pixels; narration boxes have no tail. */
   tail?: { x: number; y: number };
+  /**
+   * Who is speaking. The relationship is semantic, so moving the character
+   * lets the tail follow instead of pointing at empty space (§17).
+   */
+  targetCharacterId?: ID;
+  /** Instance the tail tracks; resolved from targetCharacterId when absent. */
+  targetInstanceId?: ID;
 }
 
-export type EffectKind = "speed-lines" | "focus-lines" | "screentone" | "impact-burst";
+export type EffectKind = "speed-lines" | "focus-lines" | "screentone" | "impact-burst" | "emotion";
 
 export interface EffectItem extends PanelItemBase {
   kind: "effect";
   effectKind: EffectKind;
-  params: Record<string, number | string | boolean>;
+  /** Typed per kind; see domain/effects.ts. Stays editable for the document's life. */
+  params: EffectParams;
+  /** Optional semantic attachment: the subject this effect describes (§16). */
+  targetItemId?: ID;
 }
 
 export type PanelItem = AssetInstance | SpeechBubbleItem | EffectItem;
@@ -399,4 +473,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;

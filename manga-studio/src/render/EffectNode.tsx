@@ -2,6 +2,7 @@
 
 import { Group, Shape } from "react-konva";
 import type Konva from "konva";
+import type { ScreentoneParams, SpeedLinesParams } from "@/domain/effects";
 import type { EffectItem } from "@/domain/types";
 
 interface EffectNodeProps {
@@ -51,29 +52,36 @@ export function EffectNode({ item, interactive, onSelect, onDragEnd }: EffectNod
 }
 
 function drawEffect(ctx: Konva.Context, shape: Konva.Shape, item: EffectItem): void {
-  const { width: w, height: h, effectKind, params } = item;
+  const { width: w, height: h, params } = item;
   ctx.save();
-  switch (effectKind) {
+  // Params are typed per kind, so each branch narrows to its own shape. Unit
+  // ranges (0-1) are scaled to concrete counts here — the document stores
+  // intent, the renderer decides how many lines that means at this size.
+  switch (params.kind) {
     case "speed-lines":
       drawSpeedLines(ctx, w, h, params);
       break;
     case "focus-lines":
-      drawRadialLines(ctx, w, h, Number(params.density ?? 60), 0.35, 2.2);
+      drawRadialLines(ctx, w, h, 20 + Math.round(params.density * 120), params.radius, 2.2);
       break;
     case "impact-burst":
-      drawRadialLines(ctx, w, h, Number(params.density ?? 110), 0.18, 4);
+      drawRadialLines(ctx, w, h, params.spikes * 4, 0.18, 4);
       break;
     case "screentone":
       drawScreentone(ctx, w, h, params);
+      break;
+    case "emotion":
+      drawRadialLines(ctx, w, h, 12 + Math.round(params.intensity * 20), 0.45, 1.6);
       break;
   }
   ctx.restore();
   ctx.fillStrokeShape(shape);
 }
 
-function drawSpeedLines(ctx: Konva.Context, w: number, h: number, params: EffectItem["params"]): void {
-  const vertical = params.direction === "vertical";
-  const count = Number(params.density ?? 40);
+function drawSpeedLines(ctx: Konva.Context, w: number, h: number, params: SpeedLinesParams): void {
+  // Direction is radians; anything past 45 degrees reads as vertical banding.
+  const vertical = Math.abs(Math.sin(params.direction)) > Math.SQRT1_2;
+  const count = 10 + Math.round(params.density * 90);
   ctx.strokeStyle = "#111111";
   for (let i = 0; i < count; i++) {
     // Deterministic pseudo-random thickness/offset so re-renders are stable.
@@ -112,9 +120,9 @@ function drawRadialLines(ctx: Konva.Context, w: number, h: number, count: number
   }
 }
 
-function drawScreentone(ctx: Konva.Context, w: number, h: number, params: EffectItem["params"]): void {
-  const spacing = Number(params.spacing ?? 10);
-  const radius = Number(params.dotRadius ?? 1.6);
+function drawScreentone(ctx: Konva.Context, w: number, h: number, params: ScreentoneParams): void {
+  const spacing = 4 + params.spacing * 16;
+  const radius = 0.5 + params.dotSize * 3;
   ctx.fillStyle = "#111111";
   for (let y = spacing / 2; y < h; y += spacing) {
     for (let x = spacing / 2; x < w; x += spacing) {

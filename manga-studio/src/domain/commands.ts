@@ -20,6 +20,8 @@ import type {
   LayoutPresetId,
   Point,
   ProjectDocument,
+  CharacterState,
+  InstanceStage,
   SceneDepth,
   SceneFacing,
   ScenePosition,
@@ -28,6 +30,20 @@ import type {
   StyleProfile,
 } from "./types";
 import { validateAndCorrectComposition, type CompositionIssue, type CompositionRequirements } from "./compositionValidation";
+import type { CameraPatch } from "./camera";
+import type { PerspectivePatch } from "./perspective";
+import {
+  clearInstanceStage,
+  movePanelVanishingPoint,
+  refreshBubbleTails,
+  setBubbleTarget,
+  setEffectParams,
+  setEffectTarget,
+  setInstanceCharacterState,
+  setInstanceStage,
+  setPanelCamera,
+  setPanelPerspective,
+} from "./stageOps";
 
 export type SemanticFraming = "full-body" | "medium-full" | "medium" | "upper-body" | "close-up" | "face";
 
@@ -80,7 +96,18 @@ export type DomainCommand =
   | { type: "delete-workspace-instance"; itemId: ID }
   | { type: "set-project-style"; styleId: ID }
   | { type: "add-custom-style"; input: Omit<StyleProfile, "id" | "family"> }
-  | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements };
+  | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements }
+  // ── Virtual manga stage ──
+  | { type: "set-panel-camera"; panelId: ID; patch: CameraPatch }
+  | { type: "set-panel-perspective"; panelId: ID; patch: PerspectivePatch }
+  | { type: "move-vanishing-point"; panelId: ID; index: number; point: Point }
+  | { type: "set-instance-stage"; instanceId: ID; patch: Partial<InstanceStage> }
+  | { type: "clear-instance-stage"; instanceId: ID }
+  | { type: "set-instance-character-state"; instanceId: ID; state: CharacterState }
+  | { type: "set-effect-params"; itemId: ID; patch: Record<string, unknown> }
+  | { type: "set-effect-target"; itemId: ID; targetItemId?: ID }
+  | { type: "set-bubble-target"; itemId: ID; characterId?: ID; instanceId?: ID }
+  | { type: "refresh-bubble-tails"; panelId: ID };
 
 export interface CommandResult {
   doc: ProjectDocument;
@@ -202,6 +229,26 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       const result = addCustomStyle(doc, command.input);
       return { doc: result.doc, createdId: result.styleId };
     }
+    case "set-panel-camera":
+      return { doc: setPanelCamera(doc, command.panelId, command.patch) };
+    case "set-panel-perspective":
+      return { doc: setPanelPerspective(doc, command.panelId, command.patch) };
+    case "move-vanishing-point":
+      return { doc: movePanelVanishingPoint(doc, command.panelId, command.index, command.point) };
+    case "set-instance-stage":
+      return { doc: setInstanceStage(doc, command.instanceId, command.patch) };
+    case "clear-instance-stage":
+      return { doc: clearInstanceStage(doc, command.instanceId) };
+    case "set-instance-character-state":
+      return { doc: setInstanceCharacterState(doc, command.instanceId, command.state) };
+    case "set-effect-params":
+      return { doc: setEffectParams(doc, command.itemId, command.patch) };
+    case "set-effect-target":
+      return { doc: setEffectTarget(doc, command.itemId, command.targetItemId) };
+    case "set-bubble-target":
+      return { doc: setBubbleTarget(doc, command.itemId, { characterId: command.characterId, instanceId: command.instanceId }) };
+    case "refresh-bubble-tails":
+      return { doc: refreshBubbleTails(doc, command.panelId) };
     case "validate-composition": {
       const result = validateAndCorrectComposition(doc, command.panelIds, command.requirements);
       return { doc: result.doc, issues: result.issues };

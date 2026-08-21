@@ -27,6 +27,10 @@ import type {
   SceneDepth,
   SceneFacing,
   ScenePosition,
+  CameraAngle,
+  CameraLens,
+  PerspectiveType,
+  ShotType,
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
@@ -86,6 +90,21 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Add ${args.effectKind} to panel ${args.panel}`;
     case "remove_items":
       return `Clear ${args.kind ?? "items"} from panel ${args.panel}`;
+    case "set_camera": {
+      const parts = [args.shot, args.angle, args.lens ? `${args.lens} lens` : undefined]
+        .filter(Boolean)
+        .map((value) => String(value).replace(/-/g, " "));
+      if (typeof args.mangaPerspective === "number" && args.mangaPerspective > 0) {
+        parts.push(`manga perspective ${args.mangaPerspective}`);
+      }
+      return `Set panel ${args.panel} camera: ${parts.join(", ") || "defaults"}`;
+    }
+    case "set_perspective":
+      return `Set panel ${args.panel} perspective to ${String(args.type).replace(/-/g, " ")}`;
+    case "set_character_depth":
+      return `Move ${args.characterName ?? "character"} to depth ${args.depth} in panel ${args.panel}`;
+    case "attach_bubble":
+      return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
   }
 }
 
@@ -171,6 +190,14 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doAddBubble(args);
     case "add_effect":
       return doAddEffect(args);
+    case "set_camera":
+      return doSetCamera(args);
+    case "set_perspective":
+      return doSetPerspective(args);
+    case "set_character_depth":
+      return doSetCharacterDepth(args);
+    case "attach_bubble":
+      return doAttachBubble(args);
     case "remove_items":
       return doRemoveItems(args);
   }
@@ -599,4 +626,98 @@ function validatePlanResult(plan: AgentPlan, before: ProjectDocument): Compositi
   const after = validated.doc;
   const scopeIssues = plan.targetScope ? validateScopeIntegrity(before, after, plan.targetScope) : [];
   return [...(validated.issues ?? []), ...scopeIssues];
+}
+
+// ─── Virtual manga stage (§18) ──────────────────────────────────────────────
+// The model states intent; these handlers convert it into panel geometry. The
+// LLM never computes coordinates.
+
+function doSetCamera(args: {
+  panel: number;
+  shot?: ShotType;
+  angle?: CameraAngle;
+  lens?: CameraLens;
+  mangaPerspective?: number;
+}): void {
+  const panelId = panelIdByNumber(args.panel);
+  dispatch({
+    type: "set-panel-camera",
+    panelId,
+    patch: {
+      shot: args.shot,
+      angle: args.angle,
+      lens: args.lens,
+      mangaPerspectiveStrength: args.mangaPerspective,
+    },
+  });
+}
+
+function doSetPerspective(args: { panel: number; type: PerspectiveType; horizonY?: number }): void {
+  const panelId = panelIdByNumber(args.panel);
+  dispatch({
+    type: "set-panel-perspective",
+    panelId,
+    patch: { type: args.type, horizonY: args.horizonY, visible: args.type !== "none" },
+  });
+}
+
+/** Find the character instance a semantic panel operation refers to. */
+function characterInstanceInPanel(doc: ProjectDocument, panelId: ID, characterName?: string): AssetInstance {
+  const wanted = characterName ? findCharacter(doc, characterName) : null;
+  if (characterName && !wanted) throw new Error(`Character "${characterName}" not found`);
+  const panel = doc.panels[panelId];
+  if (!panel) throw new Error("Unknown panel");
+  const matches = panel.itemIds
+    .map((id) => doc.items[id])
+    .filter((item): item is AssetInstance => item?.kind === "asset")
+    .filter((item) => {
+      const characterId = item.characterState?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId;
+      if (!characterId) return false;
+      return wanted ? characterId === wanted.id : true;
+    });
+  const target = matches[matches.length - 1];
+  if (!target) {
+    throw new Error(
+      wanted ? `${wanted.name} is not placed in that panel` : "No character instance found in that panel",
+    );
+  }
+  return target;
+}
+
+function doSetCharacterDepth(args: { panel: number; characterName?: string; depth: number; groundY?: number }): void {
+  const panelId = panelIdByNumber(args.panel);
+  const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
+  dispatch({
+    type: "set-instance-stage",
+    instanceId: instance.id,
+    patch: { depth: args.depth, groundY: args.groundY },
+  });
+  // Depth moves the speaker, so any bubble aimed at them follows.
+  dispatch({ type: "refresh-bubble-tails", panelId });
+}
+
+function doAttachBubble(args: {
+  panel: number;
+  characterName: string;
+  bubbleType: BubbleType;
+  text: string;
+}): void {
+  const panelId = panelIdByNumber(args.panel);
+  const doc = currentDoc();
+  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const characterId = instance.characterState?.characterId ?? doc.assets[instance.sourceAssetId]?.metadata?.characterId;
+  const rect = panelPxRect(doc, panelId);
+  // Place the balloon above the speaker, clear of the face.
+  const at = {
+    x: Math.max(rect.width * 0.2, Math.min(rect.width * 0.8, instance.cx)),
+    y: rect.height * 0.18,
+  };
+  const created = dispatch({ type: "add-bubble", panelId, bubbleType: args.bubbleType, text: args.text, at });
+  if (!created.createdId) throw new Error("Bubble could not be created");
+  dispatch({
+    type: "set-bubble-target",
+    itemId: created.createdId,
+    characterId,
+    instanceId: instance.id,
+  });
 }

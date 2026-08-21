@@ -7,6 +7,7 @@
 import { cloneDoc, insertIndexForBand, itemBand, panelPxRect, touch } from "./docHelpers";
 import { newId } from "./factory";
 import { cropModeTransform, fitTransform } from "./geometry";
+import { normalizeEffectParams } from "./effects";
 import { stateFromAsset } from "@/characters/state";
 import { syncPanelScene } from "./sceneOps";
 import type {
@@ -112,7 +113,7 @@ export function addEffect(
   doc: ProjectDocument,
   panelId: ID,
   effectKind: EffectKind,
-  params: Record<string, number | string | boolean> = {},
+  params: Record<string, unknown> = {},
 ): { doc: ProjectDocument; itemId: ID } {
   if (!doc.panels[panelId]) throw new Error(`Unknown panel: ${panelId}`);
   const next = cloneDoc(doc);
@@ -122,7 +123,7 @@ export function addEffect(
     kind: "effect",
     panelId,
     effectKind,
-    params,
+    params: normalizeEffectParams(effectKind, params),
     cx: panelRect.width / 2,
     cy: panelRect.height / 2,
     width: panelRect.width,

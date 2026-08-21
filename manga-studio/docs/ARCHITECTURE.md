@@ -54,6 +54,10 @@ ImageGenerationProvider → immutable source image
 
 Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the original bytes; `processedImageUrl` identifies a separately stored PNG derivative. `backgroundRemovalStatus`, method, and provider record the cutout lifecycle without putting credentials in project data. A character/prop is composable only when the state is `ready`, real alpha was validated, and a derivative URL exists. A generated character/prop that fails extraction never becomes a library asset; the generator offers a single Retry. Legacy or reprocessed sources that fail expose one Retry control — extraction strategy and provider choice are pipeline internals, not product UI. `assetRenderUrl` is the single thumbnail, reference, canvas, and export selection rule and only promotes a validated derivative.
 
+## Virtual manga stage
+
+`Panel` carries a `camera` (shot/angle/lens presets deriving pitch, roll, horizon, FOV, plus `mangaPerspectiveStrength`) and a `perspective` (type, horizon, vanishing points). Guides are panel data, never items, so export cannot reach them. `AssetInstance` carries an optional `stage` (depth, ground line, anchor, scale lock) layered over the existing free transform. `domain/stageOps.ts` holds the mutations; `characters/` holds the Character Kit projection, semantic sockets, the pose-rig data model, and the state resolver that answers cache-or-generate for every caller.
+
 ## Module rules
 
 - `src/domain/commands.ts` is the canonical mutation facade. UI actions and Agent tools dispatch typed `DomainCommand` values; domain modules remain pure `doc → doc` transformations. Live canvas gestures use `transientDispatch`, which applies the same commands without adding history until the gesture ends.
