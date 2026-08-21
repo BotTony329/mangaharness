@@ -67,6 +67,8 @@ export interface SequencePlan {
   allocation: PanelAllocation;
   /** True when the plan is only camera/staging work — no new pixels needed. */
   editorOnly: boolean;
+  /** True when any beat asks for camera, perspective or focus — panel-level work. */
+  needsPanelLevel: boolean;
 }
 
 /**
@@ -207,9 +209,19 @@ export function buildSequencePlan(input: BuildSequenceInput): SequencePlan {
 
   const editorOnly = beats.every((beat) => !beat.interaction && !beat.action && !beat.expression);
 
+  const needsPanelLevel = beats.some(
+    (beat) =>
+      beat.camera?.shot !== undefined ||
+      beat.camera?.angle !== undefined ||
+      beat.camera?.lens !== undefined ||
+      beat.camera?.perspective !== undefined ||
+      beat.camera?.focalCharacterId !== undefined,
+  );
+
   return {
     pageId: page?.id ?? scope.pageId,
     beats,
+    needsPanelLevel,
     requiredPanelCount: new Set(beats.map((beat) => beat.panelNumber)).size,
     allocation,
     editorOnly,

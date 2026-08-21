@@ -96,7 +96,7 @@ function plan(prompt: string, selectedItemId?: ID) {
     ? subject.characterIds
     : grounding.entities.filter((e) => e.characterId).map((e) => e.characterId as ID);
   const sequence = buildSequencePlan({ doc, intent, scope, characterIds });
-  scope = scopeForPanels(scope, sequence.allocation.panelNumbers);
+  scope = scopeForPanels(scope, sequence.allocation.panelNumbers, sequence.needsPanelLevel);
   const steps = compileSequencePlan(sequence, doc);
   return { doc, scope, grounding, subject, intent, sequence, steps };
 }
@@ -245,6 +245,17 @@ describe("camera intent reaches the document", () => {
     expect(camera?.angle).toBe("low");
     expect(camera?.lens).toBe("wide");
     expect(result.after.generationHistory).toHaveLength(0);
+  });
+
+  it("camera work is not blocked by whatever happens to be selected", async () => {
+    // A character is selected; the request is about the panel's camera.
+    const yuriItem = panelOf(useEditorStore.getState().doc!, f.pageId, 1)!.itemIds[0];
+    const result = await run("给Yuri一个特写", yuriItem);
+
+    expect(result.scope.kind).toBe("selected-panel");
+    expect(result.scope.demotionReason).toMatch(/camera or framing/);
+    expect(result.summary.rolledBack).toBe(false);
+    expect(panelOf(result.after, f.pageId, 1)!.camera?.shot).toBe("close-up");
   });
 
   it("maps the English vocabulary too", () => {

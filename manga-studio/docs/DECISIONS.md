@@ -813,3 +813,18 @@ pre-existing breach is a warning, and only a NEW one is fatal.
 Relatedly, being MENTIONED is not being the actor. "她回头看Mori" needs Mori in
 the panel so she can be looked at, but the pose belongs to Yuri alone; the
 compiled plan applies action and expression only to the beat's actor.
+
+## D70 — Camera intent outranks the selection too
+
+Found on production: with a character selected, "给Yuri一个特写，低机位广角" was
+refused. `selected-object` scope forbids panel-level tools — a rule that exists
+so selecting one actor cannot license restaging the panel — and the camera steps
+were rejected before execution. The post-conditions then correctly caught that
+the shot had not been applied and rolled the run back, so the failure was honest
+but the behaviour was wrong.
+
+Selecting a character does not mean "do not touch the camera". Asking for a
+close-up DOES mean "this is about the panel". `scopeForPanels` now widens a
+selection-locked scope by one step when the plan carries camera, perspective or
+focus intent, and records why — the same precedence rule already applied to a
+named character and to a named panel, arriving through a third axis.

@@ -192,6 +192,9 @@ Concretely:
   and composite renders; which of those a request needs is the planner's
   question. `scopeForSubject` widens a selection-locked scope to its panel when
   the request names somebody else.
+- Explicit intent outranks selection on THREE axes: a named character
+  (`scopeForSubject`), a named panel, and panel-level camera work
+  (`scopeForPanels`). A selection is always evidence, never authority.
 - `agent/sceneIntent.ts` produces the semantic plan — participants and ordered
   beats — BEFORE the planner is called, deterministically from the prompt. It is
   passed to the model as a constraint and shown to the creator in the run log.

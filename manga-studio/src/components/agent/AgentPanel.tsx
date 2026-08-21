@@ -190,7 +190,7 @@ export function AgentPanel() {
           : report.entities.filter((e) => e.characterId).map((e) => e.characterId as ID),
       });
       // A named panel widens the scope, just as a named character does.
-      scope = scopeForPanels(scope, plan.allocation.panelNumbers);
+      scope = scopeForPanels(scope, plan.allocation.panelNumbers, plan.needsPanelLevel);
       setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
       setSequence(plan);
       const compiled = compileSequencePlan(plan, state.doc);

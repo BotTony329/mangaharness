@@ -170,10 +170,34 @@ export function scopeForSubject(scope: AgentRunScope, subject: SubjectResolution
  * The widening is bounded by the panels the sequence actually needs, and the
  * reason is recorded so the run log can explain it.
  */
-export function scopeForPanels(scope: AgentRunScope, panelNumbers: number[]): AgentRunScope {
+export function scopeForPanels(
+  scope: AgentRunScope,
+  panelNumbers: number[],
+  /**
+   * The request asks for panel-level work — a camera move, a perspective, a
+   * focal subject. Selecting a character does not mean "do not touch the
+   * camera"; asking for a close-up does mean "this is about the panel". The
+   * explicit instruction outranks the selection, exactly as a named character
+   * outranks a selected object.
+   */
+  needsPanelLevel = false,
+): AgentRunScope {
   if (scope.kind === "current-page" || scope.kind === "whole-project") return scope;
   const outside = panelNumbers.filter((number) => number !== scope.panelNumber);
-  if (outside.length === 0) return scope;
+
+  if (outside.length === 0) {
+    if (!needsPanelLevel || scope.kind !== "selected-object") return scope;
+    // Same panel, wider operation: step out to the panel, not to the page.
+    return {
+      ...scope,
+      kind: "selected-panel",
+      itemId: undefined,
+      label: `Selected Panel · Panel ${scope.panelNumber}`,
+      demotedFrom: "selected-object",
+      demotionReason: "The request asks for camera or framing work, which belongs to the panel rather than to the selected object.",
+    };
+  }
+
   return {
     ...scope,
     kind: "current-page",
