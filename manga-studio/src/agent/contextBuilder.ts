@@ -10,6 +10,7 @@ import type { ID, ProjectDocument } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
 import { groundingContext, type GroundingReport } from "./grounding";
+import { CATEGORY_LABELS, LANGUAGE_CATEGORIES, languageLibrary } from "@/language/library";
 
 /** Context budget. Identity is exempt; only panel detail is trimmed to fit. */
 const MAX_CONTEXT_CHARS = 8000;
@@ -67,6 +68,17 @@ export function buildAgentContext({ doc, currentPageId, selection, scope, ground
     const assets = Object.values(doc.assets).filter((a) => a.category === category && isAssetReadyForComposition(a));
     lines.push("", `${category.toUpperCase()}S (${assets.length}):`);
     lines.push(...(assets.length > 0 ? assets.map((a) => `- ${a.name}`) : ["- none yet"]));
+  }
+
+  // ── Manga Language Library (§12) ──
+  // Listed so the planner can reuse rather than generate. Built-ins are
+  // included: they are as reusable as anything the creator made.
+  const language = languageLibrary(doc);
+  lines.push("", `MANGA LANGUAGE LIBRARY (${language.length}) — reuse these before generating any effect:`);
+  for (const category of LANGUAGE_CATEGORIES) {
+    const inCategory = language.filter((asset) => asset.category === category);
+    if (inCategory.length === 0) continue;
+    lines.push(`- ${CATEGORY_LABELS[category]}: ${inCategory.map((asset) => asset.name).join(", ")}`);
   }
 
   // ── Current page ──

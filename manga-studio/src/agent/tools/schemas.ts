@@ -228,6 +228,29 @@ export const toolSchemas = {
       .describe('Pose descriptors, e.g. ["right arm raised", "head turned left"]'),
   }),
 
+  // ── Manga Language Library: SEARCH → REUSE → GENERATE → PLACE (§12) ──
+  place_manga_effect: z.object({
+    panel: panelIndex,
+    /** What the effect should be, in the creator's words. Matched against the library. */
+    query: z.string().min(2).max(120),
+    category: z.enum(["bubbles", "effects", "tones", "emotion", "sfx", "decorations"]).optional(),
+    /** Attach to this character so the effect follows them when they move. */
+    targetCharacterName: z.string().max(80).optional(),
+    targetCharacterId: characterId,
+    /** Text for a bubble or SFX placement. */
+    text: z.string().max(120).optional(),
+  }),
+
+  generate_manga_effect: z.object({
+    description: z.string().min(3).max(300),
+    category: z.enum(["bubbles", "effects", "tones", "emotion", "sfx", "decorations"]),
+    name: z.string().max(60).optional(),
+    /** Place it in this panel after adding it to the library. */
+    panel: panelIndex.optional(),
+    targetCharacterName: z.string().max(80).optional(),
+    targetCharacterId: characterId,
+  }),
+
   attach_bubble: z.object({
     panel: panelIndex,
     characterName: z.string().max(80),
@@ -327,6 +350,8 @@ const PANEL_TOOLS = new Set<ToolName>([
   "set_focal_character",
   "set_puppet_expression",
   "set_puppet_joint",
+  "place_manga_effect",
+  "generate_manga_effect",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -384,5 +409,7 @@ Available tools (call only these, with exactly these argument shapes):
 - set_focal_character {panel, characterName} — name the subject the camera frames. Set this before changing shot, so a close-up frames that character rather than the middle of the panel.
 - set_character_pose_rig {panel, characterName?, basePose?, adjustments} — adjust a placed character's pose semantically, e.g. basePose "walking" with adjustments ["right arm raised","head turned left"]. Identity, expression, outfit, view and props are preserved; only pose geometry changes. Prefer this over regenerating a character to change a limb.
 - attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
+- place_manga_effect {panel, query, category?, targetCharacterName?, text?} — search the Manga Language Library and place the best existing match. ALWAYS try this before generating an effect: the library already contains bubbles, speed/focus lines, tones, emotion marks and SFX, plus everything the creator uploaded or generated earlier. Naming a character attaches the effect so it follows them.
+- generate_manga_effect {description, category, name?, panel?, targetCharacterName?} — create a NEW manga-language asset with AI and add it to the library. Plan this ONLY when the library genuinely has no suitable asset; the runtime rejects it when a match already exists. Say in the step reason what is missing.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).
 `.trim();

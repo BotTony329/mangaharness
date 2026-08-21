@@ -8,10 +8,12 @@ import { cloneDoc, insertIndexForBand, itemBand, panelPxRect, touch } from "./do
 import { newId } from "./factory";
 import { cropModeTransform, fitTransform } from "./geometry";
 import { normalizeEffectParams } from "./effects";
+import { bubbleHasTail, defaultBubbleStyle, resolvedBubbleStyle, updateBubbleStyle } from "./bubbleStyles";
 import { stateFromAsset } from "@/characters/state";
 import { syncPanelScene } from "./sceneOps";
 import type {
   AssetInstance,
+  BubbleStyle,
   BubbleType,
   CropMode,
   EffectItem,
@@ -94,14 +96,15 @@ export function addBubble(
     bubbleType,
     text,
     fontSize: 22,
+    style: defaultBubbleStyle(bubbleType),
     cx,
     cy,
     width,
     height,
     rotation: 0,
     opacity: 1,
-    // Narration boxes have no tail by design.
-    tail: bubbleType === "narration" ? undefined : { x: cx, y: cy + height },
+    // Narration boxes, internal monologue and SFX carry no tail by design.
+    tail: bubbleHasTail(bubbleType, defaultBubbleStyle(bubbleType)) ? { x: cx, y: cy + height } : undefined,
   };
   insertItem(next, item);
   syncPanelScene(next, panelId);
@@ -207,13 +210,27 @@ export function swapInstanceAsset(doc: ProjectDocument, itemId: ID, newSourceAss
 export function updateBubble(
   doc: ProjectDocument,
   itemId: ID,
-  patch: Partial<Pick<SpeechBubbleItem, "text" | "fontSize" | "bubbleType" | "tail">>,
+  patch: Partial<Pick<SpeechBubbleItem, "text" | "fontSize" | "bubbleType" | "tail">> & {
+    style?: Partial<BubbleStyle>;
+  },
 ): ProjectDocument {
   const next = cloneDoc(doc);
   const item = requireItem(next, itemId);
   if (item.kind !== "bubble") throw new Error("Not a bubble");
-  Object.assign(item, patch);
-  if (item.bubbleType === "narration") item.tail = undefined;
+  const { style, ...rest } = patch;
+  Object.assign(item, rest);
+  /**
+   * Changing the semantic type re-bases appearance on that type's default,
+   * then re-applies whatever the creator explicitly customized — so switching
+   * speech → horror actually looks like horror, without discarding a hand-set
+   * border weight.
+   */
+  if (rest.bubbleType && rest.bubbleType !== doc.items[itemId]?.["bubbleType" as never]) {
+    item.style = updateBubbleStyle(item.bubbleType, defaultBubbleStyle(item.bubbleType), style ?? {});
+  } else if (style) {
+    item.style = updateBubbleStyle(item.bubbleType, item.style, style);
+  }
+  if (!bubbleHasTail(item.bubbleType, resolvedBubbleStyle(item))) item.tail = undefined;
   touch(next);
   return next;
 }

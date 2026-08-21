@@ -6,12 +6,18 @@
  */
 
 import { create } from "zustand";
-import type { ID } from "@/domain/types";
+import type { ID, MangaLanguageCategory } from "@/domain/types";
 import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
 
 export interface GeneratorRequest {
-  assetType: "character" | "character-pose" | "character-expression" | "background" | "prop";
+  assetType: "character" | "character-pose" | "character-expression" | "background" | "prop" | "manga-effect";
   characterId?: ID;
+  /**
+   * Manga Language Library category for a "manga-effect" generation. Accepting
+   * it beside the result keeps the review flow honest: the preview knows which
+   * shelf the asset will land on before the creator presses Add to Library.
+   */
+  languageCategory?: MangaLanguageCategory;
   /** Prefilled slot descriptor, e.g. { pose: "running" }. */
   prefill?: Record<string, string>;
   /**

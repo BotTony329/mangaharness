@@ -21,7 +21,19 @@ import { isPuppetInstance } from "@/domain/puppetOps";
 import { InstanceStageControls } from "./InstanceStageControls";
 import type { ReorderDirection } from "@/domain/itemOps";
 import type { DomainCommand } from "@/domain/commands";
-import type { AssetInstance, BubbleType, CharacterState, CropMode, PanelItem, SourceAsset } from "@/domain/types";
+import type {
+  AssetInstance,
+  BubbleStyle,
+  BubbleType,
+  CharacterState,
+  CropMode,
+  ID,
+  PanelItem,
+  SourceAsset,
+  SpeechBubbleItem,
+} from "@/domain/types";
+import { resolvedBubbleStyle } from "@/domain/bubbleStyles";
+import { searchLanguageAssets } from "@/language/library";
 import { useEditorStore } from "@/editor/store";
 import { useState } from "react";
 
@@ -120,10 +132,11 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                 value={item.bubbleType}
                 onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { bubbleType: e.target.value as BubbleType } })}
               >
-                <option value="speech">Speech</option>
-                <option value="thought">Thought</option>
-                <option value="shout">Shout</option>
-                <option value="narration">Narration</option>
+                {BUBBLE_TYPES.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -138,7 +151,22 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
               />
             </div>
           </div>
+          <BubbleStyleControls item={item} />
         </>
+      )}
+
+      {item.attachment && (
+        <div className="rounded border border-indigo-900/60 bg-indigo-950/20 p-2">
+          <p className="text-[11px] text-indigo-300">
+            Attached to {attachmentLabel(item.attachment.targetItemId)} — it moves when they move.
+          </p>
+          <button
+            className="mt-1 rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-800"
+            onClick={() => dispatch({ type: "detach-item", itemId: id })}
+          >
+            Detach (keep in place)
+          </button>
+        </div>
       )}
 
       <div>
@@ -424,3 +452,198 @@ function StateCardRow({
     </div>
   );
 }
+
+/** Name the thing an effect is attached to, so "detach" is an informed choice. */
+function attachmentLabel(targetItemId: ID): string {
+  const doc = useEditorStore.getState().doc;
+  const target = doc?.items[targetItemId];
+  if (!doc || target?.kind !== "asset") return "another item";
+  const characterId = target.characterState?.characterId ?? doc.assets[target.sourceAssetId]?.metadata?.characterId;
+  return (characterId && doc.characters[characterId]?.name) ?? doc.assets[target.sourceAssetId]?.name ?? "another item";
+}
+
+/** The full semantic bubble vocabulary (§7). */
+const BUBBLE_TYPES: { id: BubbleType; label: string }[] = [
+  { id: "speech", label: "Speech" },
+  { id: "thought", label: "Thought" },
+  { id: "whisper", label: "Whisper" },
+  { id: "shout", label: "Shout" },
+  { id: "narration", label: "Narration" },
+  { id: "electronic", label: "Electronic / Radio" },
+  { id: "tremble", label: "Tremble" },
+  { id: "horror", label: "Horror" },
+  { id: "cute", label: "Cute" },
+  { id: "internal", label: "Internal monologue" },
+  { id: "sfx", label: "SFX lettering" },
+];
+
+const SHAPES: BubbleStyle["shape"][] = [
+  "ellipse",
+  "rounded-rect",
+  "rect",
+  "spiky",
+  "cloud",
+  "wavy",
+  "jagged",
+  "scalloped",
+  "none",
+];
+
+/**
+ * Bubble appearance stays editable forever, because it is parameters rather
+ * than a rendered image. A custom silhouette from the Manga FX shelf can be
+ * used as the shape while the text layer above it keeps being text (§8).
+ */
+function BubbleStyleControls({ item }: { item: SpeechBubbleItem }) {
+  const dispatch = useEditorStore((s) => s.dispatch);
+  const doc = useEditorStore((s) => s.doc);
+  const style = resolvedBubbleStyle(item);
+  const patch = (change: Partial<BubbleStyle>) =>
+    dispatch({ type: "update-bubble", itemId: item.id, patch: { style: change } });
+
+  // Only uploaded/generated bubble silhouettes can act as a mask.
+  const masks = doc
+    ? searchLanguageAssets(doc, { category: "bubbles", format: "visual" }).map((hit) => hit.asset)
+    : [];
+
+  return (
+    <details className="rounded border border-zinc-800 bg-zinc-950/50 p-2" open={false}>
+      <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">Appearance</summary>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <div>
+          <Label>Shape</Label>
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
+            value={style.shape}
+            onChange={(e) => patch({ shape: e.target.value as BubbleStyle["shape"] })}
+          >
+            {SHAPES.map((shape) => (
+              <option key={shape} value={shape}>
+                {title(shape)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Border</Label>
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
+            value={style.borderStyle}
+            onChange={(e) => patch({ borderStyle: e.target.value as BubbleStyle["borderStyle"] })}
+          >
+            {(["solid", "dashed", "double", "rough"] as const).map((border) => (
+              <option key={border} value={border}>
+                {title(border)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Weight</Label>
+          <input
+            type="number"
+            min={0}
+            max={20}
+            step={0.5}
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+            value={style.borderWeight}
+            onChange={(e) => patch({ borderWeight: Number(e.target.value) })}
+          />
+        </div>
+        <div>
+          <Label>Tail</Label>
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
+            value={style.tailType}
+            onChange={(e) => patch({ tailType: e.target.value as BubbleStyle["tailType"] })}
+          >
+            {(["none", "point", "bubbles", "zigzag"] as const).map((tail) => (
+              <option key={tail} value={tail}>
+                {title(tail)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Align</Label>
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
+            value={style.textAlign}
+            onChange={(e) => patch({ textAlign: e.target.value as BubbleStyle["textAlign"] })}
+          >
+            {(["left", "center", "right"] as const).map((align) => (
+              <option key={align} value={align}>
+                {title(align)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Padding {Math.round(style.padding * 100)}%</Label>
+          <input
+            type="range"
+            min={0}
+            max={0.4}
+            step={0.02}
+            className="w-full"
+            value={style.padding}
+            onChange={(e) => patch({ padding: Number(e.target.value) })}
+          />
+        </div>
+        <div>
+          <Label>Fill</Label>
+          <input
+            type="color"
+            className="h-8 w-full rounded border border-zinc-700 bg-zinc-800"
+            value={style.fill === "transparent" ? "#ffffff" : style.fill}
+            onChange={(e) => patch({ fill: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label>Ink</Label>
+          <input
+            type="color"
+            className="h-8 w-full rounded border border-zinc-700 bg-zinc-800"
+            value={style.textColor}
+            onChange={(e) => patch({ textColor: e.target.value, stroke: e.target.value })}
+          />
+        </div>
+      </div>
+
+      {masks.length > 0 && (
+        <div className="mt-2">
+          <Label>Custom shape</Label>
+          <select
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1.5"
+            value={style.maskAssetId ?? ""}
+            onChange={(e) => patch({ maskAssetId: e.target.value || undefined })}
+          >
+            <option value="">Built-in shape</option>
+            {masks.map((mask) => (
+              <option key={mask.id} value={mask.assetId}>
+                {mask.name}
+              </option>
+            ))}
+          </select>
+          <Hint>The silhouette becomes the balloon; the text above it stays editable.</Hint>
+        </div>
+      )}
+
+      {item.bubbleType === "sfx" && (
+        <div className="mt-2">
+          <Label>Outline {style.outlineWidth ?? 0}px</Label>
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            className="w-full"
+            value={style.outlineWidth ?? 0}
+            onChange={(e) => patch({ outlineWidth: Number(e.target.value) })}
+          />
+        </div>
+      )}
+    </details>
+  );
+}
+

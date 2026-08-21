@@ -19,7 +19,8 @@
 
 import { DEFAULT_CHARACTER_STATE, stateFromAsset } from "@/characters/state";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
-import type { Character, CharacterState, ID, ProjectDocument } from "@/domain/types";
+import type { Character, CharacterState, ID, MangaLanguageCategory, ProjectDocument } from "@/domain/types";
+import { bestLanguageAsset } from "@/language/library";
 import {
   normalizeReference,
   resolveCharacterReference,
@@ -55,6 +56,8 @@ const CHARACTER_BINDINGS: Partial<Record<ToolName, CharacterArgBinding[]>> = {
   attach_bubble: [{ nameArg: "characterName", idArg: "characterId", required: true }],
   set_puppet_expression: [{ nameArg: "characterName", idArg: "characterId", required: false }],
   set_puppet_joint: [{ nameArg: "characterName", idArg: "characterId", required: false }],
+  place_manga_effect: [{ nameArg: "targetCharacterName", idArg: "targetCharacterId", required: false }],
+  generate_manga_effect: [{ nameArg: "targetCharacterName", idArg: "targetCharacterId", required: false }],
 };
 
 export interface GroundedPlanValidation {
@@ -151,6 +154,22 @@ export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanVali
     // ── Reuse before generate (§9/§10) ──
     if (!error && step.tool === "generate_character_asset") {
       error = generationRejection(args, doc, grounding, authorizedNames, pendingNames);
+    }
+
+    /**
+     * The same rule for manga language: an effect the library already holds is
+     * never worth an image generation. This is the deterministic half of
+     * SEARCH → REUSE → GENERATE — the planner's judgement is not trusted with
+     * a decision that costs money and can be checked exactly.
+     */
+    if (!error && step.tool === "generate_manga_effect") {
+      const existing = bestLanguageAsset(doc, {
+        category: args.category as MangaLanguageCategory | undefined,
+        text: typeof args.description === "string" ? args.description : undefined,
+      });
+      if (existing) {
+        error = `The library already has "${existing.name}" for that. Use place_manga_effect to reuse it instead of generating.`;
+      }
     }
 
     // ── Scope (unchanged rules, re-checked after ID binding) ──

@@ -19,7 +19,7 @@ import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferen
 import { referenceOptions } from "@/characters/stateResolver";
 import type { CharacterState } from "@/domain/types";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
-import type { AssetCategory } from "@/domain/types";
+import type { AssetCategory, MangaLanguageCategory } from "@/domain/types";
 import {
   BACKGROUND_REMOVAL_FAILED_MESSAGE,
   validateCharacterTransparency,
@@ -27,6 +27,7 @@ import {
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
 import { assetRenderUrl } from "@/assets/renderSource";
+import { CATEGORY_LABELS, LANGUAGE_CATEGORIES } from "@/language/library";
 
 interface ProviderInfo {
   configured: boolean;
@@ -40,7 +41,23 @@ const TYPE_LABEL: Record<GeneratorRequest["assetType"], string> = {
   "character-expression": "Character expression",
   background: "Background",
   prop: "Prop",
+  "manga-effect": "Manga effect",
 };
+
+/**
+ * Search tags for a generated effect, from what the creator actually typed.
+ * The category is always included so a "shock" search finds it even when the
+ * description used different words.
+ */
+function tagsFromDescription(description: string, category: MangaLanguageCategory): string[] {
+  const stop = new Set(["a", "an", "the", "with", "and", "of", "for", "in", "on", "style", "manga"]);
+  const words = description
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((word) => word.length > 2 && !stop.has(word));
+  return [...new Set([category, ...words])].slice(0, 12);
+}
 
 export function GeneratorDialog() {
   const request = useUiStore((s) => s.generator);
@@ -74,6 +91,8 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const referenceAsset = referenceId && doc ? doc.assets[referenceId] : undefined;
   const style = doc ? getStyleGenerationContext(doc) : undefined;
   const isCharacterType = request.assetType.startsWith("character");
+  const isLanguageType = request.assetType === "manga-effect";
+  const languageCategory: MangaLanguageCategory = request.languageCategory ?? "decorations";
   const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
 
   const prompt = useMemo(
@@ -89,9 +108,11 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         style: style?.profile,
         supportsNativeTransparency: Boolean(provider?.capabilities?.supportsTransparentBackground),
         monochrome: isMonochromeStyle(style?.profile),
+        languageCategory,
       }),
     [
       request.assetType,
+      languageCategory,
       description,
       character,
       pose,
@@ -105,7 +126,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   // Whether this result may become a library asset at all. Backgrounds always
   // pass; characters and props must carry a validated transparent derivative.
   const contract = validateCharacterTransparency({
-    category: isCharacterType ? "character" : (request.assetType as AssetCategory),
+    category: isCharacterType ? "character" : isLanguageType ? "prop" : (request.assetType as AssetCategory),
     processingStatus: result?.processingStatus,
     hasAlpha: result?.hasAlpha,
     processedImageUrl: result?.processedImageUrl,
@@ -164,6 +185,43 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
 
   const addToLibrary = async () => {
     if (!result || !doc) return;
+
+    /**
+     * A generated manga-language visual lands on TWO shelves: the underlying
+     * SourceAsset carries the image and its transparency, and a
+     * MangaLanguageAsset makes it findable, taggable, and reusable by both the
+     * creator and the Agent. Without the second, a generated sparkle would be
+     * an anonymous "prop" nobody could search for.
+     */
+    if (isLanguageType) {
+      const assetId = await storeGeneratedAsset({
+        result,
+        assetType: "manga-effect",
+        category: "prop",
+        name: description.slice(0, 40) || "Manga effect",
+        prompt,
+        metadata: style ? styleMetadata(style) : undefined,
+      });
+      useEditorStore.getState().dispatch({
+        type: "add-language-asset",
+        input: {
+          category: languageCategory,
+          name: description.slice(0, 40) || "Manga effect",
+          source: "ai-generated",
+          format: "visual",
+          assetId,
+          tags: tagsFromDescription(description, languageCategory),
+          generationMetadata: {
+            prompt,
+            styleProfileId: style?.profile.id,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+      onClose();
+      return;
+    }
+
     const category: AssetCategory = isCharacterType ? "character" : (request.assetType as AssetCategory);
     const assetId = await storeGeneratedAsset({
       result,
@@ -270,6 +328,32 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               </div>
             )}
 
+            {isLanguageType && (
+              <div className="mb-3">
+                <label className="mb-1 block text-xs text-zinc-400" htmlFor="language-category">Category</label>
+                <select
+                  id="language-category"
+                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+                  value={languageCategory}
+                  onChange={(event) =>
+                    useUiStore.getState().openGenerator({
+                      ...request,
+                      languageCategory: event.target.value as MangaLanguageCategory,
+                    })
+                  }
+                >
+                  {LANGUAGE_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {CATEGORY_LABELS[category]}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] leading-4 text-zinc-500">
+                  Generated effects inherit the project art style, so a monochrome project cannot receive a colour effect.
+                </p>
+              </div>
+            )}
+
             <label className="mb-1 block text-xs text-zinc-400">
               {isCharacterType ? "Extra instruction (optional)" : "Description"}
             </label>
@@ -282,7 +366,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                   ? "Empty Japanese high school classroom, afternoon sunlight"
                   : request.assetType === "prop"
                     ? "Japanese school bag, isolated object"
-                    : "Running toward camera while carrying a school bag"
+                    : isLanguageType
+                      ? "extreme shocked manga symbol, black-and-white, rough ink style"
+                      : "Running toward camera while carrying a school bag"
               }
             />
 

@@ -7,14 +7,27 @@ import { addAsset, addCharacter, addGenerationRecord, setAssetProcessedImage, se
 import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAssetReferences, setAssetArchived, type DeleteAssetMode, type DeleteCharacterMode } from "./assetLifecycle";
 import { addBubble, addEffect, duplicateItem, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
 import { addPage, removePage, setPageLayout } from "./pageOps";
+import {
+  addLanguageAsset,
+  applyAttachments,
+  attachItem,
+  deleteLanguageAsset,
+  detachItem,
+  duplicateLanguageAsset,
+  placeLanguageAsset,
+  updateLanguageAsset,
+  type NewLanguageAssetInput,
+} from "./languageOps";
 import { cloneDoc, panelPxRect, touch } from "./docHelpers";
 import { reshapePanel } from "./panelOps";
 import { addSceneRelationship, setSceneCharacterSemantics, setSceneContinuity } from "./sceneOps";
 import { addCustomStyle, setProjectStyle } from "./styleOps";
 import { addWorkspaceItem, instanceToWorkspaceItem, removeWorkspaceItem, updateWorkspaceItem, workspaceItemToInstance } from "./workspaceOps";
 import type {
+  BubbleStyle,
   BubbleType,
   CropMode,
+  MangaLanguageCategory,
   EffectKind,
   ID,
   LayoutPresetId,
@@ -104,8 +117,21 @@ export type DomainCommand =
   | { type: "reuse-panel-background"; sourcePanelId: ID; targetPanelId: ID }
   | { type: "add-scene-relationship"; panelId: ID; subjectCharacterId: ID; action: string; targetCharacterId?: ID }
   | { type: "add-bubble"; panelId: ID; bubbleType: BubbleType; text: string; at?: Point }
-  | { type: "update-bubble"; itemId: ID; patch: { text?: string; bubbleType?: BubbleType; fontSize?: number; tail?: Point } }
+  | {
+      type: "update-bubble";
+      itemId: ID;
+      patch: { text?: string; bubbleType?: BubbleType; fontSize?: number; tail?: Point; style?: Partial<BubbleStyle> };
+    }
   | { type: "add-effect"; panelId: ID; effectKind: EffectKind }
+  // ── Manga Language Library ──
+  | { type: "add-language-asset"; input: NewLanguageAssetInput }
+  | { type: "update-language-asset"; languageAssetId: ID; patch: { name?: string; tags?: string[]; category?: MangaLanguageCategory } }
+  | { type: "duplicate-language-asset"; languageAssetId: ID }
+  | { type: "delete-language-asset"; languageAssetId: ID }
+  | { type: "place-language-asset"; panelId: ID; languageAssetId: ID; at?: Point; text?: string; attachToItemId?: ID }
+  | { type: "attach-item"; itemId: ID; targetItemId: ID; anchor?: Point }
+  | { type: "detach-item"; itemId: ID }
+  | { type: "apply-attachments"; panelId: ID }
   | { type: "reshape-panel"; panelId: ID; points: Point[] }
   | { type: "set-page-layout"; pageId: ID; layout: LayoutPresetId }
   | { type: "add-page"; layout?: LayoutPresetId }
@@ -149,7 +175,48 @@ export interface CommandResult {
   issues?: CompositionIssue[];
 }
 
+/**
+ * Commands that can move or resize an item, and therefore have to drag any
+ * attached manga-language effects along with it (§11). Listing them here keeps
+ * "the sweat drop follows Yuri" a property of the document rather than
+ * something every UI path has to remember to maintain.
+ */
+const ATTACHMENT_AFFECTING = new Set<DomainCommand["type"]>([
+  "update-instance-transform",
+  "set-framing",
+  "set-instance-stage",
+  "place-on-stage",
+  "compose-character",
+  "set-panel-camera",
+  "set-panel-perspective",
+  "swap-instance-asset",
+  "attach-item",
+  "delete-instance",
+  "reshape-panel",
+]);
+
 export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand): CommandResult {
+  const result = applyCommandCore(doc, command);
+  if (!ATTACHMENT_AFFECTING.has(command.type)) return result;
+  // The pre-command document is consulted too, because a deletion removes the
+  // very item whose panel we need — and a deleted subject is exactly when
+  // stale attachments must be released.
+  const panelId = affectedPanelId(result.doc, command) ?? affectedPanelId(doc, command);
+  return panelId ? { ...result, doc: applyAttachments(result.doc, panelId) } : result;
+}
+
+function affectedPanelId(doc: ProjectDocument, command: DomainCommand): ID | undefined {
+  if ("panelId" in command && typeof command.panelId === "string") return command.panelId;
+  const itemId =
+    "instanceId" in command && typeof command.instanceId === "string"
+      ? command.instanceId
+      : "itemId" in command && typeof command.itemId === "string"
+        ? command.itemId
+        : undefined;
+  return itemId ? doc.items[itemId]?.panelId : undefined;
+}
+
+function applyCommandCore(doc: ProjectDocument, command: DomainCommand): CommandResult {
   switch (command.type) {
     case "create-character": {
       const result = addCharacter(doc, command.name, command.appearance, command.personalityNotes);
@@ -231,6 +298,34 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       const result = addEffect(doc, command.panelId, command.effectKind);
       return { doc: result.doc, createdId: result.itemId };
     }
+    case "add-language-asset": {
+      const result = addLanguageAsset(doc, command.input);
+      return { doc: result.doc, createdId: result.languageAssetId };
+    }
+    case "update-language-asset":
+      return { doc: updateLanguageAsset(doc, command.languageAssetId, command.patch) };
+    case "duplicate-language-asset": {
+      const result = duplicateLanguageAsset(doc, command.languageAssetId);
+      return { doc: result.doc, createdId: result.languageAssetId };
+    }
+    case "delete-language-asset":
+      return { doc: deleteLanguageAsset(doc, command.languageAssetId) };
+    case "place-language-asset": {
+      const result = placeLanguageAsset(doc, {
+        panelId: command.panelId,
+        languageAssetId: command.languageAssetId,
+        at: command.at,
+        text: command.text,
+        attachToItemId: command.attachToItemId,
+      });
+      return { doc: result.doc, createdId: result.itemId };
+    }
+    case "attach-item":
+      return { doc: attachItem(doc, command.itemId, command.targetItemId, command.anchor) };
+    case "detach-item":
+      return { doc: detachItem(doc, command.itemId) };
+    case "apply-attachments":
+      return { doc: applyAttachments(doc, command.panelId) };
     case "reshape-panel":
       return { doc: reshapePanel(doc, command.panelId, command.points) };
     case "set-page-layout":

@@ -19,6 +19,7 @@ import { pointInPolygon } from "@/domain/geometry";
 import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { SOCKET_DRAG_TYPE, decodeSocketDrag, resolveSocketAt } from "@/characters/sockets";
+import { LANGUAGE_DRAG_TYPE } from "@/language/library";
 import { acceptableSockets, patchForSocketDrop, propsAfterDrop } from "@/characters/stateResolver";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { useUiStore } from "@/editor/uiStore";
@@ -284,10 +285,32 @@ export function CanvasStage() {
       e.preventDefault();
       const socketPayload = e.dataTransfer.getData(SOCKET_DRAG_TYPE);
       if (socketPayload && onSocketDrop(socketPayload, e.clientX, e.clientY)) return;
+      const languageAssetId = e.dataTransfer.getData(LANGUAGE_DRAG_TYPE);
       const assetId = e.dataTransfer.getData("application/x-asset-id");
-      if (!assetId || !doc || !page) return;
+      if ((!assetId && !languageAssetId) || !doc || !page) return;
       const workspacePoint = pointerToWorkspace(e.clientX, e.clientY);
       const panelId = panelAtWorkspacePoint(workspacePoint);
+
+      /**
+       * Manga language drops are contextual (§10): dropped on a character the
+       * effect attaches to them and travels with them; dropped on empty panel
+       * space it stays in panel space. The drop point decides, so "put the
+       * sweat drop on Yuri's head" is a gesture rather than a settings dialog.
+       */
+      if (languageAssetId) {
+        if (!panelId) return;
+        const at = pageToPanelLocal(workspaceToPage(workspacePoint, page), panelBoundsPx(doc, doc.panels[panelId]));
+        const host = characterItemAt(doc, panelId, at);
+        const placed = useEditorStore.getState().dispatch({
+          type: "place-language-asset",
+          panelId,
+          languageAssetId,
+          at,
+          attachToItemId: host?.id,
+        });
+        if (placed.createdId) select({ itemId: placed.createdId, panelId });
+        return;
+      }
 
       if (!panelId) {
         const result = useEditorStore.getState().dispatch({ type: "add-workspace-instance", assetId, at: workspacePoint });
@@ -547,4 +570,22 @@ function ZoomButton({ label, onClick }: { label: string; onClick: () => void }) 
 
 function offsetRect(rect: { x: number; y: number; width: number; height: number }, by: Point) {
   return { ...rect, x: rect.x + by.x, y: rect.y + by.y };
+}
+
+/** The topmost character/asset instance under a panel-local point, if any. */
+function characterItemAt(doc: ProjectDocument, panelId: string, at: { x: number; y: number }) {
+  const panel = doc.panels[panelId];
+  if (!panel) return undefined;
+  for (let i = panel.itemIds.length - 1; i >= 0; i -= 1) {
+    const item = doc.items[panel.itemIds[i]];
+    if (item?.kind !== "asset") continue;
+    if (doc.assets[item.sourceAssetId]?.category === "background") continue;
+    if (
+      Math.abs(at.x - item.cx) <= item.width / 2 &&
+      Math.abs(at.y - item.cy) <= item.height / 2
+    ) {
+      return item;
+    }
+  }
+  return undefined;
 }

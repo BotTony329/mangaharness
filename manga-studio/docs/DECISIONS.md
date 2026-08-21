@@ -299,3 +299,19 @@ The Manga Agent was inconsistently resolving existing characters: a prompt namin
 **An unresolvable reference blocks the whole run rather than failing one step.** The remaining steps were written assuming that step succeeded; executing them is precisely how a panel ends up holding the wrong character.
 
 **Execution runs on IDs.** Plan validation binds every character argument to a `characterId` before anything mutates, and rewrites the display name to the bound character's real name so a step label can never read "Yuri" while operating on someone else. The library is re-checked at the generation boundary against the *current* document, because the plan was validated against an older one. Post-conditions then verify the document itself: the requested character is in the requested panel, and no Character exists that the run was not authorized to create.
+
+## D41 — Manga language is a library, not a toolbar
+
+Manga vocabulary was four hard-coded effect kinds in a dropdown. A dropdown cannot grow with a project, so a creator could not bring their own bubble shape, their own anger mark, or anything an AI generated for them.
+
+**Manga language is now a first-class project library** across six categories, fed by three sources: built-ins for speed, uploads for creator ownership, and AI generation to fill gaps. The Agent orchestrates all three through the same search function the creator's search box uses — so the agent can never "reuse" something the human cannot find, or miss something visible on the shelf beside it.
+
+**Built-ins are code, not document data.** They are merged in at read time rather than written into every project, which means they cannot be deleted into undeletable clutter, a new built-in appears in existing projects with no migration, and a saved document carries only what the creator actually owns.
+
+**Structured and visual are kept distinct.** Bubbles, lines, tones and SFX stay parameterized objects that remain editable for the life of the document; a built-in bubble is never a generated bitmap. Uploaded and generated graphics are `SourceAsset`s placed as ordinary `AssetInstance`s, so they inherit transforms, z-order, camera staging and export with no new machinery. Presets like "Radial Speed" and "Shadow Tone" are variations on the existing typed `EffectParams` — new *presets* are data; only a new *kind* is a renderer change.
+
+**SFX reuses the bubble item rather than adding a PanelItem kind.** D39's lesson applies: `kind === "asset" | "bubble" | "effect"` is matched across a dozen files, and a fourth kind would fork all of them. SFX is `bubbleType: "sfx"` with a style whose shape is `none` and whose outline is heavy — editable text, no balloon, and every existing path (selection, transform, undo, export) works untouched.
+
+**Attachment is a document relationship, not a UI convention.** `ItemAttachment` stores the offset in the target's own frame, so a sweat drop follows Yuri through drags, resizes and camera restaging; the command layer recomputes it after anything that can move a subject. Detaching leaves the effect exactly where it is, and deleting the subject releases the attachment rather than snapping the effect to the origin.
+
+**Reuse before generate is enforced deterministically, not by prompting.** `generate_manga_effect` is rejected during plan validation when the library already holds a match, and re-checked at the generation boundary against the current document. The search requires most of the query's meaningful words to land: sharing the single word "black" with "Black Focus Rays" is not a reason to drop focus lines into a panel that asked for smoke — and a weak match masquerading as a hit would suppress the generation the request genuinely needs.

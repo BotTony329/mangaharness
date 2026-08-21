@@ -14,6 +14,7 @@ const BUBBLE_TYPES: { type: BubbleType; label: string }[] = [
   { type: "speech", label: "Speech bubble" },
   { type: "thought", label: "Thought bubble" },
   { type: "shout", label: "Shout bubble" },
+  { type: "whisper", label: "Whisper bubble" },
   { type: "narration", label: "Narration box" },
 ];
 
@@ -106,6 +107,9 @@ export function TopBar() {
       </select>
 
       <Dropdown label="+ Bubble" items={BUBBLE_TYPES.map((b) => ({ key: b.type, label: b.label }))} onPick={(k) => addBubbleToPanel(k as BubbleType)} />
+      {/* Quick access to the most-used built-ins only. The full catalogue —
+          including uploads and generated effects — lives in the Manga FX shelf,
+          because a dropdown cannot grow with a project. */}
       <Dropdown label="+ Effect" items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))} onPick={(k) => addEffectToPanel(k as EffectKind)} />
 
       <div className="flex-1" />

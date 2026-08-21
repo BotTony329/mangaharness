@@ -29,6 +29,7 @@ import type {
   SceneDepth,
   SceneFacing,
   ScenePosition,
+  MangaLanguageCategory,
   CameraAngle,
   CameraLens,
   PerspectiveType,
@@ -40,6 +41,7 @@ import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSourc
 import { findUnreadyCharacterAsset, requireCharacter, requestedCharacterState, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
 import { hasExactState } from "./planValidation";
 import { normalizeReference } from "./grounding";
+import { bestLanguageAsset } from "@/language/library";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
 import { isPuppetInstance } from "@/domain/puppetOps";
 import type { PuppetJoint } from "@/puppet/model";
@@ -118,6 +120,10 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Set ${args.characterName ?? "character"} to ${args.expression} (instant)`;
     case "set_puppet_joint":
       return `Rotate ${args.characterName ?? "character"} ${args.joint} to ${args.degrees}° (instant)`;
+    case "place_manga_effect":
+      return `Add ${args.query} to panel ${args.panel}${args.targetCharacterName ? ` on ${args.targetCharacterName}` : ""}`;
+    case "generate_manga_effect":
+      return `Generate manga ${args.category}: ${String(args.description).slice(0, 40)}`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
     case "set_character_pose_rig": {
@@ -160,6 +166,9 @@ let createdCharacterIds: ID[] = [];
 export function countGenerations(plan: AgentPlan): number {
   return plan.steps.filter((s) => s.tool.startsWith("generate_")).length;
 }
+
+/** Human-readable note for the agent log about what a language step did. */
+let lastLanguageAction: string | undefined;
 
 export async function executePlan(
   plan: AgentPlan,
@@ -204,6 +213,9 @@ function runningDetail(tool: ToolName): string | undefined {
 function completedDetail(tool: ToolName): string | undefined {
   if (tool === "generate_character_asset") return "Image generated · character cutout ready";
   if (tool === "place_character" || tool === "compose_character") return "Character cutout ready · composed";
+  // §13: reuse and generation are both stated explicitly in the run log, so a
+  // creator can always see whether an image was paid for.
+  if (tool === "place_manga_effect" || tool === "generate_manga_effect") return lastLanguageAction;
 }
 
 // ─── Step dispatch ──────────────────────────────────────────────────────────
@@ -259,6 +271,10 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doSetPuppetExpression(args);
     case "set_puppet_joint":
       return doSetPuppetJoint(args);
+    case "place_manga_effect":
+      return doPlaceMangaEffect(args);
+    case "generate_manga_effect":
+      return doGenerateMangaEffect(args);
     case "remove_items":
       return doRemoveItems(args);
   }
@@ -737,6 +753,132 @@ function doRemoveItems(args: { panel: number; kind?: "asset" | "bubble" | "effec
     return item && (!args.kind || item.kind === args.kind);
   });
   for (const itemId of toRemove) dispatch({ type: "delete-instance", instanceId: itemId });
+}
+
+
+// ─── Manga Language Library: SEARCH → REUSE → GENERATE → PLACE (§12) ────────
+
+/**
+ * Place an existing manga-language asset.
+ *
+ * The library is searched first and only reused — this handler cannot
+ * generate. Failing loudly with the name of the fallback tool is what keeps
+ * "add a shocked effect" from silently costing an image generation when a
+ * perfectly good built-in Shock effect is already on the shelf.
+ */
+function doPlaceMangaEffect(args: {
+  panel: number;
+  query: string;
+  category?: MangaLanguageCategory;
+  targetCharacterName?: string;
+  targetCharacterId?: ID;
+  text?: string;
+}): void {
+  const doc = currentDoc();
+  const panelId = panelIdByNumber(args.panel);
+  const asset = bestLanguageAsset(doc, { category: args.category, text: args.query });
+  if (!asset) {
+    throw new Error(
+      `No manga-language asset matches "${args.query}". Use generate_manga_effect to create one, then place it.`,
+    );
+  }
+  placeLanguageAssetOnTarget(doc, panelId, asset.id, args, args.text);
+  lastLanguageAction = `Reused "${asset.name}" (${asset.source})`;
+}
+
+/**
+ * Generate a new manga-language asset, add it to the library, then place it.
+ *
+ * The library is re-checked here against the CURRENT document as well as in
+ * plan validation, because an earlier step in this same run may already have
+ * created what this step is about to pay for.
+ */
+async function doGenerateMangaEffect(args: {
+  description: string;
+  category: MangaLanguageCategory;
+  name?: string;
+  panel?: number;
+  targetCharacterName?: string;
+  targetCharacterId?: ID;
+}): Promise<void> {
+  let doc = currentDoc();
+  const existing = bestLanguageAsset(doc, { category: args.category, text: args.description });
+  if (existing) {
+    throw new Error(`"${existing.name}" already covers that — reuse it with place_manga_effect instead of generating.`);
+  }
+
+  const style = getStyleGenerationContext(doc);
+  const prompt = buildAssetPrompt({
+    assetType: "manga-effect",
+    description: args.description,
+    languageCategory: args.category,
+    style: style.profile,
+    // Project style governs generated language too, so a monochrome project
+    // cannot acquire a full-colour sparkle (§16).
+    monochrome: isMonochromeStyle(style.profile),
+  });
+  const result = await callGenerateApi({
+    assetType: "manga-effect",
+    prompt,
+    negativePrompt: style.profile.negativePrompt,
+    size: "square",
+    expectMonochrome: isMonochromeStyle(style.profile),
+    referenceUrls: style.referenceAsset ? [assetRenderUrl(style.referenceAsset)!] : undefined,
+  });
+  const name = args.name ?? args.description.slice(0, 40);
+  const assetId = await storeGeneratedAsset({
+    result,
+    assetType: "manga-effect",
+    category: "prop",
+    name,
+    prompt,
+    metadata: styleMetadata(style),
+  });
+  const created = dispatch({
+    type: "add-language-asset",
+    input: {
+      category: args.category,
+      name,
+      source: "ai-generated",
+      format: "visual",
+      assetId,
+      tags: [args.category, ...args.description.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)].slice(0, 12),
+      generationMetadata: { prompt, styleProfileId: style.profile.id, createdAt: new Date().toISOString() },
+    },
+  });
+  if (!created.createdId) throw new Error("Generated effect could not be registered in the library");
+  lastLanguageAction = `Generated "${name}" and added it to the library`;
+
+  if (args.panel === undefined) return;
+  doc = currentDoc();
+  placeLanguageAssetOnTarget(doc, panelIdByNumber(args.panel), created.createdId, args);
+}
+
+function placeLanguageAssetOnTarget(
+  doc: ProjectDocument,
+  panelId: ID,
+  languageAssetId: ID,
+  ref: { targetCharacterName?: string; targetCharacterId?: ID },
+  text?: string,
+): void {
+  // Attaching is what makes "around Yuri" mean something: the effect keeps its
+  // relationship to the subject when the subject is moved or restaged.
+  const target =
+    ref.targetCharacterId ?? ref.targetCharacterName
+      ? characterInstanceInPanel(doc, panelId, {
+          characterName: ref.targetCharacterName,
+          characterId: ref.targetCharacterId,
+        })
+      : undefined;
+  const placed = dispatch({
+    type: "place-language-asset",
+    panelId,
+    languageAssetId,
+    text,
+    attachToItemId: target?.id,
+    at: target ? { x: target.cx, y: target.cy - target.height * 0.35 } : undefined,
+  });
+  if (!placed.createdId) throw new Error("The effect could not be placed");
 }
 
 function validatePlanResult(plan: AgentPlan, before: ProjectDocument): CompositionIssue[] {

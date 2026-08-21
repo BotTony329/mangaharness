@@ -243,6 +243,15 @@ const MIGRATIONS: Record<number, Migration> = {
    * before — a flat character is a flat character until someone compiles it.
    */
   9: (doc) => ({ ...doc, puppets: doc.puppets ?? {}, schemaVersion: 10 }),
+  /**
+   * v10 → v11: the Manga Language Library.
+   *
+   * Purely additive. Built-ins live in code and are merged in at read time, so
+   * no project gains stored entries it did not create. Existing bubbles keep
+   * `style` absent, which resolves to the default look for their type — the
+   * same appearance they had before styles existed.
+   */
+  10: (doc) => ({ ...doc, language: doc.language ?? {}, schemaVersion: 11 }),
 };
 
 function migrate(input: unknown): ProjectDocument {

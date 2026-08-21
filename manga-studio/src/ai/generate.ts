@@ -17,7 +17,7 @@ import { createAssetProcessingPipeline } from "@/assets/processingPipeline";
 import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
 
 export const generateRequestSchema = z.object({
-  assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop"]),
+  assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop", "manga-effect"]),
   prompt: z.string().min(3).max(4000),
   negativePrompt: z.string().max(1000).optional(),
   referenceUrls: z.array(z.string().max(2048)).max(3).optional(),
@@ -150,6 +150,10 @@ export async function generateAssetImage(
 function categoryFor(assetType: GeneratedAssetType): AssetCategory {
   if (assetType === "background") return "background";
   if (assetType === "prop") return "prop";
+  // A manga-language visual is an isolated cutout on a flat field, exactly the
+  // shape a prop is — so it takes the prop post-processing path and gets real
+  // transparency instead of a pasted white rectangle.
+  if (assetType === "manga-effect") return "prop";
   return "character";
 }
 

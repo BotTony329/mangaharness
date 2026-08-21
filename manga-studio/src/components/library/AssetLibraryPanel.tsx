@@ -11,19 +11,21 @@ import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { CharactersTab } from "./CharactersTab";
+import { MangaFxTab } from "./MangaFxTab";
 import { uploadImageFile } from "./uploadAsset";
 import { AssetDeleteDialog } from "./LifecycleDialogs";
 
-type LibraryTab = "characters" | "backgrounds" | "props" | "uploads";
+type LibraryTab = "characters" | "backgrounds" | "props" | "mangafx" | "uploads";
 
 const TABS: { id: LibraryTab; label: string }[] = [
   { id: "characters", label: "Characters" },
   { id: "backgrounds", label: "Backgrounds" },
   { id: "props", label: "Props" },
+  { id: "mangafx", label: "Manga FX" },
   { id: "uploads", label: "Uploads" },
 ];
 
-const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters">, AssetCategory> = {
+const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters" | "mangafx">, AssetCategory> = {
   backgrounds: "background",
   props: "prop",
   uploads: "upload",
@@ -39,7 +41,7 @@ export function AssetLibraryPanel() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 px-1 py-2 ${
+            className={`flex-1 px-0.5 py-2 text-[11px] ${
               tab === t.id ? "border-b-2 border-indigo-500 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
             }`}
           >
@@ -48,7 +50,13 @@ export function AssetLibraryPanel() {
         ))}
       </nav>
       <div className="flex-1 overflow-y-auto p-3">
-        {tab === "characters" ? <CharactersTab /> : <CategoryGrid category={TAB_CATEGORY[tab]} />}
+        {tab === "characters" ? (
+          <CharactersTab />
+        ) : tab === "mangafx" ? (
+          <MangaFxTab />
+        ) : (
+          <CategoryGrid category={TAB_CATEGORY[tab]} />
+        )}
       </div>
     </aside>
   );

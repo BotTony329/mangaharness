@@ -30,6 +30,8 @@ export interface AssetPromptInput {
    */
   cameraContext?: string[];
   aspect?: "portrait" | "landscape" | "square";
+  /** Manga Language Library category, for manga-effect generation. */
+  languageCategory?: string;
   /** Provider-neutral project art direction. */
   style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
 }
@@ -75,6 +77,9 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         `Sequential-art background scene: ${input.description ?? "a scene"}.`,
         "Detailed environment, no people, no characters, no text.",
       );
+      break;
+    case "manga-effect":
+      lines.push(mangaEffectDescription(input), mangaEffectIsolation(input));
       break;
     case "prop":
       lines.push(
@@ -212,8 +217,45 @@ function characterIsolationInstruction(input: AssetPromptInput | Omit<AssetPromp
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {
   if (assetType === "background") return "landscape";
-  if (assetType === "prop") return "square";
+  if (assetType === "prop" || assetType === "manga-effect") return "square";
   return "portrait";
+}
+
+/**
+ * Manga-language generation (§5/§16).
+ *
+ * The category is stated as manga vocabulary rather than as a generic subject,
+ * because "emotion mark" and "screentone tile" are terms an image model has
+ * seen in manga context and "a small graphic" is not. Project art direction is
+ * appended by the shared style instruction, so a monochrome project cannot
+ * receive a full-colour sparkle.
+ */
+const LANGUAGE_CATEGORY_PHRASING: Record<string, string> = {
+  bubbles: "manga speech balloon outline, empty inside with no text or lettering",
+  effects: "manga effect line artwork",
+  tones: "seamless manga screentone texture tile",
+  emotion: "manga emotion symbol (the small iconic mark drawn beside a character)",
+  sfx: "hand-drawn manga sound-effect lettering",
+  decorations: "decorative manga graphic element",
+};
+
+function mangaEffectDescription(input: AssetPromptInput): string {
+  const phrasing = LANGUAGE_CATEGORY_PHRASING[input.languageCategory ?? "decorations"] ?? LANGUAGE_CATEGORY_PHRASING.decorations;
+  return `A single ${phrasing}: ${input.description ?? "a manga effect"}.`;
+}
+
+function mangaEffectIsolation(input: AssetPromptInput): string {
+  const strategy = selectBackgroundStrategy({
+    supportsNativeTransparency: input.supportsNativeTransparency,
+    monochrome: input.monochrome,
+  });
+  // A tone tile must fill its frame; every other language asset is one
+  // isolated graphic that will be composited over artwork.
+  const framing =
+    input.languageCategory === "tones"
+      ? "The texture fills the entire frame edge to edge, evenly, with no border, no subject, and no text."
+      : "One single isolated graphic, centered, complete and uncropped. No characters, no scenery, no frame, no border, no watermark, and no text unless the graphic itself is lettering.";
+  return `${framing} ${backgroundInstruction("object", strategy)}`;
 }
 
 function aspectHint(aspect: "portrait" | "landscape" | "square"): string {

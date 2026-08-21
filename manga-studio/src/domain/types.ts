@@ -383,6 +383,31 @@ interface PanelItemBase {
   opacity: number;
   locked?: boolean;
   visible?: boolean;
+  /**
+   * Optional semantic attachment to another item in the same panel (§11).
+   * An attached sweat drop follows Yuri's head when Yuri moves; a detached one
+   * stays in panel space. Absent means panel-space, which is the default.
+   */
+  attachment?: ItemAttachment;
+}
+
+/**
+ * "This effect belongs to that subject."
+ *
+ * Stored relative to the target so the relationship survives the target being
+ * moved, resized, or restaged by the camera — the alternative, recomputing an
+ * absolute offset on every change, silently drifts.
+ */
+export interface ItemAttachment {
+  targetItemId: ID;
+  /** Anchor on the target, normalized within its box: {0.5,0} is above the head. */
+  anchor: Point;
+  /** Offset from the anchor, in multiples of the target's height so it scales along. */
+  offset: Point;
+  /** When true the attached item is scaled by the target's size changes too. */
+  scaleWithTarget: boolean;
+  /** Size at attachment time, used as the basis for proportional scaling. */
+  baseTargetHeight?: number;
 }
 
 /**
@@ -430,13 +455,78 @@ export interface InstanceStage {
 /** Semantic drop targets on a placed character (§6). Derived, never stored. */
 export type CharacterSocket = "face" | "body" | "outfit" | "hand";
 
-export type BubbleType = "speech" | "thought" | "shout" | "whisper" | "narration";
+/**
+ * Semantic dialogue types (§7). The type carries meaning; `BubbleStyle` carries
+ * appearance, so a horror bubble can be restyled without stopping being horror.
+ * "sfx" is dialogue-shaped machinery reused for sound effects — see BubbleStyle.
+ */
+export type BubbleType =
+  | "speech"
+  | "thought"
+  | "shout"
+  | "whisper"
+  | "narration"
+  | "electronic"
+  | "tremble"
+  | "horror"
+  | "cute"
+  | "internal"
+  | "sfx";
+
+export type BubbleShape =
+  | "ellipse"
+  | "rounded-rect"
+  | "rect"
+  | "spiky"
+  | "cloud"
+  | "wavy"
+  | "jagged"
+  | "scalloped"
+  /** No balloon at all — bare text. Used by SFX and by custom-mask bubbles. */
+  | "none";
+
+export type BubbleBorderStyle = "solid" | "dashed" | "double" | "rough";
+export type BubbleTailType = "none" | "point" | "bubbles" | "zigzag";
+
+/**
+ * Editable bubble appearance.
+ *
+ * Every field is a parameter rather than a baked bitmap, so a bubble stays
+ * editable for the life of the document. A custom silhouette is referenced by
+ * `maskAssetId` and drawn *behind* the text layer — never with the text baked
+ * into the image (§8).
+ */
+export interface BubbleStyle {
+  shape: BubbleShape;
+  borderStyle: BubbleBorderStyle;
+  borderWeight: number;
+  tailType: BubbleTailType;
+  fill: string;
+  stroke: string;
+  textColor: string;
+  textAlign: "left" | "center" | "right";
+  /** Fraction of the bubble box kept clear around the text. */
+  padding: number;
+  fontFamily?: string;
+  /** Custom silhouette from the Manga Language Library; text stays editable. */
+  maskAssetId?: ID;
+  // ── SFX-only (§14). Ignored by balloon shapes. ──
+  outlineWidth?: number;
+  outlineColor?: string;
+  vertical?: boolean;
+  /** Perspective/scale exaggeration for impact lettering, 0 = none. */
+  warp?: number;
+}
 
 export interface SpeechBubbleItem extends PanelItemBase {
   kind: "bubble";
   bubbleType: BubbleType;
   text: string;
   fontSize: number;
+  /** Appearance. Absent means "the default look for this bubbleType". */
+  style?: BubbleStyle;
+  /** The library asset this bubble was created from, when it came from one. */
+  languageAssetId?: ID;
   /** Tail target in panel-local pixels; narration boxes have no tail. */
   tail?: { x: number; y: number };
   /**
@@ -457,6 +547,8 @@ export interface EffectItem extends PanelItemBase {
   params: EffectParams;
   /** Optional semantic attachment: the subject this effect describes (§16). */
   targetItemId?: ID;
+  /** The library preset this effect was created from, when it came from one. */
+  languageAssetId?: ID;
 }
 
 export type PanelItem = AssetInstance | SpeechBubbleItem | EffectItem;
@@ -555,6 +647,72 @@ export interface Project {
  * per project; browser persistence stores this JSON, remote object storage
  * holds the image binaries it references by URL.
  */
+
+// ─── Manga Language Library ─────────────────────────────────────────────────
+
+/**
+ * Manga language as a first-class, extensible asset ecosystem (§1).
+ *
+ * The old model hard-coded four effect kinds into a toolbar dropdown. This
+ * makes manga language a *library*: built-ins provide speed, uploads give the
+ * creator ownership, AI generation fills gaps, and the Agent orchestrates all
+ * three through one search surface.
+ */
+export type MangaLanguageCategory =
+  | "bubbles"
+  | "effects"
+  | "tones"
+  | "emotion"
+  | "sfx"
+  | "decorations";
+
+export type MangaLanguageSource = "builtin" | "upload" | "ai-generated";
+
+/**
+ * Structured assets stay parameterized and editable forever. Visual assets are
+ * images — uploaded or generated — placed as ordinary reusable instances.
+ * Flattening everything into PNG would throw away the editability that makes
+ * speed lines and bubbles worth having (§2).
+ */
+export type MangaLanguageFormat = "structured" | "visual";
+
+/** What a structured language asset actually instantiates. */
+export type StructuredLanguageDefinition =
+  | { kind: "bubble"; bubbleType: BubbleType; style: BubbleStyle }
+  | { kind: "effect"; effectKind: EffectKind; params?: Record<string, unknown> }
+  | { kind: "sfx"; text: string; style: BubbleStyle };
+
+export interface MangaLanguageGenerationMetadata {
+  prompt: string;
+  provider?: string;
+  model?: string;
+  styleProfileId?: string;
+  createdAt: ISODate;
+}
+
+export interface MangaLanguageAsset {
+  id: ID;
+  projectId: ID;
+  category: MangaLanguageCategory;
+  name: string;
+  source: MangaLanguageSource;
+  format: MangaLanguageFormat;
+  tags: string[];
+  /** Structured only: the parameterized definition placed into a panel. */
+  structuredDefinition?: StructuredLanguageDefinition;
+  /** Visual only: the SourceAsset holding the image (and its transparency). */
+  assetId?: ID;
+  thumbnailUrl?: string;
+  generationMetadata?: MangaLanguageGenerationMetadata;
+  /**
+   * Stable identifier for built-ins. Built-ins are code, not document data, so
+   * they cannot be deleted into clutter and new ones appear on upgrade.
+   */
+  builtinId?: string;
+  createdAt: ISODate;
+  updatedAt?: ISODate;
+}
+
 export interface ProjectDocument {
   schemaVersion: number;
   project: Project;
@@ -567,6 +725,11 @@ export interface ProjectDocument {
   characterStates: Record<ID, CharacterStateRecord>;
   /** Reusable puppet models, shared across every instance of a character. */
   puppets: Record<ID, MangaPuppet>;
+  /**
+   * Custom and generated manga-language assets. Built-ins live in code and are
+   * merged in at read time, so this holds only what the creator actually owns.
+   */
+  language: Record<ID, MangaLanguageAsset>;
   items: Record<ID, PanelItem>;
   /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
   workspaceItems: Record<ID, WorkspaceItem>;
@@ -574,4 +737,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
