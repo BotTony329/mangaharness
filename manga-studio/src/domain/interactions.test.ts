@@ -330,19 +330,42 @@ describe("acceptance B — hug", () => {
     expect(request.cameraContext).toEqual(["medium shot", "eye level"]);
   });
 
-  it("refuses rather than describing a participant in text when they lack a reference", () => {
+  it("refuses, and names who, when a participant genuinely has no usable reference", () => {
     const c = cast();
     const stripped = structuredClone(c.doc);
+    // Nothing left to fall back on: no pointer AND no usable image anywhere.
     delete stripped.characters[c.mio].canonicalReferenceAssetId;
     delete stripped.characters[c.mio].referenceAssetId;
+    stripped.characters[c.mio].assetIds = [];
+    for (const asset of Object.values(stripped.assets)) {
+      if (asset.metadata?.characterId === c.mio) asset.status = "archived";
+    }
     const created = createInteraction(stripped, {
       panelId: c.panelId,
       participantIds: [c.yuri, c.mio],
       type: "hug",
     });
+    // The message names the character, so the creator knows who to repair.
     expect(() =>
       buildMultiCharacterRequest(created.doc, created.doc.interactions[created.interactionId], {}),
-    ).toThrow(/identity cannot be preserved/);
+    ).toThrow(new RegExp(stripped.characters[c.mio].name));
+  });
+
+  it("recovers a lost pointer from the character's own library instead of failing", () => {
+    const c = cast();
+    const damaged = structuredClone(c.doc);
+    // The exact shape a transparency repair or a replaced original leaves behind.
+    delete damaged.characters[c.mio].canonicalReferenceAssetId;
+    delete damaged.characters[c.mio].referenceAssetId;
+    const created = createInteraction(damaged, {
+      panelId: c.panelId,
+      participantIds: [c.yuri, c.mio],
+      type: "hug",
+    });
+    const request = buildMultiCharacterRequest(created.doc, created.doc.interactions[created.interactionId], {});
+    expect(request.participantReferenceAssetIds).toHaveLength(2);
+    // Two different people, two different pictures.
+    expect(new Set(request.participantReferenceAssetIds).size).toBe(2);
   });
 
   it("records provenance so the image is known to contain both characters", () => {

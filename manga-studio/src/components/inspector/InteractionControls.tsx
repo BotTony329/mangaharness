@@ -23,6 +23,8 @@
 import { useState } from "react";
 import { puppetForInstance } from "@/domain/puppetOps";
 import { executeInteraction } from "@/domain/interactionService";
+import { resolveIdentityReferences, type IdentityReference } from "@/characters/identityReference";
+import { IdentityReferenceRepair } from "./IdentityReferenceRepair";
 import { INTERACTION_LABELS, evaluateInteractionCapability } from "@/domain/interactions";
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
@@ -40,6 +42,8 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   const [pending, setPending] = useState<InteractionType | null>(null);
   const [busy, setBusy] = useState<InteractionType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Set when a joint action stopped because somebody has no reference image. */
+  const [repair, setRepair] = useState<{ action: string; references: IdentityReference[] } | null>(null);
 
   const subject = characterOf(doc, item);
   if (!subject) return null;
@@ -66,7 +70,29 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     setPending(null);
     setBusy(type);
     setError(null);
+    setRepair(null);
     try {
+      /**
+       * Check identity BEFORE spending anything.
+       *
+       * A joint render needs one clear picture of each participant. Finding
+       * that out from a failed generation gives the creator an error; finding
+       * it out here gives them a repair card with the missing name on it.
+       */
+      const capability = evaluateInteractionCapability({
+        type,
+        participantIds: [subject, partnerId],
+        puppets: [puppetForInstance(doc, item), partnerItemFor(doc, partnerId, item.panelId)],
+      });
+      if (!capability.supportedLocally) {
+        const references = resolveIdentityReferences(doc, [subject, partnerId]);
+        if (references.some((reference) => reference.status !== "resolved")) {
+          setRepair({ action: INTERACTION_LABELS[type], references });
+          setBusy(null);
+          return;
+        }
+      }
+
       /**
        * ONE execution path.
        *
@@ -180,6 +206,16 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         {showMore ? "Less" : "More…"}
       </button>
 
+      {repair && (
+        <div className="mt-2">
+          <IdentityReferenceRepair
+            references={repair.references}
+            action={repair.action}
+            onResolved={() => setRepair(null)}
+          />
+        </div>
+      )}
+
       {error && (
         <p className="mt-1.5 rounded-md p-1.5 text-[10px]" style={{ background: "var(--danger-soft)", color: "var(--danger)" }}>
           {error}
@@ -213,6 +249,14 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   );
 }
 
+
+/** The partner's placed instance in this panel, when they have one. */
+function partnerItemFor(doc: ProjectDocument, characterId: ID, panelId: ID) {
+  const item = (doc.panels[panelId]?.itemIds ?? [])
+    .map((id) => doc.items[id])
+    .find((candidate): candidate is AssetInstance => candidate?.kind === "asset" && characterOf(doc, candidate) === characterId);
+  return item ? puppetForInstance(doc, item) : undefined;
+}
 
 function characterOf(doc: ProjectDocument, item: AssetInstance): ID | undefined {
   return characterIdOfInstance(doc, item);

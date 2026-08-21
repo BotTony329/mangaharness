@@ -32,6 +32,7 @@ import type {
   Point,
   ProjectDocument,
 } from "./types";
+import { resolveCharacterIdentityReference } from "@/characters/identityReference";
 import { canApplyJoint } from "@/puppet/capability";
 import { partOfType, type MangaPuppet } from "@/puppet/model";
 
@@ -426,16 +427,18 @@ export function buildMultiCharacterRequest(
   interaction: CharacterInteraction,
   context: { cameraContext?: string[]; styleProfileId?: ID; outfits?: Record<ID, string> },
 ): MultiCharacterGenerationRequest {
+  /**
+   * Identity comes from the canonical reference, resolved through the one
+   * resolver every surface shares. Reading the stored pointer directly is what
+   * made this fail on documents that plainly contained a usable picture.
+   */
   const references: ID[] = [];
   for (const characterId of interaction.participantIds) {
-    const character = doc.characters[characterId];
-    const referenceId = character?.canonicalReferenceAssetId ?? character?.referenceAssetId;
-    if (!referenceId || !doc.assets[referenceId]) {
-      throw new Error(
-        `${character?.name ?? characterId} has no canonical reference, so their identity cannot be preserved in a joint render.`,
-      );
+    const resolved = resolveCharacterIdentityReference(doc, characterId);
+    if (resolved.status !== "resolved" || !resolved.assetId) {
+      throw new Error(resolved.reason ?? `${resolved.characterName} has no usable reference image yet.`);
     }
-    references.push(referenceId);
+    references.push(resolved.assetId);
   }
 
   const names = interaction.participantIds.map((id) => doc.characters[id]?.name ?? id);

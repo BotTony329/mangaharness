@@ -22,6 +22,7 @@
 import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
 import { buildAssetPrompt } from "@/ai/promptTemplates";
 import { assetRenderUrl } from "@/assets/renderSource";
+import { resolveCharacterIdentityReference, resolveIdentityReferences } from "@/characters/identityReference";
 import { stateFromInstance } from "@/characters/state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
@@ -208,6 +209,26 @@ export async function renderInteraction(
   const cached = findInteractionRender(doc(), cacheKey);
   if (cached) return { assetId: cached.generatedAssetId, reusedCache: true, generationCalls: 0 };
 
+  /**
+   * Heal the document before generating.
+   *
+   * A stored pointer that is missing or unusable, while the character owns a
+   * perfectly good picture, is a data fault — not a decision for the creator.
+   * Repairing it here means old projects, transparency repairs and replaced
+   * originals all start working without anybody being asked to understand
+   * metadata.
+   */
+  for (const characterId of participantIds) {
+    const reference = resolveCharacterIdentityReference(doc(), characterId);
+    if (reference.status === "resolved" && reference.needsRepair && reference.assetId) {
+      useEditorStore.getState().dispatch({
+        type: "set-character-reference",
+        characterId,
+        assetId: reference.assetId,
+      });
+    }
+  }
+
   const model = buildMultiCharacterRequest(doc(), interaction, {
     styleProfileId: style.profile.id,
     outfits: Object.fromEntries(participantIds.map((id) => [id, outfitOf(doc(), panelId, id)])),
@@ -222,7 +243,24 @@ export async function renderInteraction(
     .map((id) => assetRenderUrl(doc().assets[id]))
     .filter((url): url is string => Boolean(url));
   if (referenceUrls.length !== participantIds.length) {
-    throw new Error("Every participant needs a usable identity reference before a joint render.");
+    /**
+     * Name who is missing what. The old message named nobody, so a creator
+     * looking at two characters had no idea which one to fix or how.
+     */
+    const missing = resolveIdentityReferences(doc(), participantIds).filter(
+      (reference) => reference.status !== "resolved",
+    );
+    const names = missing.map((reference) => reference.characterName);
+    throw new Error(
+      names.length > 0
+        ? `${names.join(" and ")} ${names.length > 1 ? "need" : "needs"} a reference image before they can be drawn together.`
+        : "One of these characters has no finished reference image yet.",
+    );
+  }
+
+  /** Distinct references, or the model is being asked to draw one person twice. */
+  if (new Set(referenceUrls).size !== referenceUrls.length) {
+    throw new Error("Both characters resolved to the same reference image, so their identities could not be kept apart.");
   }
 
   /**
