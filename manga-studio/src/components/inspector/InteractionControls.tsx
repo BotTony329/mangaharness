@@ -122,7 +122,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     return (
       <button
         key={type}
-        className="flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-indigo-500 hover:text-indigo-200"
+        className="flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
         onClick={() => start(type)}
         title={instant ? "Instant — no generation" : "Needs AI generation"}
       >
@@ -146,9 +146,9 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   }
 
   return (
-    <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-2.5">
+    <div className="rounded-lg bg-[var(--bg-elevated)] p-2.5">
       <div className="mb-1.5 flex items-baseline justify-between">
-        <p className="text-[10px] uppercase tracking-wider text-indigo-300">Interactions</p>
+        <p className="text-[10px] uppercase tracking-wider text-[var(--accent-text)]">Interactions</p>
         {preselected.length > 0 && (
           <span className="text-[9px] text-zinc-500">
             with {doc.characters[preselected[0]]?.name}
@@ -173,7 +173,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
             {partners.map((partner) => (
               <button
                 key={partner.item.id}
-                className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-indigo-500"
+                className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[var(--accent)]"
                 onClick={() => start(pending, partner.characterId)}
               >
                 {doc.characters[partner.characterId]?.name}

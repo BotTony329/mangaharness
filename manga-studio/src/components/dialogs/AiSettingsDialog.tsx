@@ -10,6 +10,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUiStore } from "@/editor/uiStore";
 import {
+  CloseIcon,
+  DoneIcon,
+  HiddenIcon,
+  ICON_SIZE,
+  ICON_SIZE_SM,
+  ICON_STROKE,
+  PendingIcon,
+  VisibleIcon,
+} from "../ui/icons";
+import {
   CustomProviderForm,
   customPayloadFromForm,
   emptyCustomForm,
@@ -68,13 +78,18 @@ export function AiSettingsDialog() {
   return (
     <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/60 py-6" onMouseDown={close}>
       <div
-        className="w-[520px] max-h-[92vh] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="w-[520px] max-h-[92vh] overflow-y-auto rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-1 flex items-center justify-between">
           <h2 className="font-semibold text-zinc-100">AI Providers</h2>
-          <button aria-label="Close settings" className="text-zinc-500 hover:text-zinc-200" onClick={close}>
-            ✕
+          <button
+            aria-label="Close settings"
+            title="Close"
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            onClick={close}
+          >
+            <CloseIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
           </button>
         </div>
         <p className="mb-4 text-xs leading-5 text-zinc-500">
@@ -267,11 +282,15 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
   };
 
   return (
-    <section className="mb-4 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+    <section className="mb-4 rounded-md p-3" style={{ background: "var(--bg-elevated)" }}>
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{title}</h3>
-        <span className={`text-xs ${configured ? "text-emerald-400" : "text-zinc-500"}`}>
-          {configured ? `● Connected${summary?.source === "deployment" ? " (deployment default)" : ""}` : "○ Not configured"}
+        <span
+          className="flex items-center gap-1.5 text-xs"
+          style={{ color: configured ? "var(--success)" : "var(--text-muted)" }}
+        >
+          {configured ? <DoneIcon size={12} strokeWidth={2} /> : <PendingIcon size={12} strokeWidth={2} />}
+          {configured ? `Connected${summary?.source === "deployment" ? " (deployment default)" : ""}` : "Not configured"}
         </span>
       </div>
 
@@ -294,7 +313,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
           <div className="grid grid-cols-2 gap-2">
             <Field label="API standard">
               <select
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                 value={providerType}
                 onChange={(e) => {
                   setProviderType(e.target.value);
@@ -312,7 +331,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
             </Field>
             <Field label="Provider name (optional)">
               <input
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Kimi, MiniMax, …"
@@ -322,7 +341,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
 
           <Field label="Base URL">
             <input
-              className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-xs"
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 font-mono text-xs"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder={typeInfo.placeholder}
@@ -333,7 +352,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
             <div className="relative">
               <input
                 type={showKey ? "text" : "password"}
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 pr-9 font-mono text-xs"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 pr-9 font-mono text-xs"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder={configured ? "Configured — enter a new key to replace" : "sk-…"}
@@ -341,11 +360,16 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
               />
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={() => setShowKey(!showKey)}
-                title={showKey ? "Hide" : "Show while typing"}
+                title={showKey ? "Hide key" : "Show key while typing"}
+                aria-label={showKey ? "Hide key" : "Show key while typing"}
               >
-                {showKey ? "🙈" : "👁"}
+                {showKey ? (
+                  <HiddenIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                ) : (
+                  <VisibleIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                )}
               </button>
             </div>
           </Field>
@@ -353,7 +377,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
           {kind !== "background" && <Field label="Model">
             <div className="flex gap-2">
               <input
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-xs"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 font-mono text-xs"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 placeholder="model-name"
@@ -383,7 +407,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
 
       <div className="mt-2 flex items-center gap-2">
         <button
-          className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+          className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
           onClick={save}
           disabled={busy !== null || !canSave}
         >
@@ -415,7 +439,7 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
         <p className={`mt-2 text-xs ${message.ok ? "text-emerald-400" : "text-red-400"}`}>{message.text}</p>
       )}
       {preview && (
-        <details className="mt-2 rounded border border-zinc-800 bg-zinc-950 p-2">
+        <details className="mt-2 rounded-md bg-[var(--bg-elevated)] p-2">
           <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">
             Request preview (secrets redacted)
           </summary>
@@ -445,7 +469,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function ModeTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
-      className={`flex-1 rounded px-2 py-1 ${active ? "bg-indigo-600/30 text-indigo-200" : "text-zinc-500 hover:text-zinc-300"}`}
+      className={`flex-1 rounded px-2 py-1 ${active ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "text-zinc-500 hover:text-zinc-300"}`}
       onClick={onClick}
     >
       {children}

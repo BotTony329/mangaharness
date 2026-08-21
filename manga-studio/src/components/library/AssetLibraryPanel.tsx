@@ -55,7 +55,7 @@ export function AssetLibraryPanel() {
   const doc = useEditorStore((s) => s.doc);
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col bg-zinc-900">
+    <aside className="flex w-[280px] shrink-0 flex-col" style={{ background: "var(--bg-panel)" }}>
       <ProjectsPanel />
       {!doc ? (
         <p className="p-3 text-center text-[11px] text-zinc-600">Open or create a project to see its assets.</p>
@@ -64,13 +64,13 @@ export function AssetLibraryPanel() {
       <p className="px-2 pt-2 text-[10px] uppercase tracking-wider text-zinc-500">
         {doc.project.name} · Assets
       </p>
-      <nav className="flex border-b border-zinc-800 text-xs">
+      <nav className="flex border-b text-xs" style={{ borderColor: "var(--border-subtle)" }}>
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`flex-1 px-0.5 py-2 text-[11px] ${
-              tab === t.id ? "border-b-2 border-indigo-500 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              tab === t.id ? "border-b-2 border-[var(--accent)] text-[var(--text-primary)]" : "text-zinc-500 hover:text-zinc-300"
             }`}
           >
             {t.label}
@@ -122,7 +122,7 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
     <div>
       <div className="mb-3 flex gap-2">
         <button
-          className="flex-1 rounded border border-zinc-700 bg-zinc-800 py-1.5 text-xs hover:bg-zinc-700"
+          className="flex-1 rounded-md py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-active)] hover:text-[var(--text-primary)]" style={{ background: "var(--bg-elevated)" }}
           onClick={() => fileInput.current?.click()}
           disabled={busy}
         >
@@ -130,7 +130,7 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
         </button>
         {generatorType && (
           <button
-            className="flex-1 rounded border border-indigo-600 bg-indigo-600/20 py-1.5 text-xs text-indigo-300 hover:bg-indigo-600/40"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-hover)]" style={{ background: "var(--accent)" }}
             onClick={() => openGenerator({ assetType: generatorType })}
           >
             {category === "background" ? "+ Generate Scene" : category === "prop" ? "+ Generate Object" : "+ Generate"}
@@ -147,7 +147,7 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
       </div>
       {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
       {assets.length === 0 ? (
-        <div className="mt-6 rounded border border-zinc-800 bg-zinc-950 p-3 text-center text-[11px] leading-5 text-zinc-500">
+        <div className="mt-6 rounded-md p-3 text-center text-[11px] leading-5" style={{ background: "var(--bg-elevated)", color: "var(--text-muted)" }}>
           {category === "background" ? (
             <>
               <p className="text-zinc-400">No scenes yet.</p>
@@ -195,7 +195,7 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
         </div>
       )}
       {archived.length > 0 && (
-        <details className="mt-4 border-t border-zinc-800 pt-3">
+        <details className="mt-4 border-t pt-3" style={{ borderColor: "var(--border-subtle)" }}>
           <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">Archived ({archived.length})</summary>
           <div className="mt-2 flex flex-wrap gap-2">
             {archived.map((asset) => (

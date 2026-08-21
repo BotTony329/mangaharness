@@ -2,7 +2,7 @@
  * Universal image provider: executes a user-described Custom API. The editor
  * still sends the normalized internal request; this adapter renders the
  * user's template, performs the (optionally polled) call, and maps the result
- * out of the response by path. Providers Manga Studio has never heard of
+ * out of the response by path. Providers Kumanga has never heard of
  * connect here without any source change.
  */
 

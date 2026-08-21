@@ -74,13 +74,13 @@ function InteractionDialogInner({ interactionId, onClose }: { interactionId: ID;
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="w-[440px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="w-[440px] rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 className="mb-1 font-semibold text-zinc-100">Creating {INTERACTION_LABELS[interaction.type]}</h2>
         <p className="mb-3 text-xs text-zinc-500">Using {names.join(" and ")}</p>
 
-        <div className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-400">
+        <div className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] leading-4 text-zinc-400">
           A {INTERACTION_LABELS[interaction.type].toLowerCase()} needs the characters to overlap and occlude each
           other, which cannot be produced by moving existing artwork. It is drawn once, using both characters as
           references so neither identity is blended into the other.
@@ -125,7 +125,7 @@ function InteractionDialogInner({ interactionId, onClose }: { interactionId: ID;
               {phase === "generating" ? "Generating…" : previewUrl ? "Regenerate" : "Generate"}
             </button>
             <button
-              className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+              className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
               disabled={!assetId}
               onClick={place}
             >

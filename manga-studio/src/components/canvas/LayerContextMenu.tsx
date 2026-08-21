@@ -14,6 +14,7 @@
 import { useEffect, useRef } from "react";
 import type { ID } from "@/domain/types";
 import type { HitStackEntry } from "@/canvas/hitStack";
+import { ICON_STROKE, LockedIcon } from "../ui/icons";
 
 interface LayerContextMenuProps {
   x: number;
@@ -62,14 +63,16 @@ export function LayerContextMenu({ x, y, entries, selectedItemId, onPick, onClos
             entry.locked
               ? "cursor-not-allowed text-zinc-600"
               : entry.itemId === selectedItemId
-                ? "bg-indigo-600/25 text-indigo-100"
+                ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
                 : "text-zinc-200 hover:bg-zinc-800"
           }`}
           onClick={() => !entry.locked && onPick(entry.itemId)}
         >
           <span className="min-w-0 flex-1 truncate">{entry.label}</span>
           <span className="shrink-0 text-[10px] text-zinc-500">{entry.kind}</span>
-          {entry.locked && <span className="shrink-0 text-[10px]">🔒</span>}
+          {entry.locked && (
+            <LockedIcon size={12} strokeWidth={ICON_STROKE} className="shrink-0 text-[var(--text-muted)]" />
+          )}
         </button>
       ))}
     </div>

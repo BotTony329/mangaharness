@@ -20,7 +20,7 @@ interface TraceEvent {
 /**
  * Manga Agent planning endpoint. The reasoning model is whatever the user
  * connected in AI Settings (session config first, deployment env fallback);
- * the harness — context, skills, tools, validation — is Manga Studio's.
+ * the harness — context, skills, tools, validation — is Kumanga's.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = crypto.randomUUID();

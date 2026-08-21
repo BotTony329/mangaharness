@@ -113,7 +113,7 @@ export function PoseEditControls({ item }: { item: AssetInstance }) {
           Calibrate Rig
         </button>
         {isPoseEdited(state.poseRig) && (
-          <p className="col-span-2 mt-1 text-[10px] text-indigo-300">{describePoseRig(state.poseRig, state.pose)}</p>
+          <p className="col-span-2 mt-1 text-[10px] text-[var(--accent-text)]">{describePoseRig(state.poseRig, state.pose)}</p>
         )}
         {savedCalibration && (
           <p className="col-span-2 text-[10px] text-amber-400/80">Rig calibrated for this render.</p>
@@ -151,7 +151,7 @@ export function PoseEditControls({ item }: { item: AssetInstance }) {
       <select
         aria-label="Base pose"
         disabled={busy}
-        className="mb-2 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-[11px]"
+        className="mb-2 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-[11px]"
         value={draft.basePose}
         onChange={(event) => setPoseDraft(createPoseRigState(event.target.value))}
       >

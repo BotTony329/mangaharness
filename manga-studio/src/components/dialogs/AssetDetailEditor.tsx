@@ -30,6 +30,7 @@ import { buildEditInstruction } from "@/assets/editRequest";
 import type { AssetInstance, ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import { GenerateIcon, ICON_STROKE, SpinnerIcon } from "../ui/icons";
 
 type Tool = "brush" | "rectangle";
 
@@ -247,7 +248,7 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
                 <button
                   key={option}
                   className={`flex-1 rounded border px-2 py-1 capitalize ${
-                    tool === option ? "border-indigo-500 bg-indigo-600/25 text-indigo-200" : "border-zinc-700 text-zinc-400"
+                    tool === option ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-zinc-700 text-zinc-400"
                   }`}
                   onClick={() => setTool(option)}
                 >
@@ -265,7 +266,7 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
                 min={8}
                 max={Math.max(64, Math.round(asset.width / 3))}
                 value={brushSize}
-                className="w-full accent-indigo-500"
+                className="w-full"
                 onChange={(event) => setBrushSize(Number(event.target.value))}
               />
             </label>
@@ -287,7 +288,7 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
                 min={0}
                 max={MAX_FEATHER}
                 value={feather}
-                className="w-full accent-indigo-500"
+                className="w-full"
                 onChange={(event) => setFeather(Number(event.target.value))}
               />
             </label>
@@ -409,20 +410,27 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
           <div>
             <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">What should change?</p>
             <textarea
-              className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2 text-sm"
+              className="h-20 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] p-2 text-sm"
               placeholder="fix the hand and make her hold a smartphone"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
             />
             <button
-              className="mt-1 w-full rounded bg-indigo-600 py-1.5 text-white hover:bg-indigo-500 disabled:opacity-40"
+              className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] py-1.5 font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-40"
               disabled={busy || !hasMask || prompt.trim().length === 0}
               title={!hasMask ? "Select an area first" : prompt.trim() ? undefined : "Describe the change"}
               onClick={() => void generate()}
             >
-              {busy ? "Generating…" : "Generate ✦"}
+              {busy ? (
+                <SpinnerIcon size={13} strokeWidth={ICON_STROKE} className="animate-spin" />
+              ) : (
+                <GenerateIcon size={13} strokeWidth={ICON_STROKE} />
+              )}
+              {busy ? "Generating…" : "Generate"}
             </button>
-            <p className="mt-1 text-[10px] text-zinc-600">✦ uses one AI generation.</p>
+            <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+              Uses one AI generation.
+            </p>
             {/*
               An honest limit, stated before the creator spends a generation on
               it. Everything outside the selection is copied from the original
@@ -446,7 +454,7 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
                   <button
                     key={candidate.url}
                     className={`h-14 w-14 overflow-hidden rounded border ${
-                      index === chosen ? "border-indigo-500" : "border-zinc-700"
+                      index === chosen ? "border-[var(--accent)]" : "border-zinc-700"
                     }`}
                     onClick={() => setChosen(index)}
                   >
@@ -466,7 +474,7 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
           {result && (
             <div className="mt-auto space-y-1">
               <button
-                className="w-full rounded bg-indigo-600 py-1.5 text-white hover:bg-indigo-500"
+                className="w-full rounded-md bg-[var(--accent)] py-1.5 text-white hover:bg-[var(--accent-hover)]"
                 onClick={() => {
                   saveVariation();
                   onClose();

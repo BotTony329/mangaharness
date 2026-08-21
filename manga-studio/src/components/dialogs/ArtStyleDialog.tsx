@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StyleFamilyId, StyleProfile } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import { CloseIcon, ICON_SIZE, ICON_STROKE } from "../ui/icons";
 import {
   BUILTIN_STYLE_PROFILES,
   STYLE_FAMILIES,
@@ -45,7 +46,14 @@ function ArtStyleDialogInner({ onClose }: { onClose: () => void }) {
           <div className="ml-auto rounded-full border border-violet-700/60 bg-violet-950/40 px-3 py-1 text-xs text-violet-200">
             Active · {active.name}
           </div>
-          <button aria-label="Close art style" className="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800" onClick={onClose}>✕</button>
+          <button
+            aria-label="Close art style"
+            title="Close"
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            onClick={onClose}
+          >
+            <CloseIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+          </button>
         </header>
 
         <div className="grid min-h-0 flex-1 grid-cols-[230px_1fr]">
@@ -244,7 +252,7 @@ function CustomStyleForm() {
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <label className="block text-xs text-zinc-400">{label}<input className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-200" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>;
+  return <label className="block text-xs text-zinc-400">{label}<input className="mt-1 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-zinc-200" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>;
 }
 
 function TextField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {

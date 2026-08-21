@@ -79,7 +79,7 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
             max={MAX_MANGA_PERSPECTIVE}
             step={1}
             value={camera.mangaPerspectiveStrength}
-            className="w-full accent-indigo-500"
+            className="w-full"
             onChange={(event) =>
               dispatch({
                 type: "set-panel-camera",

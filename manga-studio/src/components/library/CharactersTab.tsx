@@ -16,6 +16,18 @@ import { generateCharacterAssetForState, starterPackStates } from "@/characters/
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import {
+  AlertIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  DeleteIcon,
+  DoneIcon,
+  ICON_SIZE_SM,
+  ICON_STROKE,
+  PendingIcon,
+  RenameIcon,
+  SpinnerIcon,
+} from "../ui/icons";
 import { AssetThumb } from "./AssetThumb";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
@@ -38,7 +50,7 @@ export function CharactersTab() {
   return (
     <div className="space-y-3">
       <button
-        className="w-full rounded border border-indigo-600 bg-indigo-600/20 py-1.5 text-xs text-indigo-300 hover:bg-indigo-600/40"
+        className="w-full rounded-md bg-[var(--accent-soft)] py-1.5 text-xs text-[var(--accent-text)] transition-colors hover:bg-[var(--accent)] hover:text-white"
         onClick={() => setCreating(true)}
       >
         + New Character
@@ -73,25 +85,38 @@ function CharacterCard({ character }: { character: Character }) {
   const stateGroups = groupCharacterStates(stateAssets, character.id);
 
   return (
-    <section className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+    <section className="rounded-md p-2" style={{ background: "var(--bg-elevated)" }}>
       <div className="flex items-center gap-1">
         <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen(!open)}>
-          <span className="text-zinc-500">{open ? "▾" : "▸"}</span>
+          <ChevronRightIcon
+            size={13}
+            strokeWidth={ICON_STROKE}
+            className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+          />
           <span className="truncate text-sm font-medium text-zinc-200">{character.name}</span>
           <span className="ml-auto text-[10px] text-zinc-500">{assets.length} assets</span>
         </button>
         <button
           type="button"
-          className="rounded px-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           title={`Rename ${character.name}`}
+          aria-label={`Rename ${character.name}`}
           onClick={() => {
             const name = prompt("Rename Character", character.name);
             if (name?.trim()) useEditorStore.getState().dispatch({ type: "rename-character", characterId: character.id, name });
           }}
         >
-          ✎
+          <RenameIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
         </button>
-        <button type="button" className="rounded px-1.5 text-red-400 hover:bg-red-950/50" title={`Delete ${character.name}`} onClick={() => setDeleteCharacterOpen(true)}>✕</button>
+        <button
+          type="button"
+          className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+          title={`Delete ${character.name}`}
+          aria-label={`Delete ${character.name}`}
+          onClick={() => setDeleteCharacterOpen(true)}
+        >
+          <DeleteIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+        </button>
       </div>
       {open && (
         <div className="mt-2 space-y-3">
@@ -107,7 +132,7 @@ function CharacterCard({ character }: { character: Character }) {
             />
           ) : (
             <button
-              className="w-full rounded border border-dashed border-zinc-700 py-2 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-300"
+              className="w-full rounded border border-dashed border-zinc-700 py-2 text-xs text-zinc-500 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
               onClick={() => openGenerator({ assetType: "character", characterId: character.id })}
             >
               Generate character reference
@@ -150,7 +175,7 @@ function CharacterCard({ character }: { character: Character }) {
                 />
               ))}
               <button
-                className="h-[104px] w-[104px] rounded-md border border-dashed border-zinc-700 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-300"
+                className="h-[104px] w-[104px] rounded-md border border-dashed border-zinc-700 text-xs text-zinc-500 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                 onClick={() => openGenerator({ assetType: "character-pose", characterId: character.id })}
               >
                 + Variation
@@ -257,7 +282,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
       return;
     }
     if (generateAfter && providerStatus?.storage?.configured === false) {
-      setError("Generation is unavailable until persistent asset storage is connected by the Manga Studio operator.");
+      setError("Generation is unavailable until persistent asset storage is connected by the Kumanga operator.");
       return;
     }
     setIsBusy(true);
@@ -361,14 +386,14 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="max-h-[92vh] w-[380px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
+        className="max-h-[92vh] w-[380px] overflow-y-auto rounded-lg bg-[var(--bg-elevated)] p-4 shadow-2xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">New Character</h2>
         <label htmlFor="character-name" className="mb-1 block text-xs text-zinc-400">Name</label>
         <input
           id="character-name"
-          className="mb-3 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          className="mb-3 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Akari"
@@ -377,7 +402,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         <label htmlFor="character-appearance" className="mb-1 block text-xs text-zinc-400">Appearance</label>
         <textarea
           id="character-appearance"
-          className="mb-3 h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          className="mb-3 h-20 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
           value={appearance}
           onChange={(e) => setAppearance(e.target.value)}
           placeholder="Young girl with long sleek hair, calm eyes and a polished appearance."
@@ -385,7 +410,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         <label htmlFor="character-personality" className="mb-1 block text-xs text-zinc-400">Personality / visual identity (optional)</label>
         <textarea
           id="character-personality"
-          className="mb-3 h-16 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          className="mb-3 h-16 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
           value={personalityNotes}
           onChange={(e) => setPersonalityNotes(e.target.value)}
           placeholder="Cool, composed and slightly aloof."
@@ -425,7 +450,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         ) : (
           <button
             type="button"
-            className="mb-3 flex w-full flex-col items-center rounded-md border border-dashed border-zinc-600 bg-zinc-950/60 px-4 py-5 text-center hover:border-indigo-500 hover:bg-indigo-950/20"
+            className="mb-3 flex w-full flex-col items-center rounded-md border border-dashed border-zinc-600 bg-zinc-950/60 px-4 py-5 text-center hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
             onClick={() => fileInput.current?.click()}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
@@ -453,8 +478,15 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
           <div className="mb-3 max-h-44 space-y-1 overflow-y-auto rounded border border-zinc-700 p-2 text-[11px]">
             {packItems.map((item, index) => (
               <div key={`${item.label}-${index}`} className="flex items-start gap-2">
-                <span className={item.status === "failed" ? "text-red-400" : item.status === "done" ? "text-emerald-400" : item.status === "running" ? "text-indigo-300" : "text-zinc-600"}>
-                  {item.status === "done" ? "✓" : item.status === "failed" ? "!" : item.status === "running" ? "●" : "○"}
+                <span className="mt-0.5 shrink-0">
+                  {item.status === "done" && <DoneIcon size={12} strokeWidth={2} className="text-[var(--success)]" />}
+                  {item.status === "failed" && <AlertIcon size={12} strokeWidth={2} className="text-[var(--danger)]" />}
+                  {item.status === "running" && (
+                    <SpinnerIcon size={12} strokeWidth={2} className="animate-spin text-[var(--accent-text)]" />
+                  )}
+                  {item.status !== "done" && item.status !== "failed" && item.status !== "running" && (
+                    <PendingIcon size={12} strokeWidth={2} className="text-[var(--text-muted)]" />
+                  )}
                 </span>
                 <span>{item.label}{item.error ? ` — ${item.error}` : ""}</span>
               </div>
@@ -482,13 +514,13 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
           </button>
           {generationUnavailable ? (
             <button
-              className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
+              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-white hover:bg-[var(--accent-hover)]"
               onClick={() => {
                 if (providerStatus?.configured === false) {
                   onClose();
                   useUiStore.getState().openSettings();
                 } else {
-                  setError("Generation is unavailable until persistent asset storage is connected by the Manga Studio operator.");
+                  setError("Generation is unavailable until persistent asset storage is connected by the Kumanga operator.");
                 }
               }}
             >
@@ -496,7 +528,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
             </button>
           ) : (
             <button
-              className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500 disabled:opacity-40"
+              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
               disabled={isBusy || providerStatus === null}
               onClick={() => create(true)}
             >
@@ -662,11 +694,12 @@ function RelationshipsRow({ character }: { character: Character }) {
                 {other?.name ?? "Unknown"} <span className="text-zinc-500">· {edge.label ?? RELATIONSHIP_LABELS[edge.type]}</span>
               </span>
               <button
-                className="shrink-0 px-1 text-[10px] text-zinc-600 hover:text-red-400"
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
                 aria-label={`Remove relationship with ${other?.name ?? "character"}`}
+                title="Remove relationship"
                 onClick={() => dispatch({ type: "remove-relationship", relationshipId: edge.id })}
               >
-                ✕
+                <CloseIcon size={11} strokeWidth={2.25} />
               </button>
             </li>
           );
@@ -701,7 +734,7 @@ function RelationshipsRow({ character }: { character: Character }) {
             ))}
           </select>
           <button
-            className="w-full rounded bg-indigo-600 py-1 text-[11px] text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="w-full rounded-md bg-[var(--accent)] py-1 text-[11px] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
             disabled={!otherId}
             onClick={() => {
               dispatch({

@@ -17,6 +17,14 @@ import type { AgentPlan } from "@/agent/tools/schemas";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import {
+  AlertIcon,
+  CheckIcon,
+  CloseIcon,
+  DoneIcon,
+  PendingIcon,
+  SpinnerIcon,
+} from "../ui/icons";
 
 type Phase = "idle" | "planning" | "confirm" | "executing" | "done" | "error";
 
@@ -257,7 +265,7 @@ export function AgentPanel() {
       <div>
         <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">What do you want to create?</p>
         <textarea
-          className="h-24 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2 text-sm"
+          className="h-24 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] p-2 text-sm"
           placeholder={'e.g. "Create a 4-panel manga where Akari gets her exam result, celebrates, then realizes she misread the score."'}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -281,7 +289,7 @@ export function AgentPanel() {
             </select>
           </label>
           <button
-            className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
             disabled={busy || prompt.trim().length < 3 || agentConfigured === false}
             onClick={() => run(prompt.trim())}
           >
@@ -294,7 +302,7 @@ export function AgentPanel() {
         <div className="rounded border border-zinc-700 bg-zinc-950/80 p-3 text-center">
           <p className="mb-2 text-zinc-400">Connect an AI model to use the Manga Agent.</p>
           <button
-            className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+            className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-white hover:bg-[var(--accent-hover)]"
             onClick={openSettings}
           >
             Connect Model
@@ -308,7 +316,7 @@ export function AgentPanel() {
           {QUICK_ACTIONS.filter((a) => a.needs !== "panel" || selection.panelId).map((action) => (
             <button
               key={action.label}
-              className="rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 hover:border-indigo-500 hover:text-indigo-300 disabled:opacity-40"
+              className="rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 hover:border-[var(--accent)] hover:text-[var(--accent-text)] disabled:opacity-40"
               disabled={busy || agentConfigured === false}
               onClick={() => {
                 setPrompt(action.prompt);
@@ -326,13 +334,17 @@ export function AgentPanel() {
       )}
 
       {grounding && grounding.entities.length > 0 && (
-        <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2" aria-label="Agent understanding">
+        <div className="rounded-md bg-[var(--bg-elevated)] p-2" aria-label="Agent understanding">
           <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Understanding</p>
           <ul className="space-y-0.5">
             {grounding.entities.map((entity) => (
               <li key={entity.surface} className="flex items-start gap-1.5">
-                <span className={entity.status === "resolved" ? "text-emerald-400" : "text-red-400"}>
-                  {entity.status === "resolved" ? "✓" : "✕"}
+                <span className="mt-0.5 shrink-0">
+                  {entity.status === "resolved" ? (
+                    <CheckIcon size={12} strokeWidth={2.25} className="text-[var(--success)]" />
+                  ) : (
+                    <CloseIcon size={12} strokeWidth={2.25} className="text-[var(--danger)]" />
+                  )}
                 </span>
                 <span className={entity.status === "resolved" ? "text-zinc-300" : "text-red-300"}>
                   {entity.status === "resolved" ? (
@@ -351,8 +363,9 @@ export function AgentPanel() {
           </ul>
           {/* Creation is only ever announced when the user actually asked for it. */}
           {grounding.creation.allowed && (
-            <p className="mt-1 text-[10px] text-amber-300">
-              ✓ New character requested{grounding.creation.requestedNames.length > 0 ? `: ${grounding.creation.requestedNames.join(", ")}` : ""}
+            <p className="mt-1 flex items-center gap-1 text-[10px] text-amber-300">
+              <CheckIcon size={11} strokeWidth={2.25} />
+              New character requested{grounding.creation.requestedNames.length > 0 ? `: ${grounding.creation.requestedNames.join(", ")}` : ""}
             </p>
           )}
         </div>
@@ -363,7 +376,10 @@ export function AgentPanel() {
           <p className="mb-1 text-[10px] uppercase tracking-wider text-amber-500">Rejected before execution</p>
           <ul className="space-y-0.5 text-[10px] text-amber-200/90">
             {assetTrace.map((entry) => (
-              <li key={entry}>○ {entry}</li>
+              <li key={entry} className="flex items-start gap-1.5">
+                <PendingIcon size={10} strokeWidth={2} className="mt-1 shrink-0 opacity-70" />
+                {entry}
+              </li>
             ))}
           </ul>
         </div>
@@ -405,17 +421,25 @@ export function AgentPanel() {
       )}
 
       {plan && steps.length > 0 && (
-        <div className="min-h-0 flex-1 overflow-y-auto rounded border border-zinc-800 bg-zinc-950/60 p-2">
-          <p className="mb-1 text-[10px] font-medium text-indigo-300">Target: {plan.targetScope?.label ?? "Current Page"}</p>
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-md bg-[var(--bg-elevated)] p-2">
+          <p className="mb-1 text-[10px] font-medium text-[var(--accent-text)]">Target: {plan.targetScope?.label ?? "Current Page"}</p>
           <p className="mb-2 text-zinc-400">{plan.summary}</p>
           <ul className="space-y-1">
             {steps.map((step, i) => (
               <li key={i} className="flex items-start gap-2">
-                <span className="mt-0.5">
-                  {step.status === "pending" && <span className="text-zinc-600">○</span>}
-                  {step.status === "running" && <span className="animate-pulse text-indigo-400">◐</span>}
-                  {step.status === "done" && <span className="text-emerald-400">●</span>}
-                  {step.status === "failed" && <span className="text-red-400">✕</span>}
+                <span className="mt-0.5 shrink-0">
+                  {step.status === "pending" && (
+                    <PendingIcon size={12} strokeWidth={2} className="text-[var(--text-muted)]" />
+                  )}
+                  {step.status === "running" && (
+                    <SpinnerIcon size={12} strokeWidth={2} className="animate-spin text-[var(--accent-text)]" />
+                  )}
+                  {step.status === "done" && (
+                    <DoneIcon size={12} strokeWidth={2} className="text-[var(--success)]" />
+                  )}
+                  {step.status === "failed" && (
+                    <AlertIcon size={12} strokeWidth={2} className="text-[var(--danger)]" />
+                  )}
                 </span>
                 <span className={step.status === "failed" ? "text-red-300" : "text-zinc-300"}>
                   {step.label}
@@ -431,7 +455,7 @@ export function AgentPanel() {
           {phase === "confirm" && plan && (
             <div className="mt-3 flex gap-2">
               <button
-                className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
+                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-white hover:bg-[var(--accent-hover)]"
                 onClick={() => execute(plan, guards ?? undefined)}
               >
                 Continue ({countGenerations(plan)} generations)

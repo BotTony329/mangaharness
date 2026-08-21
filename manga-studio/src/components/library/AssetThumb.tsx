@@ -10,6 +10,7 @@ import type { SourceAsset } from "@/domain/types";
 import { assetPreviewUrl } from "@/assets/renderSource";
 import { removeAssetBackground } from "@/assets/clientProcessing";
 import { useUiStore } from "@/editor/uiStore";
+import { CloseIcon, GenerateIcon, ICON_STROKE } from "../ui/icons";
 import { BACKGROUND_REMOVAL_FAILED_MESSAGE, assetSatisfiesTransparencyContract, requiresTransparency } from "@/assets/characterAssetContract";
 
 interface AssetThumbProps {
@@ -90,13 +91,14 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
           className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-zinc-900/90 text-xs text-zinc-400 hover:text-red-400 group-hover:flex"
           onClick={onDelete}
           title="Remove from library"
+          aria-label="Remove from library"
         >
-          ✕
+          <CloseIcon size={12} strokeWidth={2} />
         </button>
       )}
       {menuOpen && (
-        <div className="absolute left-2 top-8 z-40 min-w-40 rounded border border-zinc-600 bg-zinc-900 p-1 text-[11px] shadow-xl">
-          <MenuItem label="Edit Image ✦" onClick={() => useUiStore.getState().openAssetEditor({ assetId: asset.id })} />
+        <div className="absolute left-2 top-8 z-40 min-w-40 rounded-md bg-[var(--bg-elevated)] p-1 text-[11px] shadow-xl shadow-black/50">
+          <MenuItem label="Edit Image" generative onClick={() => useUiStore.getState().openAssetEditor({ assetId: asset.id })} />
           {onUse && <MenuItem label="Use in selected panel" onClick={onUse} />}
           {onRename && <MenuItem label="Rename" onClick={onRename} />}
           {onRegenerate && <MenuItem label="Regenerate and replace" onClick={onRegenerate} />}
@@ -114,16 +116,30 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
   );
 }
 
-function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+function MenuItem({
+  label,
+  onClick,
+  danger,
+  generative,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  /** Marks an action that spends a generation — an icon, not a sparkle emoji. */
+  generative?: boolean;
+}) {
   return (
     <button
       type="button"
-      className={`block w-full rounded px-2 py-1.5 text-left hover:bg-zinc-800 ${danger ? "text-red-300" : "text-zinc-300"}`}
+      className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
+        danger ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"
+      }`}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
       }}
     >
+      {generative && <GenerateIcon size={12} strokeWidth={ICON_STROKE} className="text-[var(--accent-text)]" />}
       {label}
     </button>
   );

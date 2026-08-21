@@ -1,8 +1,40 @@
-# Manga Studio Engineering Context
+# Kumanga Engineering Context
 
 > Read this first, then check `git log --oneline -10`. If this document
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
+
+## Product Identity
+
+**Name:** Kumanga — *kuma* (bear) + *manga*.
+**Tagline:** AI Manga Studio.
+**Browser title:** `Kumanga — AI Manga Studio`.
+
+The mark is a black bear head with a small outlined manga speech bubble at the
+lower right. It is a RECONSTRUCTION of approved reference artwork — never
+regenerate or redesign it. Every variant comes from one geometry definition in
+`scripts/build-brand.mjs`; edit that and re-run it rather than touching an SVG.
+
+| Asset | Path |
+|---|---|
+| Mark, dark ink | `public/brand/kumanga-mark.svg` |
+| Mark, light ink | `public/brand/kumanga-mark-dark.svg` |
+| Mark without the bubble (≤20px) | `public/brand/kumanga-mark-compact.svg` |
+| App tile, favicon | `public/brand/kumanga-icon.svg`, `src/app/icon.svg` |
+| Wordmark | `public/brand/kumanga-wordmark{,-dark}.svg` |
+| In-app React mark | `src/components/brand/KumangaMark.tsx` |
+
+**Icon system:** Lucide, re-exported through `src/components/ui/icons.tsx` at one
+size and stroke weight. No emoji anywhere in the product UI. The bear is brand;
+editor controls stay conventional.
+
+**Design tokens:** `src/app/globals.css` (`--bg-app`, `--bg-panel`,
+`--bg-elevated`, `--border-subtle`, `--text-*`, `--accent`, `--danger`, radius
+and spacing). Accent is Kumanga purple `#7c5cff`, reserved for the primary
+action and the selected state.
+
+**Button hierarchy:** `src/components/ui/Button.tsx` — primary, secondary,
+ghost, icon, danger. Only primary and secondary draw a filled shape.
 
 ## Current Product Thesis
 
@@ -186,6 +218,12 @@ migration.
 
 ## Last Completed Work
 
+**Kumanga brand + flat UI pass.** Product renamed from "Manga Studio"; the
+approved bear mark reconstructed as vector and wired through favicon, manifest,
+toolbar, welcome screen and README. Design tokens introduced, Lucide adopted as
+the single icon system, every emoji removed from the product UI, and the button
+hierarchy flattened (see D60/D61).
+
 **V3.5 — MVP completion / debt closure.** See `docs/MVP_COMPLETION_AUDIT.md` for
 the item-by-item classification.
 
@@ -207,7 +245,7 @@ the item-by-item classification.
 - **Ground plane + depth handle** on canvas, **Inspector tabs**
   (Look / Position / Scene), **one `+ Generate`** entry point.
 
-**Tests:** 749 passing / 59 files. Typecheck, lint and production build clean.
+**Tests:** 749 passing / 60 files. Typecheck, lint and production build clean.
 
 ## Known Bugs / UX Problems
 
@@ -226,6 +264,12 @@ the item-by-item classification.
   there is no per-participant escalation.
 - Placing into a snap-enabled panel does not auto-stage the new instance; the
   creator still presses "Place on Stage".
+- The brand pass touched surfaces and buttons, not layout. Several panels
+  (`PoseEditControls`, `PuppetControls`, `PanelStageControls`) still use raw
+  `zinc-*` utilities rather than tokens; they read correctly but will drift if
+  the palette changes.
+- `LifecycleDialogs` and `InteractionControls` still carry a few bordered chips
+  that could become tone-only.
 
 ## Next Recommended Work
 

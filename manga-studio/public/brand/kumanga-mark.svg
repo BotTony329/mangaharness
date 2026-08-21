@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="Kumanga">
+  <mask id="km-light" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+    <path d="M 25 14 C 40.12 14 46 19.46 46 33.5 C 46 47.54 40.12 53 25 53 C 9.88 53 4 47.54 4 33.5 C 4 19.46 9.88 14 25 14 Z" fill="#fff"/>
+    <circle cx="12.2" cy="15.4" r="8.7" fill="#fff"/>
+    <circle cx="37.8" cy="15.4" r="8.7" fill="#fff"/>
+    <ellipse cx="17.6" cy="29.5" rx="3.1" ry="4.1" fill="#000"/>
+    <ellipse cx="32.4" cy="29.5" rx="3.1" ry="4.1" fill="#000"/>
+    <ellipse cx="25" cy="41.5" rx="9.4" ry="6.6" fill="#000"/>
+    <ellipse cx="25" cy="38.9" rx="3.3" ry="2.5" fill="#fff"/>
+    <g fill="#000" stroke="#000" stroke-width="5.4" stroke-linejoin="round">
+      <path d="M 43 32.5 H 55 A 5 5 0 0 1 60 37.5 V 45.5 A 5 5 0 0 1 55 50.5 H 43 A 5 5 0 0 1 38 45.5 V 37.5 A 5 5 0 0 1 43 32.5 Z"/>
+      <path d="M 42.6 47 L 38.4 57.4 L 49.4 50.4 Z"/>
+    </g>
+    <path d="M 43 32.5 H 55 A 5 5 0 0 1 60 37.5 V 45.5 A 5 5 0 0 1 55 50.5 H 43 A 5 5 0 0 1 38 45.5 V 37.5 A 5 5 0 0 1 43 32.5 Z" fill="#fff"/>
+    <path d="M 42.6 47 L 38.4 57.4 L 49.4 50.4 Z" fill="#fff"/>
+    <path d="M 44.2 36.4 H 53.8 A 2.6 2.6 0 0 1 56.4 39 V 44 A 2.6 2.6 0 0 1 53.8 46.6 H 44.2 A 2.6 2.6 0 0 1 41.6 44 V 39 A 2.6 2.6 0 0 1 44.2 36.4 Z" fill="#000"/>
+  </mask>
+  <rect width="64" height="64" fill="#18181b" mask="url(#km-light)"/>
+</svg>

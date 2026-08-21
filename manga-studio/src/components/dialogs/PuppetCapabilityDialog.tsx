@@ -41,7 +41,7 @@ export function PuppetCapabilityDialog() {
         <h2 className="mb-1 font-semibold text-amber-200">Pose exceeds this puppet&apos;s local range.</h2>
         <p className="mb-2 text-xs leading-5 text-zinc-400">{prompt.reason}</p>
         {prompt.fallbackRecommendation && (
-          <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-500">
+          <p className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] leading-4 text-zinc-500">
             {prompt.fallbackRecommendation}
           </p>
         )}
@@ -54,7 +54,7 @@ export function PuppetCapabilityDialog() {
             Cancel — keep the puppet as it is
           </button>
           <button
-            className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
             disabled={!characterId}
             onClick={() => {
               close();

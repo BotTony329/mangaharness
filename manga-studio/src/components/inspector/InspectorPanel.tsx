@@ -18,6 +18,17 @@ import { PanelStageControls } from "./PanelStageControls";
 import { LayersPanel } from "./LayersPanel";
 import { InteractionControls } from "./InteractionControls";
 import { useUiStore } from "@/editor/uiStore";
+import {
+  DeleteIcon,
+  DownIcon,
+  DuplicateIcon,
+  GenerateIcon,
+  ICON_SIZE,
+  ICON_STROKE,
+  ToBackIcon,
+  ToFrontIcon,
+  UpIcon,
+} from "../ui/icons";
 import { PoseEditControls } from "./PoseEditControls";
 import { PuppetControls } from "./PuppetControls";
 import { isPuppetInstance } from "@/domain/puppetOps";
@@ -126,7 +137,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           <button
             key={entry.id}
             className={`flex-1 px-2 py-1.5 text-[11px] ${
-              tab === entry.id ? "border-b-2 border-indigo-500 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              tab === entry.id ? "border-b-2 border-[var(--accent)] text-[var(--text-primary)]" : "text-zinc-500 hover:text-zinc-300"
             }`}
             onClick={() => setTab(entry.id)}
           >
@@ -140,12 +151,14 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           {/* Opened from a placed instance, so the editor can offer to change
               only THIS panel rather than the reusable asset. */}
           <button
-            className="w-full rounded border border-indigo-600 bg-indigo-600/20 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/40"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-colors"
+            style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
             onClick={() =>
               useUiStore.getState().openAssetEditor({ assetId: asset.id, instanceId: item.id })
             }
           >
-            Edit Image ✦
+            <GenerateIcon size={13} strokeWidth={ICON_STROKE} />
+            Edit Image
           </button>
           {asset.metadata?.characterId && <CharacterStateControls item={item} />}
         <div>
@@ -160,7 +173,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                   title={faceUnavailable ? "Needs face region metadata on this asset" : undefined}
                   className={`rounded border px-2 py-1.5 ${
                     item.cropMode === mode
-                      ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
                       : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30"
                   }`}
                   onClick={() => dispatch({ type: "set-framing", instanceId: id, cropMode: mode })}
@@ -180,7 +193,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           <div>
             <Label>Text</Label>
             <textarea
-              className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2"
+              className="h-20 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] p-2"
               value={item.text}
               onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { text: e.target.value } })}
             />
@@ -206,7 +219,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                 type="number"
                 min={8}
                 max={96}
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                 value={item.fontSize}
                 onChange={(e) => dispatch({ type: "update-bubble", itemId: id, patch: { fontSize: Number(e.target.value) || 22 } })}
               />
@@ -217,8 +230,8 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
       )}
 
       {tab === "scene" && item.attachment && (
-        <div className="rounded border border-indigo-900/60 bg-indigo-950/20 p-2">
-          <p className="text-[11px] text-indigo-300">
+        <div className="rounded-md bg-[var(--accent-soft)] p-2">
+          <p className="text-[11px] text-[var(--accent-text)]">
             Attached to {attachmentLabel(item.attachment.targetItemId)} — it moves when they move.
           </p>
           <button
@@ -240,7 +253,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
           max={1}
           step={0.05}
           value={item.opacity}
-          className="w-full accent-indigo-500"
+          className="w-full"
           onChange={(e) => dispatch({ type: "set-instance-props", instanceId: id, patch: { opacity: Number(e.target.value) } })}
         />
       </div>
@@ -255,7 +268,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
               max={200}
               step={1}
               value={Math.max(5, Math.min(200, Math.round((item.height / Math.max(asset.height, 1)) * 100)))}
-              className="min-w-0 flex-1 accent-indigo-500"
+              className="min-w-0 flex-1"
               onChange={(event) => {
                 const scale = Number(event.target.value) / 100;
                 dispatch({ type: "update-instance-transform", instanceId: id, patch: {
@@ -275,7 +288,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         <Label>Rotation</Label>
         <input
           type="number"
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+          className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
           value={Math.round(item.rotation)}
           onChange={(e) => dispatch({ type: "update-instance-transform", instanceId: id, patch: { rotation: Number(e.target.value) || 0 } })}
         />
@@ -295,19 +308,21 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         <div className="grid grid-cols-4 gap-1">
           {(
             [
-              ["back", "⤓"],
-              ["backward", "↓"],
-              ["forward", "↑"],
-              ["front", "⤒"],
-            ] as [ReorderDirection, string][]
-          ).map(([direction, glyph]) => (
+              ["back", ToBackIcon, "Send to back"],
+              ["backward", DownIcon, "Send backward"],
+              ["forward", UpIcon, "Bring forward"],
+              ["front", ToFrontIcon, "Bring to front"],
+            ] as [ReorderDirection, typeof UpIcon, string][]
+          ).map(([direction, Glyph, label]) => (
             <button
               key={direction}
-              title={`Send ${direction}`}
-              className="rounded border border-zinc-700 bg-zinc-800 py-1.5 hover:bg-zinc-700"
+              title={label}
+              aria-label={label}
+              className="flex items-center justify-center rounded-md py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              style={{ background: "var(--bg-elevated)" }}
               onClick={() => dispatch({ type: "reorder-instance", instanceId: id, direction })}
             >
-              {glyph}
+              <Glyph size={ICON_SIZE} strokeWidth={ICON_STROKE} />
             </button>
           ))}
         </div>
@@ -336,18 +351,21 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
 
       <div className="flex gap-2 pt-1">
         <button
-          className="flex-1 rounded border border-zinc-700 bg-zinc-800 py-1.5 hover:bg-zinc-700"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          style={{ background: "var(--bg-elevated)" }}
           onClick={() => dispatch({ type: "duplicate-instance", instanceId: id })}
         >
+          <DuplicateIcon size={13} strokeWidth={ICON_STROKE} />
           Duplicate
         </button>
         <button
-          className="flex-1 rounded border border-red-900 bg-red-950/60 py-1.5 text-red-300 hover:bg-red-900/60"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
           onClick={() => {
             useEditorStore.getState().select({ panelId: item.panelId });
             dispatch({ type: "delete-instance", instanceId: id });
           }}
         >
+          <DeleteIcon size={13} strokeWidth={ICON_STROKE} />
           Delete
         </button>
       </div>
@@ -427,10 +445,10 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
       ];
 
   return (
-    <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-2.5">
+    <div className="rounded-lg bg-[var(--bg-elevated)] p-2.5">
       <div className="mb-2 flex items-center justify-between">
         <Label>{isPuppet ? "Character" : "Character state"}</Label>
-        <span className="text-[10px] text-indigo-300">{character.name}</span>
+        <span className="text-[10px] text-[var(--accent-text)]">{character.name}</span>
       </div>
       {isPuppet && (
         <p className="mb-2 text-[10px] leading-4 text-zinc-500">
@@ -444,7 +462,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
             <select
               aria-label={label}
               disabled={busy}
-              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 disabled:opacity-50"
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 disabled:opacity-50"
               value={current[key]}
               onChange={(event) => void change({ [key]: event.target.value })}
             >
@@ -467,13 +485,13 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
           </div>
         ))}
       </div>
-      {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
+      {status && <p className="mt-2 text-[10px] text-[var(--accent-text)]">{status}</p>}
       {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}
       {review && (
         <div className="mt-2 border-t border-zinc-700 pt-2">
           <p className="mb-1.5 text-[10px] text-zinc-400">Review generated variation</p>
           <div className="grid grid-cols-3 gap-1">
-            <button className="rounded bg-indigo-600 py-1 hover:bg-indigo-500" onClick={() => setReview(undefined)}>
+            <button className="rounded-md bg-[var(--accent)] py-1 hover:bg-[var(--accent-hover)]" onClick={() => setReview(undefined)}>
               Keep
             </button>
             <button
@@ -583,12 +601,19 @@ function StateCardRow({
             }
             className={`cursor-pointer rounded-full border px-2 py-0.5 text-[10px] disabled:opacity-40 ${
               value === active
-                ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
-                : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-indigo-600 hover:text-indigo-300"
+                ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
             }`}
           >
             {title(value)}
-            {value !== active && !instant && <span className="ml-1 text-[8px] text-amber-400/80">✦</span>}
+            {value !== active && !instant && (
+              <GenerateIcon
+                size={9}
+                strokeWidth={2.5}
+                className="ml-1 inline-block align-[-1px] text-[var(--accent-text)]"
+                aria-label="uses one generation"
+              />
+            )}
           </button>
         );
       })}
@@ -688,7 +713,7 @@ function BubbleStyleControls({ item }: { item: SpeechBubbleItem }) {
             min={0}
             max={20}
             step={0.5}
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
             value={style.borderWeight}
             onChange={(e) => patch({ borderWeight: Number(e.target.value) })}
           />

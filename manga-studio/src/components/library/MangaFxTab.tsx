@@ -14,6 +14,7 @@ import { useMemo, useRef, useState } from "react";
 import type { MangaLanguageAsset, MangaLanguageCategory } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import { DeleteIcon, ICON_STROKE, RenameIcon } from "../ui/icons";
 import {
   CATEGORY_LABELS,
   LANGUAGE_CATEGORIES,
@@ -46,14 +47,14 @@ export function MangaFxTab() {
   return (
     <div>
       <input
-        className="mb-3 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs"
+        className="mb-3 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-xs"
         placeholder="Search effects, bubbles, tones…"
         aria-label="Search manga language library"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
       {search && totalHits === 0 && (
-        <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] text-zinc-500">
+        <p className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] text-zinc-500">
           Nothing matches “{search}”. Generate or upload one — it becomes reusable across the project.
         </p>
       )}
@@ -137,7 +138,7 @@ function CategorySection({
         <>
           <div className="mb-2 flex gap-1.5">
             <button
-              className="flex-1 rounded border border-indigo-600 bg-indigo-600/20 py-1 text-[11px] text-indigo-300 hover:bg-indigo-600/40"
+              className="flex-1 rounded-md bg-[var(--accent-soft)] py-1 text-[11px] text-[var(--accent-text)] transition-colors hover:bg-[var(--accent)] hover:text-white"
               onClick={() => openGenerator({ assetType: "manga-effect", languageCategory: category })}
             >
               + Generate
@@ -201,7 +202,7 @@ function LanguageThumb({ asset }: { asset: MangaLanguageAsset }) {
   return (
     <div className="group relative w-[72px]">
       <button
-        className="flex h-[56px] w-full items-center justify-center overflow-hidden rounded border border-zinc-700 bg-zinc-800 hover:border-indigo-500"
+        className="flex h-[56px] w-full items-center justify-center overflow-hidden rounded border border-zinc-700 bg-zinc-800 hover:border-[var(--accent)]"
         onClick={place}
         draggable
         onDragStart={(event) => {
@@ -235,7 +236,7 @@ function LanguageThumb({ asset }: { asset: MangaLanguageAsset }) {
               }
             }}
           >
-            ✎
+            <RenameIcon size={12} strokeWidth={ICON_STROKE} />
           </IconButton>
           <IconButton
             label="Delete"
@@ -243,7 +244,7 @@ function LanguageThumb({ asset }: { asset: MangaLanguageAsset }) {
               useEditorStore.getState().dispatch({ type: "delete-language-asset", languageAssetId: asset.id });
             }}
           >
-            ✕
+            <DeleteIcon size={12} strokeWidth={ICON_STROKE} />
           </IconButton>
         </div>
       )}

@@ -14,6 +14,7 @@ import { availableCharacterStateValues, stateFromInstance } from "@/characters/s
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { characterOfAsset } from "@/characters/slotSwitch";
 import { useEditorStore } from "@/editor/store";
+import { DeleteIcon, FlipIcon, ICON_SIZE, ICON_STROKE } from "../ui/icons";
 import { useUiStore } from "@/editor/uiStore";
 import type { Viewport } from "./useViewport";
 import { useState } from "react";
@@ -117,7 +118,7 @@ function InstanceControls({ item }: { item: AssetInstance }) {
       })}
       <Divider />
       <ToolButton title="Flip horizontally" onClick={() => dispatch({ type: "set-instance-props", instanceId: item.id, patch: { flipX: !item.flipX } })}>
-        ⇋
+        <FlipIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
       </ToolButton>
       <DeleteButton
         onClick={() => {
@@ -178,7 +179,7 @@ function LooseControls({ item }: { item: WorkspaceItem }) {
     <>
       <span className="px-1 text-[10px] text-zinc-500">Drag into a panel to use</span>
       <ToolButton title="Flip horizontally" onClick={() => useEditorStore.getState().dispatch({ type: "update-workspace-instance", itemId: item.id, patch: { flipX: !item.flipX } })}>
-        ⇋
+        <FlipIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
       </ToolButton>
       <DeleteButton
         onClick={() => {
@@ -195,8 +196,15 @@ function LooseControls({ item }: { item: WorkspaceItem }) {
 function Bar({ anchor, children }: { anchor: { x: number; y: number }; children: React.ReactNode }) {
   return (
     <div
-      className="absolute z-30 flex -translate-x-1/2 -translate-y-[calc(100%+10px)] items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900/95 p-1 shadow-lg"
-      style={{ left: clamp(anchor.x, 90, 9999), top: Math.max(anchor.y, 52) }}
+      /* A floating surface is one of the few places a shadow carries real
+         information: it says "this hovers above the canvas". Kept, subtle, with
+         the border dropped since the elevation already separates it. */
+      className="absolute z-30 flex -translate-x-1/2 -translate-y-[calc(100%+10px)] items-center gap-0.5 rounded-lg p-1 shadow-lg shadow-black/40"
+      style={{
+        left: clamp(anchor.x, 90, 9999),
+        top: Math.max(anchor.y, 52),
+        background: "var(--bg-elevated)",
+      }}
       // Keep canvas selection: toolbar clicks must not bubble to the stage container.
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -205,6 +213,11 @@ function Bar({ anchor, children }: { anchor: { x: number; y: number }; children:
   );
 }
 
+/**
+ * An icon-only control needs a name a screen reader can read. `title` alone is
+ * not reliably exposed, so the tooltip doubles as the accessible name whenever
+ * the button has no text of its own.
+ */
 function ToolButton({
   active,
   children,
@@ -213,9 +226,12 @@ function ToolButton({
   return (
     <button
       {...props}
-      className={`h-7 rounded px-2 text-[11px] ${
-        active ? "bg-indigo-600/40 text-indigo-200" : "text-zinc-300 hover:bg-zinc-700"
+      className={`inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px] transition-colors ${
+        active
+          ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
+          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
       } disabled:opacity-30`}
+      aria-label={typeof children === "string" ? undefined : props.title}
     >
       {children}
     </button>
@@ -224,14 +240,19 @@ function ToolButton({
 
 function DeleteButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="h-7 rounded px-2 text-[11px] text-red-300 hover:bg-red-900/50" title="Delete" onClick={onClick}>
-      ✕
+    <button
+      className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+      title="Delete"
+      aria-label="Delete"
+      onClick={onClick}
+    >
+      <DeleteIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
     </button>
   );
 }
 
 function Divider() {
-  return <div className="mx-0.5 h-5 w-px bg-zinc-700" />;
+  return <div className="mx-0.5 h-5 w-px" style={{ background: "var(--border-subtle)" }} />;
 }
 
 function toViewport(wx: number, wy: number, view: Viewport): { x: number; y: number } {

@@ -43,7 +43,7 @@ export function BubbleTextEditor({ bubble, panelRect, scale, stagePos, onCommit,
         }
         if (e.key === "Escape") onCancel();
       }}
-      className="absolute z-20 resize-none rounded-md border-2 border-indigo-500 bg-white text-center text-zinc-900 outline-none"
+      className="absolute z-20 resize-none rounded-md border-2 border-[var(--accent)] bg-white text-center text-zinc-900 outline-none"
       style={{
         left,
         top,

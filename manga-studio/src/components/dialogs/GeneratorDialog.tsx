@@ -277,7 +277,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="max-h-[90vh] w-[460px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="max-h-[90vh] w-[460px] overflow-y-auto rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-1 font-semibold text-zinc-100">AI Asset Generator</h2>
@@ -290,7 +290,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
           <div className="mb-3 rounded border border-zinc-700 bg-zinc-950/80 p-3 text-center text-xs">
             <p className="mb-2 text-zinc-400">Connect an image model to generate assets.</p>
             <button
-              className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+              className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-white hover:bg-[var(--accent-hover)]"
               onClick={() => {
                 onClose();
                 useUiStore.getState().openSettings();
@@ -303,7 +303,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
 
         {provider?.storage?.configured === false && (
           <div className="mb-3 rounded border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-300">
-            Persistent asset storage is not connected. The Manga Studio operator must connect storage before generated images can be saved.
+            Persistent asset storage is not connected. The Kumanga operator must connect storage before generated images can be saved.
           </div>
         )}
 
@@ -323,7 +323,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                 <label className="mb-1 block text-xs text-zinc-400">Reference</label>
                 <select
                   aria-label="Reference"
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+                  className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
                   value={referenceChoice}
                   onChange={(event) => setReferenceChoice(event.target.value)}
                 >
@@ -355,7 +355,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                 <label className="mb-1 block text-xs text-zinc-400" htmlFor="language-category">Category</label>
                 <select
                   id="language-category"
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+                  className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
                   value={languageCategory}
                   onChange={(event) =>
                     useUiStore.getState().openGenerator({
@@ -380,7 +380,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               {isCharacterType ? "Extra instruction (optional)" : "Description"}
             </label>
             <textarea
-              className="mb-3 h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 p-2 text-sm"
+              className="mb-3 h-20 w-full resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] p-2 text-sm"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={
@@ -395,7 +395,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
             />
 
             {isCharacterType && (
-              <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-500">
+              <p className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] leading-4 text-zinc-500">
                 {canUseReference
                   ? "The character reference image will be sent to the provider to help preserve identity. Consistency is provider-dependent and not guaranteed."
                   : referenceAsset
@@ -433,7 +433,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                 Cancel
               </button>
               <button
-                className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+                className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
                 disabled={
                   phase === "generating" ||
                   provider?.configured === false ||
@@ -482,7 +482,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                   >
                     Regenerate
                   </button>
-                  <button className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500" onClick={addToLibrary}>
+                  <button className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-white hover:bg-[var(--accent-hover)]" onClick={addToLibrary}>
                     Add to Library
                   </button>
                 </div>
@@ -507,7 +507,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                     Cancel
                   </button>
                   <button
-                    className="rounded bg-indigo-600 px-4 py-1.5 text-white hover:bg-indigo-500"
+                    className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-white hover:bg-[var(--accent-hover)]"
                     onClick={() => {
                       setResult(null);
                       generate();
@@ -540,7 +540,7 @@ function Field({
     <div className="mb-3">
       <label className="mb-1 block text-xs text-zinc-400">{label}</label>
       <input
-        className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -588,7 +588,7 @@ function ReferencePicker({
 
   if (!supported) {
     return (
-      <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-500">
+      <p className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] leading-4 text-zinc-500">
         The connected image model does not accept reference images, so this generation uses the description only.
       </p>
     );
@@ -602,7 +602,7 @@ function ReferencePicker({
       <div className="flex gap-2">
         <select
           aria-label="Reference image"
-          className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          className="min-w-0 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-sm"
           value={value}
           onChange={(event) => onChange(event.target.value)}
         >

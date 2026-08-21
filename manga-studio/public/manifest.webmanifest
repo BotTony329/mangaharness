@@ -1,0 +1,17 @@
+{
+  "name": "Kumanga — AI Manga Studio",
+  "short_name": "Kumanga",
+  "description": "AI creates reusable manga assets; you compose them into manga.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/brand/kumanga-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

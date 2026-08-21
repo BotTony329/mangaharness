@@ -5,7 +5,7 @@
  *
  * All adapters return one JSON document (the plan). This doubles as the
  * structured fallback for models without native tool calling: the internal
- * tool schema is Manga Studio's own, validated by validatePlan before
+ * tool schema is Kumanga's own, validated by validatePlan before
  * anything executes.
  */
 

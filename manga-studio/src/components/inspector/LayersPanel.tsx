@@ -17,6 +17,17 @@ import { useState } from "react";
 import { panelLayers } from "@/canvas/hitStack";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import {
+  DeleteIcon,
+  DownIcon,
+  HiddenIcon,
+  ICON_SIZE_SM,
+  ICON_STROKE,
+  LockedIcon,
+  UnlockedIcon,
+  UpIcon,
+  VisibleIcon,
+} from "../ui/icons";
 
 export function LayersPanel({ panelId }: { panelId: ID }) {
   const doc = useEditorStore((s) => s.doc);
@@ -61,8 +72,10 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                   setDragging(null);
                 }}
                 onDragEnd={() => setDragging(null)}
-                className={`flex items-center gap-1 border-b border-zinc-800/70 px-1.5 py-1 last:border-b-0 ${
-                  active ? "bg-indigo-600/20" : "hover:bg-zinc-800/60"
+                /* Selection is the accent, not a border: the list reads as rows,
+                   not as a grid of boxes. */
+                className={`flex items-center gap-0.5 rounded px-1 py-1 ${
+                  active ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg-hover)]"
                 } ${dragging === layer.itemId ? "opacity-40" : ""}`}
               >
                 <IconToggle
@@ -76,7 +89,11 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                     })
                   }
                 >
-                  {layer.hidden ? "🚫" : "👁"}
+                  {layer.hidden ? (
+                    <HiddenIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                  ) : (
+                    <VisibleIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                  )}
                 </IconToggle>
                 <IconToggle
                   label={layer.locked ? "Unlock layer" : "Lock layer"}
@@ -89,7 +106,11 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                     })
                   }
                 >
-                  {layer.locked ? "🔒" : "🔓"}
+                  {layer.locked ? (
+                    <LockedIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                  ) : (
+                    <UnlockedIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+                  )}
                 </IconToggle>
 
                 <button
@@ -111,14 +132,14 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                     disabled={row === 0}
                     onClick={() => dispatch({ type: "reorder-instance", instanceId: layer.itemId, direction: "forward" })}
                   >
-                    ▴
+                    <UpIcon size={12} strokeWidth={2} />
                   </MicroButton>
                   <MicroButton
                     label="Move layer down"
                     disabled={row === count - 1}
                     onClick={() => dispatch({ type: "reorder-instance", instanceId: layer.itemId, direction: "backward" })}
                   >
-                    ▾
+                    <DownIcon size={12} strokeWidth={2} />
                   </MicroButton>
                 </div>
                 <MicroButton
@@ -129,7 +150,7 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                     if (active) select({ panelId });
                   }}
                 >
-                  ✕
+                  <DeleteIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
                 </MicroButton>
               </li>
             );
@@ -183,7 +204,9 @@ function IconToggle({
       aria-label={label}
       title={label}
       aria-pressed={on}
-      className="shrink-0 rounded px-0.5 text-[10px] leading-none opacity-70 hover:opacity-100"
+      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors ${
+        on ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)]"
+      } hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}
       onClick={onClick}
     >
       {children}
@@ -209,8 +232,10 @@ function MicroButton({
       aria-label={label}
       title={label}
       disabled={disabled}
-      className={`shrink-0 px-1 text-[9px] leading-tight disabled:opacity-20 ${
-        danger ? "text-red-400 hover:text-red-300" : "text-zinc-500 hover:text-zinc-200"
+      className={`inline-flex h-5 w-6 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-20 ${
+        danger
+          ? "text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+          : "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
       }`}
       onClick={onClick}
     >

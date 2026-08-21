@@ -23,6 +23,7 @@ import { NewProjectDialog } from "./library/ProjectsPanel";
 import { PagesBar } from "./PagesBar";
 import { RightPanel } from "./RightPanel";
 import { TopBar } from "./TopBar";
+import { KumangaMark } from "./brand/KumangaMark";
 
 // Konva touches `window` — the canvas must never render on the server.
 const CanvasStage = dynamic(() => import("./canvas/CanvasStage").then((m) => m.CanvasStage), {
@@ -127,18 +128,35 @@ export function Studio() {
   }, []);
 
   if (!ready || projectsLoading) {
-    return <div className="h-screen grid place-items-center bg-zinc-950 text-zinc-400">Opening studio…</div>;
+    return (
+      <div
+        className="grid h-screen place-items-center"
+        style={{ background: "var(--bg-app)", color: "var(--text-muted)" }}
+      >
+        <div className="flex flex-col items-center gap-3">
+          <KumangaMark size={40} className="animate-pulse" decorative />
+          <span className="text-xs">Opening Kumanga…</span>
+        </div>
+      </div>
+    );
   }
 
   // §12: no projects means a clean welcome, never a broken empty editor.
   if (!doc) return <WelcomeState />;
 
   return (
-    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-200 overflow-hidden select-none">
+    <div
+      className="flex h-screen select-none flex-col overflow-hidden"
+      style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+    >
       <TopBar />
       <div className="flex flex-1 min-h-0">
         <AssetLibraryPanel />
-        <main className="flex flex-1 min-w-0 flex-col border-x border-zinc-800">
+        {/* The canvas keeps its boundary: it is a real edge, not decoration. */}
+        <main
+          className="flex min-w-0 flex-1 flex-col border-x"
+          style={{ borderColor: "var(--border-subtle)" }}
+        >
           <CanvasStage />
         </main>
         <RightPanel />
@@ -155,21 +173,37 @@ export function Studio() {
   );
 }
 
-/** The empty state: a clean invitation, not a broken editor (§12). */
+/**
+ * The empty state: a clean invitation, not a broken editor (§12).
+ *
+ * This is the one place the full lockup earns its space — the mark, the name and
+ * the tagline, once, before the creator is inside the tool. It stays a door, not
+ * a landing page: no feature grid, no marketing copy.
+ */
 function WelcomeState() {
   const [creating, setCreating] = useState(false);
   return (
-    <div className="grid h-screen place-items-center bg-zinc-950 text-zinc-200">
-      <div className="text-center">
-        <h1 className="mb-2 text-2xl font-semibold">Create your first Manga Project</h1>
-        <p className="mb-6 text-sm text-zinc-500">
+    <div
+      className="grid h-screen place-items-center"
+      style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+    >
+      <div className="flex w-[320px] flex-col items-center text-center">
+        <KumangaMark size={64} className="mb-4" decorative />
+        <h1 className="text-3xl font-bold tracking-tight">Kumanga</h1>
+        <p
+          className="mt-1.5 text-[11px] uppercase tracking-[0.28em]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          AI Manga Studio
+        </p>
+        <p className="mt-6 text-sm leading-6" style={{ color: "var(--text-secondary)" }}>
           Every project keeps its own pages, characters, puppets and manga-language library.
         </p>
         <button
-          className="rounded bg-indigo-600 px-6 py-2 text-sm text-white hover:bg-indigo-500"
+          className="mt-6 rounded-md bg-[var(--accent)] px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
           onClick={() => setCreating(true)}
         >
-          New Project
+          Create Project
         </button>
       </div>
       {creating && <NewProjectDialog onClose={() => setCreating(false)} />}

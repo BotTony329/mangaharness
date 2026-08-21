@@ -3,6 +3,7 @@
 /** Bottom dock: page navigation — add, switch, delete. */
 
 import { useEditorStore } from "@/editor/store";
+import { CloseIcon, ICON_STROKE, PlusIcon } from "./ui/icons";
 
 export function PagesBar() {
   const doc = useEditorStore((s) => s.doc);
@@ -20,7 +21,7 @@ export function PagesBar() {
             onClick={() => useEditorStore.getState().setCurrentPage(page.id)}
             className={`h-14 w-11 rounded-sm border text-[10px] ${
               page.id === currentPageId
-                ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+                ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
                 : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-500"
             }`}
             title={page.name}
@@ -40,22 +41,25 @@ export function PagesBar() {
                   if (remaining) store.setCurrentPage(remaining.id);
                 }
               }}
+              aria-label={`Delete ${page.name}`}
             >
-              ✕
+              <CloseIcon size={12} strokeWidth={2} />
             </button>
           )}
         </div>
       ))}
       <button
-        className="h-14 w-11 rounded-sm border border-dashed border-zinc-700 text-lg text-zinc-500 hover:border-indigo-500 hover:text-indigo-300"
+        className="grid h-14 w-11 place-items-center rounded border border-dashed text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+        style={{ borderColor: "var(--border-subtle)" }}
         title="Add page"
+        aria-label="Add page"
         onClick={() => {
           const store = useEditorStore.getState();
           const result = store.dispatch({ type: "add-page" });
           if (result.createdId) store.setCurrentPage(result.createdId);
         }}
       >
-        +
+        <PlusIcon size={16} strokeWidth={ICON_STROKE} />
       </button>
     </footer>
   );

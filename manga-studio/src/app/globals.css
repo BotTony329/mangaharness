@@ -1,9 +1,62 @@
 @import "tailwindcss";
 
+/**
+ * Kumanga design tokens.
+ *
+ * Hierarchy comes from spacing, tone and typography — not from drawing a
+ * rectangle around everything. Surfaces step in tone (app → panel → elevated),
+ * borders are for real boundaries (canvas, panels, inputs, focus), and the
+ * accent is reserved for the primary action and the selected state.
+ */
+:root {
+  /* Surfaces */
+  --bg-app: #09090b;
+  --bg-panel: #111113;
+  --bg-elevated: #18181b;
+  --bg-hover: #ffffff14;
+  --bg-active: #ffffff1f;
+
+  /* Boundaries — one weight, used sparingly */
+  --border-subtle: #27272a;
+  --border-strong: #3f3f46;
+
+  /* Text */
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  /* Kumanga accent */
+  --accent: #7c5cff;
+  --accent-hover: #8f74ff;
+  --accent-soft: #7c5cff26;
+  --accent-text: #c7b8ff;
+
+  --danger: #f0546a;
+  --danger-soft: #f0546a1f;
+  --success: #34d399;
+  --warning: #fbbf24;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Spacing rhythm */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+}
+
 html,
 body {
   height: 100%;
   overscroll-behavior: none;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
 }
 
 /* Studio scrollbars: slim and dark. */
@@ -12,9 +65,27 @@ body {
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--border-strong);
   border-radius: 4px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/**
+ * Keyboard focus is the one ring we always draw.
+ *
+ * Flattening removes borders that carried no information; it must not remove
+ * the only signal a keyboard user has about where they are.
+ */
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* Native form controls follow the accent rather than the OS blue. */
+input[type="range"],
+input[type="checkbox"] {
+  accent-color: var(--accent);
 }

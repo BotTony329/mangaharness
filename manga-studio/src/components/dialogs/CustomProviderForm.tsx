@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { CloseIcon, HiddenIcon, ICON_SIZE_SM, ICON_STROKE, VisibleIcon } from "../ui/icons";
 
 export interface CustomFormState {
   name: string;
@@ -189,7 +190,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
         {PRESETS[kind].map((preset) => (
           <button
             key={preset.label}
-            className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] hover:border-indigo-500 hover:text-indigo-300"
+            className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
             onClick={() => onChange(preset.apply(form))}
           >
             {preset.label}
@@ -218,7 +219,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
       <div className="grid grid-cols-2 gap-2">
         <Field label="Authentication">
           <select
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
             value={form.authMode}
             onChange={(e) => set({ authMode: e.target.value as CustomFormState["authMode"] })}
           >
@@ -239,7 +240,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
           <div className="relative">
             <input
               type={showKey ? "text" : "password"}
-              className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 pr-9 font-mono text-xs"
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 pr-9 font-mono text-xs"
               value={form.apiKey}
               onChange={(e) => set({ apiKey: e.target.value })}
               placeholder={configured ? "Configured — enter a new key to replace" : "sk-…"}
@@ -247,10 +248,16 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
             />
             <button
               type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               onClick={() => setShowKey(!showKey)}
+              title={showKey ? "Hide key" : "Show key while typing"}
+              aria-label={showKey ? "Hide key" : "Show key while typing"}
             >
-              {showKey ? "🙈" : "👁"}
+              {showKey ? (
+                <HiddenIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+              ) : (
+                <VisibleIcon size={ICON_SIZE_SM} strokeWidth={ICON_STROKE} />
+              )}
             </button>
           </div>
         </Field>
@@ -264,7 +271,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
           <div className="grid grid-cols-2 gap-2">
             <Field label="HTTP method">
               <select
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                 value={form.method}
                 onChange={(e) => set({ method: e.target.value as "POST" | "GET" })}
               >
@@ -275,7 +282,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
             {kind !== "agent" && (
               <Field label="Reference images">
                 <select
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                  className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                   value={form.referenceMode}
                   onChange={(e) => set({ referenceMode: e.target.value as CustomFormState["referenceMode"] })}
                   title="How {{referenceImage}} / {{referenceImages}} are filled in the template"
@@ -305,15 +312,17 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
                     mono
                   />
                   <button
-                    className="shrink-0 px-1 text-zinc-500 hover:text-red-400"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
                     onClick={() => set({ headers: form.headers.filter((_, j) => j !== i) })}
+                    aria-label="Remove header"
+                    title="Remove header"
                   >
-                    ✕
+                    <CloseIcon size={12} strokeWidth={2.25} />
                   </button>
                 </div>
               ))}
               <button
-                className="rounded border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 hover:border-indigo-500 hover:text-indigo-300"
+                className="rounded border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                 onClick={() => set({ headers: [...form.headers, { name: "", value: "" }] })}
               >
                 + Add header
@@ -337,7 +346,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Response type">
                   <select
-                    className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                    className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                     value={form.responseType}
                     onChange={(e) => set({ responseType: e.target.value as "url" | "base64" })}
                   >
@@ -352,7 +361,7 @@ export function CustomProviderForm({ kind, form, configured, onChange }: CustomP
 
               <Field label="Execution mode">
                 <select
-                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+                  className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
                   value={form.execution}
                   onChange={(e) => set({ execution: e.target.value as "sync" | "async" })}
                 >
@@ -421,7 +430,7 @@ function TextInput({
 }) {
   return (
     <input
-      className={`w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 ${mono ? "font-mono text-xs" : ""}`}
+      className={`w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 ${mono ? "font-mono text-xs" : ""}`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}

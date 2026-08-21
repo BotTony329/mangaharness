@@ -64,7 +64,7 @@ export function CharacterDeleteDialog({ character, onClose }: { character: Chara
 function Dialog({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70" onMouseDown={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} className="w-[440px] max-w-[calc(100vw-32px)] rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={title} className="w-[440px] max-w-[calc(100vw-32px)] rounded-lg bg-[var(--bg-elevated)] p-4 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">{title}</h2>
         {children}
       </div>

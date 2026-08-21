@@ -38,11 +38,11 @@ export function ProjectsPanel() {
   };
 
   return (
-    <section className="border-b border-zinc-800 p-2">
+    <section className="border-b p-2" style={{ borderColor: "var(--border-subtle)" }}>
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-wider text-zinc-500">Projects</p>
         <button
-          className="rounded border border-indigo-600 bg-indigo-600/20 px-2 py-0.5 text-[10px] text-indigo-300 hover:bg-indigo-600/40"
+          className="rounded-md px-2 py-0.5 text-[10px] font-medium text-white transition-colors hover:bg-[var(--accent-hover)]" style={{ background: "var(--accent)" }}
           onClick={() => setCreating(true)}
           disabled={busy}
         >
@@ -60,7 +60,7 @@ export function ProjectsPanel() {
             <li key={project.id} className="group relative">
               <button
                 className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[11px] ${
-                  active ? "bg-indigo-600/25 text-indigo-100 ring-1 ring-indigo-500/60" : "text-zinc-400 hover:bg-zinc-800"
+                  active ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "text-zinc-400 hover:bg-zinc-800"
                 }`}
                 onClick={() => void run(() => openProject(project.id))}
                 disabled={busy}
@@ -88,7 +88,7 @@ export function ProjectsPanel() {
                 ⋯
               </button>
               {menuFor === project.id && (
-                <div className="absolute right-1 top-7 z-10 w-36 rounded border border-zinc-700 bg-zinc-900 py-0.5 text-[11px] shadow-xl">
+                <div className="absolute right-1 top-7 z-10 w-36 rounded-md bg-[var(--bg-elevated)] py-0.5 text-[11px] shadow-xl shadow-black/50">
                   <MenuItem
                     onClick={() => {
                       const name = window.prompt("Rename project", project.name);
@@ -176,7 +176,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="w-[380px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="w-[380px] rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-3 font-semibold text-zinc-100">New Project</h2>
@@ -187,7 +187,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         <input
           id="project-name"
           autoFocus
-          className="mb-3 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+          className="mb-3 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
           placeholder="Tokyo Story"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -199,7 +199,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         </label>
         <select
           id="project-layout"
-          className="mb-3 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+          className="mb-3 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
           value={layout}
           onChange={(e) => setLayout(e.target.value as LayoutPresetId)}
         >
@@ -215,7 +215,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         </label>
         <select
           id="project-style"
-          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5"
+          className="mb-4 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
           value={styleId}
           onChange={(e) => setStyleId(e.target.value)}
         >
@@ -229,11 +229,11 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
         {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800" onClick={onClose}>
+          <button className="rounded-md px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose}>
             Cancel
           </button>
           <button
-            className="rounded bg-indigo-600 px-4 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
             disabled={busy}
             onClick={() => void submit()}
           >
@@ -268,7 +268,7 @@ function DeleteProjectDialog({
           the manga-language library. This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
-          <button className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800" onClick={onClose}>
+          <button className="rounded-md px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose}>
             Cancel
           </button>
           <button className="rounded bg-red-700 px-4 py-1.5 text-xs text-white hover:bg-red-600" onClick={onConfirm}>

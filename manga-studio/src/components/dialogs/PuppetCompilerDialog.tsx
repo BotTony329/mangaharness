@@ -17,6 +17,7 @@ import { characterReferenceId } from "@/characters/state";
 import type { ID, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import { AlertIcon, PendingIcon } from "../ui/icons";
 import {
   COMPILER_PART_TYPES,
   compilePuppet,
@@ -138,7 +139,7 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="max-h-[90vh] w-[560px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-sm shadow-xl"
+        className="max-h-[90vh] w-[560px] overflow-y-auto rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="mb-1 font-semibold text-zinc-100">Convert {character.name} to a Puppet</h2>
@@ -158,7 +159,7 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
                 <p>
                   The compiler proposes {COMPILER_PART_TYPES.length} part regions from standard manga proportions.
                 </p>
-                <p className="rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] text-zinc-500">
+                <p className="rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] text-zinc-500">
                   These are a starting guess, <strong className="text-zinc-300">not automatic segmentation</strong>.
                   They will not line up with {character.name} until you adjust them in the next step.
                 </p>
@@ -181,14 +182,14 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
                   .map((region) => (
                     <div
                       key={region.type}
-                      className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-950 p-2 text-xs"
+                      className="flex items-center justify-between rounded-md bg-[var(--bg-elevated)] p-2 text-xs"
                     >
                       <span className="text-zinc-300">{region.type}</span>
                       {region.hiddenRegionAssetId ? (
                         <span className="text-emerald-400">Reconstructed</span>
                       ) : (
                         <button
-                          className="rounded border border-indigo-700 px-2 py-1 text-[11px] text-indigo-300 hover:bg-indigo-950/50 disabled:opacity-40"
+                          className="rounded-md bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-text)] transition-colors hover:bg-[var(--accent)] hover:text-white disabled:opacity-40"
                           disabled={busyPart !== null}
                           onClick={() => void reconstruct(region.type)}
                         >
@@ -213,7 +214,14 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
                       key={index}
                       className={issue.severity === "blocking" ? "text-red-300" : "text-amber-300/90"}
                     >
-                      {issue.severity === "blocking" ? "✕" : "○"} {issue.message}
+                      <span className="flex items-start gap-1.5">
+                        {issue.severity === "blocking" ? (
+                          <AlertIcon size={12} strokeWidth={2} className="mt-0.5 shrink-0" />
+                        ) : (
+                          <PendingIcon size={12} strokeWidth={2} className="mt-0.5 shrink-0" />
+                        )}
+                        {issue.message}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -248,7 +256,7 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
                 )}
                 {step < 4 && (
                   <button
-                    className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500"
+                    className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)]"
                     onClick={() => setStep((current) => (current + 1) as Step)}
                   >
                     Next
@@ -256,7 +264,7 @@ function CompilerInner({ characterId, onClose }: { characterId: ID; onClose: () 
                 )}
                 {step === 4 && (
                   <button
-                    className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500 disabled:opacity-40"
+                    className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
                     disabled={blocking.length > 0 || !isCompilable(regions)}
                     onClick={build}
                   >
@@ -336,14 +344,13 @@ function RegionEditor({
       <div>
         <select
           aria-label="Part"
-          className="mb-2 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs"
+          className="mb-2 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 text-xs"
           value={selected}
           onChange={(event) => setSelected(event.target.value as PuppetPartType)}
         >
           {regions.map((candidate) => (
             <option key={candidate.type} value={candidate.type}>
-              {candidate.confirmed ? "✓ " : "○ "}
-              {candidate.type}
+              {candidate.confirmed ? "Confirmed" : "Unconfirmed"} · {candidate.type}
             </option>
           ))}
         </select>

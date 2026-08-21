@@ -1,8 +1,28 @@
-# Manga Studio — AI-Native Asset-Based Manga Creation
+<img src="public/brand/kumanga-mark.svg#gh-light-mode-only" width="72" alt="Kumanga">
+<img src="public/brand/kumanga-mark-dark.svg#gh-dark-mode-only" width="72" alt="Kumanga">
+
+# Kumanga — AI Manga Studio
+
+*Kuma* (bear) + *manga*.
 
 A browser-based creative studio built on one thesis: **AI creates reusable manga assets; creators compose those assets into manga.** Generation and composition are separate systems, and the creator is always the director.
 
 Think *Figma/Canva + manga editor + AI character studio + AI asset library* — plus a **Manga Agent** that operates the same editor through natural-language prompts.
+
+## Brand
+
+| Asset | Path |
+|---|---|
+| Mark (dark ink, light surfaces) | `public/brand/kumanga-mark.svg` |
+| Mark (light ink, dark surfaces) | `public/brand/kumanga-mark-dark.svg` |
+| Mark without the bubble (≤20px) | `public/brand/kumanga-mark-compact.svg` |
+| App tile / favicon source | `public/brand/kumanga-icon.svg`, `src/app/icon.svg` |
+| Wordmark | `public/brand/kumanga-wordmark.svg`, `…-dark.svg` |
+| In-app component | `src/components/brand/KumangaMark.tsx` (inherits `currentColor`) |
+
+All variants are generated from one geometry definition — edit
+`scripts/build-brand.mjs` and run `node scripts/build-brand.mjs`, never the SVGs
+by hand. The bear is BRAND; functional UI icons are Lucide (`src/components/ui/icons.tsx`).
 
 ## What it does
 

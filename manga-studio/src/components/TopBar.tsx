@@ -1,8 +1,29 @@
 "use client";
 
-/** Top toolbar: project identity, undo/redo, layout, add-object tools, export. */
+/**
+ * The Kumanga tool strip.
+ *
+ * One horizontal strip, read left to right: who and where (brand, project,
+ * save state), history, what you can add, then the global settings and the
+ * export. Groups are separated by a hairline rule rather than by giving every
+ * control its own box — the strip should read as one tool, not as a shelf of
+ * buttons.
+ */
 
 import { useState } from "react";
+import { KumangaMark } from "./brand/KumangaMark";
+import { Button, IconButton, ToolbarDivider } from "./ui/Button";
+import { ChevronDown } from "lucide-react";
+import {
+  ExportIcon,
+  GenerateIcon,
+  ICON_SIZE,
+  ICON_STROKE,
+  RedoIcon,
+  SettingsIcon,
+  StyleIcon,
+  UndoIcon,
+} from "./ui/icons";
 import { LAYOUT_PRESETS } from "@/domain/layouts";
 import type { BubbleType, EffectKind, LayoutPresetId } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -84,89 +105,117 @@ export function TopBar() {
   };
 
   return (
-    <header className="flex h-12 items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-3 text-sm">
-      <span className="font-semibold tracking-wide text-zinc-100">Manga Studio</span>
-      <span className="text-zinc-600">/</span>
-      <span className="text-zinc-300">{doc.project.name}</span>
-      <span className={`ml-1 text-xs ${dirty ? "text-amber-400" : "text-zinc-500"}`}>
+    <header
+      className="flex h-12 shrink-0 items-center gap-1 border-b px-2 text-sm"
+      style={{ background: "var(--bg-panel)", borderColor: "var(--border-subtle)" }}
+    >
+      {/* Brand: compact by design. This is a creator tool, not a landing page. */}
+      <span className="flex items-center gap-2 pl-1 pr-2" title="Kumanga — AI Manga Studio">
+        <KumangaMark size={20} decorative />
+        <span className="font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+          Kumanga
+        </span>
+      </span>
+
+      <span aria-hidden style={{ color: "var(--border-strong)" }}>
+        /
+      </span>
+      <span className="truncate" style={{ color: "var(--text-secondary)" }}>
+        {doc.project.name}
+      </span>
+      <span
+        className="ml-1 text-[11px]"
+        style={{ color: dirty ? "var(--warning)" : "var(--text-muted)" }}
+      >
         {dirty ? "Saving…" : "Saved"}
       </span>
 
-      <div className="mx-3 h-6 w-px bg-zinc-700" />
+      <ToolbarDivider />
 
-      <ToolButton disabled={!canUndo} onClick={() => useEditorStore.getState().undo()} title="Undo (⌘Z)">
-        ↩
-      </ToolButton>
-      <ToolButton disabled={!canRedo} onClick={() => useEditorStore.getState().redo()} title="Redo (⇧⌘Z)">
-        ↪
-      </ToolButton>
+      <IconButton
+        label="Undo"
+        title="Undo (⌘Z)"
+        disabled={!canUndo}
+        onClick={() => useEditorStore.getState().undo()}
+        icon={<UndoIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
+      />
+      <IconButton
+        label="Redo"
+        title="Redo (⇧⌘Z)"
+        disabled={!canRedo}
+        onClick={() => useEditorStore.getState().redo()}
+        icon={<RedoIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
+      />
 
-      <div className="mx-3 h-6 w-px bg-zinc-700" />
-
-      <label className="text-zinc-400">Layout</label>
-      <select
-        className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"
-        value=""
-        onChange={(e) => {
-          const layout = e.target.value as LayoutPresetId;
-          if (layout && page) {
-            useEditorStore.getState().dispatch({ type: "set-page-layout", pageId: page.id, layout });
-          }
-        }}
-      >
-        <option value="" disabled>
-          Apply preset…
-        </option>
-        {Object.values(LAYOUT_PRESETS).map((preset) => (
-          <option key={preset.id} value={preset.id}>
-            {preset.label}
-          </option>
-        ))}
-      </select>
+      <ToolbarDivider />
 
       <Dropdown
-        label="+ Generate ✦"
+        label="Layout"
+        items={Object.values(LAYOUT_PRESETS).map((preset) => ({ key: preset.id, label: preset.label }))}
+        onPick={(key) => {
+          if (page) useEditorStore.getState().dispatch({ type: "set-page-layout", pageId: page.id, layout: key as LayoutPresetId });
+        }}
+      />
+      <Dropdown
+        label="Generate"
         accent
+        icon={<GenerateIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
         items={GENERATE_TARGETS.map((target) => ({ key: target.key, label: target.label }))}
         onPick={(key) => openGenerator({ assetType: key as GeneratorRequest["assetType"] })}
       />
-      <Dropdown label="+ Bubble" items={BUBBLE_TYPES.map((b) => ({ key: b.type, label: b.label }))} onPick={(k) => addBubbleToPanel(k as BubbleType)} />
+      <Dropdown
+        label="Bubble"
+        items={BUBBLE_TYPES.map((b) => ({ key: b.type, label: b.label }))}
+        onPick={(k) => addBubbleToPanel(k as BubbleType)}
+      />
       {/* Quick access to the most-used built-ins only. The full catalogue —
           including uploads and generated effects — lives in the Manga FX shelf,
           because a dropdown cannot grow with a project. */}
-      <Dropdown label="+ Effect" items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))} onPick={(k) => addEffectToPanel(k as EffectKind)} />
+      <Dropdown
+        label="Effect"
+        items={EFFECT_KINDS.map((e) => ({ key: e.kind, label: e.label }))}
+        onPick={(k) => addEffectToPanel(k as EffectKind)}
+      />
 
       <div className="flex-1" />
 
       {/* Advanced reveals rigging and raw camera numerics. Off by default: a
           creator directs the scene, the harness picks the implementation. */}
-      <label className="flex items-center gap-1 text-[10px] text-zinc-500" title="Show rigging and numeric camera controls">
+      <label
+        className="mr-1 flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] hover:bg-[var(--bg-hover)]"
+        style={{ color: "var(--text-muted)" }}
+        title="Show rigging and numeric camera controls"
+      >
         <input
           type="checkbox"
-          className="accent-violet-500"
           checked={advanced}
           onChange={(event) => setAdvancedMode(event.target.checked)}
         />
         Advanced
       </label>
 
-      <button
-        className="max-w-[220px] truncate rounded border border-violet-700/70 bg-violet-950/40 px-3 py-1 text-violet-200 hover:bg-violet-900/50"
+      <Button
+        variant="ghost"
+        icon={<StyleIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
         onClick={openArtStyle}
         title={`Project Art Style: ${activeStyle.name}`}
+        className="max-w-[200px]"
       >
-        Art Style · {activeStyle.name}
-      </button>
+        <span className="truncate">{activeStyle.name}</span>
+      </Button>
 
-      <button
-        className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1 hover:bg-zinc-700"
+      <Button
+        variant="ghost"
+        icon={<SettingsIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
         onClick={openSettings}
       >
         AI Settings
-      </button>
+      </Button>
+
       <Dropdown
-        label={exporting ? "Exporting…" : "Export PNG"}
+        label={exporting ? "Exporting…" : "Export"}
         accent
+        icon={<ExportIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
         items={[
           { key: "1", label: "Export page @1x" },
           { key: "2", label: "Export page @2x" },
@@ -177,49 +226,65 @@ export function TopBar() {
   );
 }
 
-function ToolButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      {...props}
-      className="h-8 w-8 rounded text-base hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent"
-    >
-      {children}
-    </button>
-  );
-}
-
+/**
+ * A menu that looks like a button.
+ *
+ * A native `<select>` keeps keyboard and platform menu behaviour for free; the
+ * visible control is styled to match the button hierarchy, and the chevron and
+ * leading icon are drawn behind it. Reaching for a custom popover here would
+ * cost accessibility for a cosmetic gain.
+ */
 function Dropdown({
   label,
   items,
   onPick,
   accent,
+  icon,
 }: {
   label: string;
   items: { key: string; label: string }[];
   onPick: (key: string) => void;
   accent?: boolean;
+  icon?: React.ReactNode;
 }) {
   return (
-    <select
-      className={`rounded border px-2 py-1 ${
-        accent
-          ? "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-500"
-          : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
-      }`}
-      value=""
-      onChange={(e) => {
-        if (e.target.value) onPick(e.target.value);
-        e.target.value = "";
-      }}
-    >
-      <option value="" disabled hidden>
+    <span className="group relative inline-flex h-8 shrink-0">
+      {/*
+        The visible control sizes the strip; the native select is stretched
+        transparently over it. A bare styled <select> sizes itself to its widest
+        OPTION, which spaced the toolbar out according to the length of
+        "Two panels (side by side)" rather than the word "Layout".
+      */}
+      <span
+        aria-hidden
+        className={`pointer-events-none flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors ${
+          accent
+            ? "bg-[var(--accent)] text-white group-hover:bg-[var(--accent-hover)]"
+            : "text-[var(--text-secondary)] group-hover:bg-[var(--bg-hover)] group-hover:text-[var(--text-primary)]"
+        }`}
+      >
+        {icon}
         {label}
-      </option>
-      {items.map((item) => (
-        <option key={item.key} value={item.key} className="bg-zinc-800 text-zinc-200">
-          {item.label}
+        <ChevronDown size={13} strokeWidth={ICON_STROKE} className="opacity-60" />
+      </span>
+      <select
+        aria-label={label}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        value=""
+        onChange={(e) => {
+          if (e.target.value) onPick(e.target.value);
+          e.target.value = "";
+        }}
+      >
+        <option value="" disabled hidden>
+          {label}
         </option>
-      ))}
-    </select>
+        {items.map((item) => (
+          <option key={item.key} value={item.key}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }
