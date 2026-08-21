@@ -33,6 +33,7 @@ import { ShapeEditOverlay } from "./ShapeEditOverlay";
 import { PerspectiveOverlay } from "./PerspectiveOverlay";
 import { StageOverlay } from "./StageOverlay";
 import { usesStagePlacement } from "@/domain/stageOps";
+import { characterIdOfInstance } from "@/characters/identity";
 import { PoseEditOverlay } from "./PoseEditOverlay";
 import { PuppetOverlay } from "./PuppetOverlay";
 import { puppetForInstance } from "@/domain/puppetOps";
@@ -277,7 +278,7 @@ export function CanvasStage() {
         const item = current.items[panel.itemIds[index]];
         if (item?.kind !== "asset") continue;
         const asset = current.assets[item.sourceAssetId];
-        const characterId = item.characterState?.characterId ?? asset?.metadata?.characterId;
+        const characterId = characterIdOfInstance(current, item);
         if (!characterId) continue;
         if (payload.characterId && payload.characterId !== characterId) continue;
 

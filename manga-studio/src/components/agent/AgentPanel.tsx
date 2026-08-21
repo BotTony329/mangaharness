@@ -18,6 +18,7 @@ import { deriveSceneIntent, describeIntent, type SceneIntent } from "@/agent/sce
 import type { AgentPlan } from "@/agent/tools/schemas";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { characterIdOfInstance } from "@/characters/identity";
 import { useUiStore } from "@/editor/uiStore";
 import {
   AlertIcon,
@@ -561,7 +562,7 @@ function selectedCharacterId(doc: ProjectDocument, itemId?: ID): ID | undefined 
   const item = itemId ? doc.items[itemId] : undefined;
   if (item?.kind !== "asset") return undefined;
   const instance = item as AssetInstance;
-  return instance.characterState?.characterId ?? doc.assets[instance.sourceAssetId]?.metadata?.characterId;
+  return characterIdOfInstance(doc, instance);
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -579,7 +580,7 @@ function panelCharacterIds(doc: ProjectDocument, panelId?: ID): ID[] {
   return panel.itemIds
     .map((id) => doc.items[id])
     .filter((item): item is AssetInstance => item?.kind === "asset")
-    .map((item) => item.characterState?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId)
+    .map((item) => characterIdOfInstance(doc, item))
     .filter((id): id is ID => Boolean(id));
 }
 

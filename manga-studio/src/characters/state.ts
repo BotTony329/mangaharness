@@ -10,6 +10,7 @@ import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
 import { normalizeProps, sameProps } from "./stateGraph";
 import { poseRigKey } from "./poseRig";
+import { characterIdOfInstance } from "./identity";
 
 export const DEFAULT_CHARACTER_STATE = {
   pose: "standing",
@@ -47,7 +48,17 @@ export function stateFromAsset(asset: SourceAsset, characterId?: ID): CharacterS
 
 export function stateFromInstance(doc: ProjectDocument, instance: AssetInstance): CharacterState | null {
   const asset = doc.assets[instance.sourceAssetId];
-  const fallback = asset ? stateFromAsset(asset) : null;
+  /**
+   * Resolve identity through every link before giving up.
+   *
+   * Reading only the instance's stored state and the asset's metadata meant a
+   * character whose identity survived on the reverse link alone had no state at
+   * all — the Inspector showed the tabs but the Pose, Expression, Outfit and
+   * View controls silently vanished, which is a worse failure than showing
+   * nothing because it looks like the character simply has no states.
+   */
+  const resolvedId = characterIdOfInstance(doc, instance);
+  const fallback = asset ? stateFromAsset(asset, resolvedId) : null;
   const stored = instance.characterState;
   if (!stored && !fallback) return null;
   const characterId = stored?.characterId ?? fallback!.characterId;

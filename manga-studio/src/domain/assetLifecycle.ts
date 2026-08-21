@@ -207,9 +207,34 @@ export function replaceAssetReferences(doc: ProjectDocument, oldAssetId: ID, new
     if (item.sourceAssetId === oldAssetId) item.sourceAssetId = newAssetId;
   }
   for (const character of Object.values(next.characters)) {
+    const owned = character.assetIds.includes(oldAssetId);
     character.assetIds = character.assetIds.map((id) => id === oldAssetId ? newAssetId : id).filter((id, index, ids) => ids.indexOf(id) === index);
     if (character.referenceAssetId === oldAssetId) character.referenceAssetId = newAssetId;
     if (character.canonicalReferenceAssetId === oldAssetId) character.canonicalReferenceAssetId = newAssetId;
+
+    /**
+     * Carry the identity onto the replacement.
+     *
+     * The character's asset list was being repointed at an asset whose own
+     * metadata said nothing about that character, which left the identity
+     * surviving on the reverse link alone. Anything reading the forward link
+     * then saw an anonymous image — that is how a character on the canvas lost
+     * its State, Interactions and Details tabs.
+     */
+    const replacement = next.assets[newAssetId];
+    if (owned && replacement && !replacement.metadata?.characterId) {
+      replacement.metadata = { ...replacement.metadata, characterId: character.id };
+    }
+  }
+
+  /**
+   * Re-derive instance state AFTER the metadata repair above, so an instance
+   * whose asset just regained its identity regains its character state too.
+   */
+  for (const item of Object.values(next.items)) {
+    if (item.kind !== "asset" || item.sourceAssetId !== newAssetId || item.characterState) continue;
+    const state = stateFromAsset(next.assets[newAssetId]);
+    if (state) item.characterState = state;
   }
   for (const record of next.generationHistory) if (record.resultAssetId === oldAssetId) record.resultAssetId = newAssetId;
   for (const profile of Object.values(next.project.settings.artStyle.customProfiles)) {

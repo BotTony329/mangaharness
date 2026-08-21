@@ -51,6 +51,7 @@ import { resolvedBubbleStyle } from "@/domain/bubbleStyles";
 import { findExactCharacterAsset } from "@/characters/state";
 import { searchLanguageAssets } from "@/language/library";
 import { useEditorStore } from "@/editor/store";
+import { characterIdOfInstance } from "@/characters/identity";
 import { useState } from "react";
 
 const CROP_MODES: { mode: CropMode; label: string }[] = [
@@ -150,10 +151,7 @@ function MultiSelectInteractions({ item }: { item: PanelItem }) {
     .find((candidate): candidate is AssetInstance => candidate?.kind === "asset");
   if (!partnerItem) return null;
 
-  const nameOf = (candidate: AssetInstance) => {
-    const owner = candidate.characterState?.characterId ?? doc.assets[candidate.sourceAssetId]?.metadata?.characterId;
-    return owner ? doc.characters[owner]?.name : undefined;
-  };
+  const nameOf = (candidate: AssetInstance) => doc.characters[characterIdOfInstance(doc, candidate) ?? ""]?.name;
   const a = nameOf(item);
   const b = nameOf(partnerItem);
   if (!a || !b) return null;
@@ -174,12 +172,17 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
   const advanced = useUiStore((state) => state.advancedMode);
   const [tab, setTab] = useState<ItemTab>("look");
   const id = item.id;
-  const isCharacter = item.kind === "asset" && Boolean(asset?.metadata?.characterId);
+  /**
+    * Any surviving character link counts. Reading only `asset.metadata` is what
+    * rendered a real character as an anonymous picture — no State tab, no
+    * Interactions tab, no Details tab.
+    */
+   const characterId = doc ? characterIdOfInstance(doc, item) : undefined;
+   const isCharacter = Boolean(characterId);
   const isPuppet = Boolean(doc && item.kind === "asset" && isPuppetInstance(doc, item.id));
   // Subscribed, not read from getState(): this must re-render when the creator
   // shift-clicks a second actor.
   const pairSelected = useEditorStore((state) => (state.selection.alsoItemIds ?? []).length > 0);
-  const characterId = item.kind === "asset" ? asset?.metadata?.characterId : undefined;
   const character = characterId && doc ? doc.characters[characterId] : undefined;
 
   return (
@@ -216,7 +219,7 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
             <GenerateIcon size={13} strokeWidth={ICON_STROKE} />
             Edit Image
           </button>
-          {asset.metadata?.characterId && <CharacterStateControls item={item} />}
+          {isCharacter && <CharacterStateControls item={item} />}
         <div>
           <Label>Framing</Label>
           <div className="grid grid-cols-2 gap-1">
@@ -688,7 +691,7 @@ function attachmentLabel(targetItemId: ID): string {
   const doc = useEditorStore.getState().doc;
   const target = doc?.items[targetItemId];
   if (!doc || target?.kind !== "asset") return "another item";
-  const characterId = target.characterState?.characterId ?? doc.assets[target.sourceAssetId]?.metadata?.characterId;
+  const characterId = characterIdOfInstance(doc, target);
   return (characterId && doc.characters[characterId]?.name) ?? doc.assets[target.sourceAssetId]?.name ?? "another item";
 }
 

@@ -7,6 +7,7 @@
 
 import type { Character, ID, ProjectDocument, SourceAsset } from "@/domain/types";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
+import { characterIdOfAsset } from "./identity";
 
 export interface SlotQuery {
   pose?: string;
@@ -14,7 +15,7 @@ export interface SlotQuery {
 }
 
 export function characterOfAsset(doc: ProjectDocument, sourceAssetId: ID): Character | null {
-  const characterId = doc.assets[sourceAssetId]?.metadata?.characterId;
+  const characterId = characterIdOfAsset(doc, sourceAssetId);
   return characterId ? (doc.characters[characterId] ?? null) : null;
 }
 

@@ -25,9 +25,9 @@ import { puppetForInstance } from "@/domain/puppetOps";
 import { executeInteraction } from "@/domain/interactionService";
 import { INTERACTION_LABELS, evaluateInteractionCapability } from "@/domain/interactions";
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
-import { stateFromInstance } from "@/characters/state";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { characterIdOfInstance } from "@/characters/identity";
 
 /** The interactions offered as one-click actions, in order of usefulness. */
 const QUICK: InteractionType[] = ["look_at", "hold_hands", "hug", "walk_together", "high_five"];
@@ -215,5 +215,5 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
 
 
 function characterOf(doc: ProjectDocument, item: AssetInstance): ID | undefined {
-  return stateFromInstance(doc, item)?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId;
+  return characterIdOfInstance(doc, item);
 }

@@ -26,6 +26,7 @@
 
 import { resolvedBubbleStyle } from "@/domain/bubbleStyles";
 import { assetRenderUrl } from "@/assets/renderSource";
+import { characterIdOfInstance } from "@/characters/identity";
 import type { AssetInstance, ID, PanelItem, Point, ProjectDocument, SpeechBubbleItem } from "@/domain/types";
 import { resolvePartTransforms, resolveVisibleParts } from "@/puppet/transforms";
 
@@ -281,7 +282,7 @@ export function itemKind(doc: ProjectDocument, item: PanelItem): string {
   if (item.kind === "effect") return "Effect";
   if (item.puppet) return "Character (Puppet)";
   const asset = doc.assets[item.sourceAssetId];
-  const characterId = item.characterState?.characterId ?? asset?.metadata?.characterId;
+  const characterId = characterIdOfInstance(doc, item);
   if (characterId && doc.characters[characterId]) return "Character";
   switch (asset?.category) {
     case "background":
@@ -307,7 +308,7 @@ export function itemLabel(doc: ProjectDocument, item: PanelItem): string {
   if (item.kind === "effect") return effectLabel(item.effectKind);
 
   const asset = doc.assets[item.sourceAssetId];
-  const characterId = item.characterState?.characterId ?? asset?.metadata?.characterId;
+  const characterId = characterIdOfInstance(doc, item);
   const character = characterId ? doc.characters[characterId] : undefined;
   if (character) return character.name;
   return asset?.name ?? "Untitled";
