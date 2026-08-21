@@ -16,6 +16,8 @@
  * identical, so there is no second code path to drift.
  */
 
+import { decontaminateMatteEdges, type DecontaminationStats } from "./matteDecontamination";
+
 export type Rgb = [number, number, number];
 
 export interface BackgroundModel {
@@ -36,6 +38,8 @@ export interface BackgroundRemovalOutput {
   rgba: Buffer;
   method: BackgroundRemovalMethod;
   removedPixels: number;
+  /** What edge decontamination did, for diagnostics and tests. */
+  decontamination?: DecontaminationStats;
 }
 
 export interface BackgroundRemovalProvider {
@@ -145,34 +149,28 @@ function floodKeyBackground(input: BackgroundRemovalInput): BackgroundRemovalOut
   enqueuePerimeter(width, height, enqueue);
   while (head < tail) enqueueNeighbours(queue[head++], width, height, enqueue);
 
-  if (background.kind === "chroma-key") suppressKeySpill(rgba, pixelCount, background.colors[0]);
+  /**
+   * Segmentation is only half the job.
+   *
+   * The rim pixels the flood correctly refused to key out are real alpha blends
+   * of foreground over the matte, so their RGB still carries matte colour. Left
+   * as-is, straight-alpha output reproduces that as a coloured halo the moment
+   * it is composited. Un-mixing happens here, on every background model — a
+   * white matte haloes dark artwork exactly as a magenta one haloes everything.
+   */
+  const decontamination = decontaminateMatteEdges({
+    rgba,
+    width,
+    height,
+    matteColors: background.colors,
+    background: visited,
+  });
 
   let removedPixels = 0;
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
     if (rgba[pixel * 4 + 3] < 128) removedPixels += 1;
   }
-  return { rgba, method: methodFor(background.kind), removedPixels };
-}
-
-/**
- * Chroma-key screens reflect onto the subject's edge, leaving a coloured
- * fringe. Only partially transparent pixels can carry that fringe, so pulling
- * their colour toward neutral there fixes the halo without touching artwork
- * that is legitimately the key colour.
- */
-function suppressKeySpill(rgba: Buffer, pixelCount: number, key: Rgb): void {
-  const keyLuminance = luminance(key);
-  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    const offset = pixel * 4;
-    const alpha = rgba[offset + 3];
-    if (alpha === 0 || alpha === 255) continue;
-    const color: Rgb = [rgba[offset], rgba[offset + 1], rgba[offset + 2]];
-    if (colorDistance(color, key) > 150) continue;
-    const neutral = Math.round((luminance(color) + keyLuminance) / 2);
-    rgba[offset] = neutral;
-    rgba[offset + 1] = neutral;
-    rgba[offset + 2] = neutral;
-  }
+  return { rgba, method: methodFor(background.kind), removedPixels, decontamination };
 }
 
 function enqueuePerimeter(width: number, height: number, enqueue: (pixel: number) => void): void {

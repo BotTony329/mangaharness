@@ -335,3 +335,26 @@ Manga vocabulary was four hard-coded effect kinds in a dropdown. A dropdown cann
 **Deleting the active project can never produce a broken editor**: it falls back to another project, or clears the document and shows the welcome state, and the stale `lastProjectId` pointer is removed so a reload cannot try to open a deleted project.
 
 **Left dock is navigation; right inspector is editing.** The duplicate Pose / Face / Outfit / View matrix (`CharacterKitPanel`) is deleted. The left character browser now shows canonical preview, puppet status, rendered states, + Variation and Convert to Puppet — discovery, not a second editing surface competing with the inspector at different cost.
+
+## D43 — The purple halo was contaminated RGB, not failed segmentation
+
+A generated colour character showed saturated magenta fringes around hair, shoulders, arms, hands and trousers after background removal, even though the background itself was fully transparent.
+
+**Measured, not inferred.** A probe ran physically-correct chroma-key sources through the real pipeline and sampled the silhouette. A black-hair edge at 75% coverage arrives from the generator as RGB `[73, 9, 76]` — exactly `0.75·[12,12,16] + 0.25·[255,0,255]`, which is what anti-aliasing *is*. The extracted PNG contained `[73, 9, 76, α=255]`: alpha correct, RGB still one-quarter magenta. The halo therefore existed in **both** the source (unavoidably) and the extracted PNG (avoidably), and compositing merely revealed it.
+
+**Segmentation was never the bug.** That pixel is mostly foreground, so the perimeter flood correctly refused to key it out — and because it stayed fully opaque, the old `suppressKeySpill` never even looked at it: that function skipped `alpha === 255`. It could not have fixed the visible halo under any tuning.
+
+**Where it did fire, it destroyed artwork.** It pushed RGB toward grey, turning a legitimately purple prop's edge from `[176, 45, 206]` into `[79, 79, 79]`. That is desaturation dressed as a fix: it removed real colour to hide a symptom.
+
+**The fix un-mixes the blend.** For a rim pixel we know the matte and can read the true foreground from clean pixels a little deeper inside the silhouette. The blend then lies on the segment matte→foreground, and its position along that segment *is* the coverage:
+
+    α  = clamp( (Csrc − M)·(F − M) / |F − M|² , 0, 1 )
+    Cfg ≈ (Csrc − (1−α)·M) / α
+
+Black hair recovers to `[12,12,16] @ α=191`; the purple prop recovers to `[150,60,190] @ α=188` — its real colour, because recovery targets the **local foreground**, never neutral.
+
+**Two findings forced corrections during implementation.** A one-pixel erosion is not enough to locate clean reference colour: a soft edge several pixels wide is contaminated several pixels deep, and every pixel in that band is surrounded by other contaminated pixels, so the erosion happily returns a reference that is itself part magenta. A distance transform measures the band instead of assuming its width. Separately, taking the *median* of a reference window fails where the window straddles a colour boundary — a purple bag against black hair — producing a colour that exists nowhere in the artwork; choosing the candidate with the **smallest residual** asks the right question directly: which neighbouring colour, mixed with this matte, explains this pixel?
+
+**Guardrails.** A pixel whose residual from the matte→foreground line exceeds a threshold is left alone, because it is independent artwork rather than a blend. Alpha is never raised above what segmentation concluded, so decontamination cannot resurrect background. Below 15% coverage the division is unstable, so the local foreground colour is used directly. Rejected outright: raising the removal threshold, eroding the silhouette, keying magenta indiscriminately, global desaturation, and prompt changes — none of those recover a foreground colour, and most destroy real artwork.
+
+This matters beyond one image: puppet-native generation composites many independently extracted parts, so every part would have carried its own fringe.
