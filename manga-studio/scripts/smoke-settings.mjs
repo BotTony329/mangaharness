@@ -22,12 +22,17 @@ await page.getByText("AI Settings", { exact: false }).first().click();
 await page.waitForTimeout(800);
 
 const body = await page.locator("body").innerText();
+// Protocol picker lives behind Advanced; open it before asserting options.
+await page.getByText("Advanced — API standard").first().click();
+await page.waitForTimeout(300);
+const body2 = await page.locator("body").innerText();
 const checks = {
-  "API Standard label": /API standard/i.test(body),
-  "OpenAI-compatible option": /OpenAI-compatible/i.test(body),
-  "Anthropic Messages option": /Anthropic Messages/i.test(body),
-  "Gemini Native option": /Gemini Native/i.test(body),
-  "Custom JSON option": /Custom JSON/i.test(body),
+  "default view hides protocol": !/API STANDARD/i.test(body.split(/ADVANCED/i)[0] ?? ""),
+  "API Standard label": /API standard/i.test(body2),
+  "OpenAI-compatible option": /OpenAI-compatible/i.test(body2),
+  "Anthropic Messages option": /Anthropic Messages/i.test(body2),
+  "Gemini Native option": /Gemini Native/i.test(body2),
+  "Custom JSON option": /Custom JSON/i.test(body2),
   "Background Removal card": /background removal/i.test(body),
   "Primary built-in": /Primary/i.test(body) && /built-in/i.test(body),
   "Fallback collapsed": /Configure fallback \(optional\)/i.test(body),

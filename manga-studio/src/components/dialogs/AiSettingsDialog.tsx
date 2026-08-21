@@ -334,38 +334,19 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
       </div>
 
       {/*
-        One simple setup: pick the API STANDARD, name the provider anything,
-        paste address, key, model. "Custom JSON" is one of the standards and is
-        the only one that unfolds the request/response mapping.
+        Simple setup is the default: name, address, key, model, connect.
+        The API-standard picker is an Advanced concern — most providers speak
+        OpenAI-compatible, so the dropdown only appears on demand (and stays
+        visible once a non-default standard or Custom JSON mapping is chosen).
       */}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="API standard / protocol">
-          <select
-            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
-            value={providerType}
-            onChange={(e) => {
-              setProviderType(e.target.value);
-              setBaseUrl("");
-              setModels([]);
-              if (kind === "background") setModel("background-removal");
-            }}
-          >
-            {protocols.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Provider name (any label)">
-          <input
-            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Kimi, MiniMax, OpenRouter, My Gateway…"
-          />
-        </Field>
-      </div>
+      <Field label="Provider name (any label)">
+        <input
+          className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Kimi, MiniMax, OpenRouter, My Gateway…"
+        />
+      </Field>
 
       {isCustom ? (
         <details className="mb-2" open>
@@ -441,6 +422,35 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
           </Field>}
         </>
       )}
+
+      <details className="mt-2" open={providerType !== simpleProtocols[0].id}>
+        <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-zinc-500">
+          Advanced — API standard
+        </summary>
+        <div className="mt-2">
+          <Field label="API standard / protocol">
+            <select
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
+              value={providerType}
+              onChange={(e) => {
+                setProviderType(e.target.value);
+                setBaseUrl("");
+                setModels([]);
+                if (kind === "background") setModel("background-removal");
+              }}
+            >
+              {protocols.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p className="mt-1 text-[10px] leading-4 text-zinc-600">
+            Most providers speak OpenAI-compatible. Custom JSON unfolds the request/response mapping.
+          </p>
+        </div>
+      </details>
 
       <div className="mt-2 flex items-center gap-2">
         <button

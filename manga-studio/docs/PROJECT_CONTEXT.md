@@ -4,6 +4,18 @@
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
 
+> **2026-08-22 — EDITOR CORE FROZEN.**
+> Camera/Stage closed (all controls verified real — see the Camera section);
+> provider settings UI simplified to name/key/model with the API-standard
+> picker folded into Advanced; final smoke 10/10 PASS with zero console errors
+> (`scripts/smoke-final.mjs`); 872 tests / lint / typecheck / build green.
+> POST-MVP non-blockers: on-canvas depth handle, ground-plane overlay,
+> perspective corner-pin, dedicated Camera mode, live-provider E2E.
+> **Manga Agent = REWRITE REQUIRED / NOT PART OF EDITOR FREEZE.** Agent code
+> must not change Editor Core; it calls `src/services/*` + domain commands.
+> Known residual: `app/api/provider/test` + `models` routes import
+> `agent/providers` (the agent-model channel — goes with the rewrite).
+>
 > **2026-08-22 Editor Core decoupling (phase 1):** `src/services/` is now the
 > single application-service layer — generation, characters, scenery,
 > manga-language and interaction all enter through it from BOTH the UI and the
@@ -537,15 +549,20 @@ warns that existing panels change).
 pan drag (zoom only, image is centred); the whole edit path has never run
 against a live image-edit provider.
 
-### Camera / Stage — **mostly working, discoverability weak**
+### Camera / Stage — **COMPLETE (frozen)**
 `src/domain/camera.ts`, `src/domain/staging.ts`, `src/domain/stageOps.ts`,
-`src/components/canvas/PerspectiveOverlay.tsx`,
-`src/components/inspector/PanelStageControls.tsx`.
-Shot, angle, lens, roll, yaw (shifts framing — genuinely functional), depth,
-ground anchor, focal subject, draggable horizon and vanishing points.
-*Limitation:* no dedicated Camera/Stage mode; controls are found by selecting a
-panel and scrolling the Inspector. No on-canvas depth handle. No ground-plane
-overlay. No perspective corner-pin for scene assets.
+`src/components/canvas/PerspectiveOverlay.tsx`, `PanelRollGroup.tsx`,
+`src/components/inspector/PanelStageControls.tsx` (panel-level) +
+`InstanceStageControls.tsx` (per-character).
+Verified real, not data-only: Shot/Angle reframe via `applyShotFraming`;
+Lens→fov→depthScale; roll rotates panel content on canvas (PanelRollGroup);
+yaw pans framing; horizonY moves the ground line; depth slider resizes live;
+ground anchor (Snap to Ground); focal subject drives framing; perspective
+mode + draggable horizon/vanishing points via Edit Guides; auto depth order.
+Entry: select a panel → Inspector top section (Camera / Perspective / Stage).
+Advanced-only by design: pitch, roll, yaw, fov numerics, eye level.
+*POST-MVP (non-blockers):* on-canvas depth handle, ground-plane overlay,
+perspective corner-pin, dedicated Camera mode.
 
 ### Agent — **working**
 `src/agent/*`. Deterministic grounding before planning, plan validation binding
