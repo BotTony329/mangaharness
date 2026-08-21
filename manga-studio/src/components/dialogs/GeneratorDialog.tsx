@@ -16,7 +16,7 @@ import {
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
-import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
+import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import type { AssetCategory } from "@/domain/types";
 import {
   BACKGROUND_REMOVAL_FAILED_MESSAGE,
@@ -84,6 +84,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         hasReference: canUseReference,
         style: style?.profile,
         supportsNativeTransparency: Boolean(provider?.capabilities?.supportsTransparentBackground),
+        monochrome: isMonochromeStyle(style?.profile),
       }),
     [
       request.assetType,
@@ -121,6 +122,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         prompt,
         negativePrompt: style?.profile.negativePrompt,
         size: defaultAspect(request.assetType),
+        expectMonochrome: isMonochromeStyle(style?.profile),
         referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
       });
       setResult(output);

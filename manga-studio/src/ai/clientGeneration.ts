@@ -56,6 +56,8 @@ export async function callGenerateApi(request: {
   negativePrompt?: string;
   referenceUrls?: string[];
   size?: "portrait" | "landscape" | "square";
+  /** Project style is monochrome: the server refuses colour-contaminated results. */
+  expectMonochrome?: boolean;
 }): Promise<GenerateApiResult> {
   const response = await fetch("/api/generate", {
     method: "POST",

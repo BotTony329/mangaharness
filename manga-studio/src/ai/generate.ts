@@ -22,6 +22,8 @@ export const generateRequestSchema = z.object({
   negativePrompt: z.string().max(1000).optional(),
   referenceUrls: z.array(z.string().max(2048)).max(3).optional(),
   size: z.enum(["portrait", "landscape", "square"]).optional(),
+  /** Monochrome project style: refuse colour-contaminated character results. */
+  expectMonochrome: z.boolean().optional(),
 });
 
 export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
@@ -108,6 +110,7 @@ export async function generateAssetImage(
       extension,
       category,
       keyPrefix: "generated",
+      expectMonochrome: input.expectMonochrome,
       processor: createAssetProcessingPipeline({ imageProvider: provider, backgroundProvider, trace }),
     });
   } catch (error) {

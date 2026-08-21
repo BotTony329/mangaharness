@@ -12,6 +12,7 @@ import {
 import { inspectReferenceImage, REFERENCE_ACCEPT, type ReferenceImageSelection } from "@/components/library/referenceImage";
 import { uploadImageFile } from "@/components/library/uploadAsset";
 import { assetRenderUrl } from "@/assets/renderSource";
+import { isMonochromeStyle } from "@/styles/generation";
 
 export function ArtStyleDialog() {
   const open = useUiStore((state) => state.artStyleOpen);
@@ -114,7 +115,7 @@ function StylePreview({ profile, localPreview }: { profile: StyleProfile; localP
   const referenceUrl = profile.referenceAssetId && doc ? assetRenderUrl(doc.assets[profile.referenceAssetId]) : undefined;
   const image = localPreview ?? profile.previewImage ?? referenceUrl;
   const seed = hash(profile.id);
-  const monochrome = profile.visualProperties?.colorMode?.includes("black") || profile.visualProperties?.colorMode?.includes("mono");
+  const monochrome = isMonochromeStyle(profile);
   const accent = hue(seed);
   return (
     <div

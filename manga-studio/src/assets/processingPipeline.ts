@@ -32,7 +32,7 @@ export function createAssetProcessingPipeline(input: {
             image: { mimeType: options.sourceMimeType ?? "image/png", data, url: options.sourceUrl },
             trace: input.trace,
           });
-          const validated = await validateTransparentImageBytes(edited.data, "image-edit", imageProvider.id);
+          const validated = await validateTransparentImageBytes(edited.data, "image-edit", imageProvider.id, options);
           input.trace?.("background_removal_attempt_complete", {
             method: "image_edit",
             provider: imageProvider.id,
@@ -67,6 +67,7 @@ export function createAssetProcessingPipeline(input: {
               result.processedImage,
               "dedicated-provider",
               result.providerMetadata.id,
+              options,
             );
             if (validated.processingStatus === "ready") return validated;
             failures.push(`${backgroundProvider.name}: ${validated.reason}`);

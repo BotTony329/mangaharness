@@ -6,6 +6,23 @@ export interface StyleGenerationContext {
   referenceAsset?: SourceAsset;
 }
 
+/**
+ * Whether a style locks the project to black-and-white artwork.
+ *
+ * `colorMode` is deliberately free text (it is also injected into prompts), so
+ * this matches the monochrome vocabulary the built-in profiles use:
+ * "black-and-white", "ink monochrome", "near-monochrome".
+ *
+ * Two things depend on the answer: monochrome characters are generated on a
+ * white background rather than a chroma key, and their results are checked for
+ * colour contamination before entering the library.
+ */
+export function isMonochromeStyle(profile: Pick<StyleProfile, "visualProperties"> | undefined): boolean {
+  const colorMode = profile?.visualProperties?.colorMode?.toLowerCase();
+  if (!colorMode) return false;
+  return colorMode.includes("black") || colorMode.includes("mono");
+}
+
 export function getStyleGenerationContext(doc: ProjectDocument): StyleGenerationContext {
   const profile = getActiveStyleProfile(doc);
   return {

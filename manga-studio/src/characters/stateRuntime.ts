@@ -14,7 +14,7 @@ import {
   stateFromInstance,
   type CharacterStatePatch,
 } from "./state";
-import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
+import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 
 export type CharacterGenerationRole = "canonical" | "state";
@@ -84,6 +84,7 @@ export async function generateCharacterAssetForState(input: {
           description: [input.instruction, continuity].filter(Boolean).join(" ") || undefined,
           style: style.profile,
           supportsNativeTransparency: capabilities.nativeTransparency,
+          monochrome: isMonochromeStyle(style.profile),
         })
       : buildCharacterStatePrompt({
           characterName: character.name,
@@ -93,6 +94,7 @@ export async function generateCharacterAssetForState(input: {
           hasReference: useIdentityReference,
           style: style.profile,
           supportsNativeTransparency: capabilities.nativeTransparency,
+          monochrome: isMonochromeStyle(style.profile),
         });
 
   const result = await callGenerateApi({
@@ -100,6 +102,7 @@ export async function generateCharacterAssetForState(input: {
     prompt,
     negativePrompt: style.profile.negativePrompt,
     size: "portrait",
+    expectMonochrome: isMonochromeStyle(style.profile),
     referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
   });
   return storeGeneratedAsset({

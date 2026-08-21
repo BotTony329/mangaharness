@@ -21,6 +21,7 @@ export async function processAndStoreAsset(input: {
   category: AssetCategory;
   keyPrefix: string;
   processor?: AssetPostProcessor;
+  expectMonochrome?: boolean;
 }): Promise<StoredProcessedAsset> {
   const source = await putObject(
     `${input.keyPrefix}/source-${crypto.randomUUID()}.${input.extension}`,
@@ -32,6 +33,7 @@ export async function processAndStoreAsset(input: {
     result = await (input.processor ?? defaultAssetPostProcessor).process(input.data, input.category, {
       sourceUrl: source.url,
       sourceMimeType: input.mimeType,
+      expectMonochrome: input.expectMonochrome,
     });
   } catch {
     return {

@@ -29,7 +29,7 @@ import type {
   ScenePosition,
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { getStyleGenerationContext, styleMetadata } from "@/styles/generation";
+import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
 import type { AgentRunScope } from "./scope";
@@ -233,12 +233,18 @@ async function doGenerateScenery(
 ): Promise<void> {
   const doc = currentDoc();
   const style = getStyleGenerationContext(doc);
-  const prompt = buildAssetPrompt({ assetType: category, description: args.description, style: style.profile });
+  const prompt = buildAssetPrompt({
+    assetType: category,
+    description: args.description,
+    style: style.profile,
+    monochrome: isMonochromeStyle(style.profile),
+  });
   const result = await callGenerateApi({
     assetType: category,
     prompt,
     negativePrompt: style.profile.negativePrompt,
     size: defaultAspect(category),
+    expectMonochrome: isMonochromeStyle(style.profile),
     referenceUrls: style.referenceAsset ? [assetRenderUrl(style.referenceAsset)!] : undefined,
   });
   const assetId = await storeGeneratedAsset({

@@ -22,6 +22,8 @@ export interface AssetPromptInput {
   hasReference?: boolean;
   /** Provider can emit a real alpha channel; otherwise we ask for a keyable flat field. */
   supportsNativeTransparency?: boolean;
+  /** Project style is black-and-white line art, which selects the white-background strategy. */
+  monochrome?: boolean;
   aspect?: "portrait" | "landscape" | "square";
   /** Provider-neutral project art direction. */
   style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
@@ -38,7 +40,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.characterDescription ?? "",
         input.description ?? "",
         "Standing neutral pose, front view, whole body visible head to feet.",
-        characterIsolationInstruction(input.supportsNativeTransparency),
+        characterIsolationInstruction(input),
       );
       break;
     case "character-pose":
@@ -59,7 +61,7 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         input.outfit ? `Outfit: ${input.outfit}.` : "",
         input.view ? `Camera angle: ${input.view}.` : "",
         input.description ?? "",
-        `Whole body visible head to feet. ${characterIsolationInstruction(input.supportsNativeTransparency)}`,
+        `Whole body visible head to feet. ${characterIsolationInstruction(input)}`,
       );
       break;
     }
@@ -72,7 +74,13 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
     case "prop":
       lines.push(
         `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
-        isolationInstruction("object", input.supportsNativeTransparency),
+        isolationInstruction(
+          "object",
+          selectBackgroundStrategy({
+            supportsNativeTransparency: input.supportsNativeTransparency,
+            monochrome: input.monochrome,
+          }),
+        ),
       );
       break;
   }
@@ -92,10 +100,10 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
     `Outfit: ${input.outfit ?? "default outfit"}.`,
     `View: ${input.view ?? "front"}.`,
     input.hasReference
-      ? "Preserve identity exactly: same face, facial structure, hairstyle, body proportions, and line-art style. Follow the requested outfit while keeping the character recognizable. Do not redesign the character."
+      ? "Preserve the exact visual language, face design, proportions, hairstyle, outfit, and line style of the supplied character reference. Change only the requested pose and expression. Do not redesign the character."
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
-    `Whole body visible head to feet. ${characterIsolationInstruction(input.supportsNativeTransparency)}`,
+    `Whole body visible head to feet. ${characterIsolationInstruction(input)}`,
     styleInstruction(input.style),
     aspectHint(input.aspect ?? "portrait"),
   ]
@@ -126,28 +134,73 @@ export const CHROMA_KEY_PROMPT_COLOR = "magenta (RGB 255, 0, 255)";
 /**
  * How to ask for an isolated subject.
  *
- * Critically, this NEVER asks an opaque-only provider for a "transparent
- * background", and never uses the word checkerboard. Image models cannot honour
+ * Critically, no branch ever asks an opaque-only provider for a "transparent
+ * background", and none uses the word checkerboard. Image models cannot honour
  * negations reliably, so naming the checkerboard conditions them to draw one;
  * and a model with no alpha channel can only satisfy "transparent background"
  * by painting the thing transparency looks like — the grey grid. That pairing
- * is what produced the baked checkerboards this pipeline then failed to remove.
+ * produced the baked checkerboards this pipeline then failed to remove.
  *
- * Instead we ask for something an opaque model CAN deliver and the extractor
- * can key deterministically: one flat, unbroken colour field.
+ * Every branch instead asks for something an opaque model CAN deliver and the
+ * extractor can key deterministically: one flat, unbroken field.
  */
-function isolationInstruction(subject: "character" | "object", supportsNativeTransparency = false): string {
+export type BackgroundStrategy = "native-alpha" | "white" | "chroma-key";
+
+/**
+ * Which background to ask the model for.
+ *
+ * Monochrome line art gets a pure white field rather than a chroma key. A
+ * saturated screen reflects onto the subject, and the model bakes that spill
+ * into hair strands and silhouette edges as part of the artwork — no
+ * post-process can separate it from intended colour afterwards, and on a
+ * black-and-white asset a magenta halo is glaring. White cannot tint anything.
+ *
+ * White is only safe because extraction is connectivity-based: the flood
+ * removes perimeter-connected background and never touches enclosed whites, so
+ * eye whites, white clothing, highlights, and interior gaps survive. A global
+ * "near-white becomes transparent" rule could not use this strategy at all.
+ *
+ * Coloured art keeps the chroma key: its own palette can occupy the full
+ * near-white range, where a white background offers no separation.
+ */
+export function selectBackgroundStrategy(input: {
+  supportsNativeTransparency?: boolean;
+  monochrome?: boolean;
+}): BackgroundStrategy {
+  if (input.supportsNativeTransparency) return "native-alpha";
+  return input.monochrome ? "white" : "chroma-key";
+}
+
+function backgroundInstruction(subject: "character" | "object", strategy: BackgroundStrategy): string {
+  switch (strategy) {
+    case "native-alpha":
+      return `Output a PNG whose background is genuinely empty using a real alpha channel.`;
+    case "white":
+      return `Place the ${subject} on a completely uniform pure white (#FFFFFF) background. The background must contain no objects, texture, gradient, shadows, pattern, or colour.`;
+    case "chroma-key":
+      return `Place the ${subject} on a completely flat, uniform, solid ${CHROMA_KEY_PROMPT_COLOR} background — one single unbroken colour covering every pixel behind the ${subject}, with no gradient, shading, texture, pattern, or objects.`;
+  }
+}
+
+function isolationInstruction(subject: "character" | "object", strategy: BackgroundStrategy): string {
   const framing =
     subject === "character"
       ? "Isolated single character, complete unbroken silhouette, nothing cropped. No scenery, no environment, no floor, no shadow on the ground, no frame, no border, no text, no speech bubbles."
       : "Single isolated object, complete unbroken silhouette. No scenery, no surface it rests on, no shadow on the ground, no frame, no text.";
-  return supportsNativeTransparency
-    ? `${framing} Output a PNG whose background is genuinely empty using a real alpha channel.`
-    : `${framing} Place the ${subject} on a completely flat, uniform, solid ${CHROMA_KEY_PROMPT_COLOR} background — one single unbroken colour covering every pixel behind the ${subject}, with no gradient, shading, texture, pattern, or objects.`;
+  return `${framing} ${backgroundInstruction(subject, strategy)}`;
 }
 
-function characterIsolationInstruction(supportsNativeTransparency = false): string {
-  return isolationInstruction("character", supportsNativeTransparency);
+function characterIsolationInstruction(input: AssetPromptInput | Omit<AssetPromptInput, "assetType">): string {
+  const strategy = selectBackgroundStrategy({
+    supportsNativeTransparency: input.supportsNativeTransparency,
+    monochrome: input.monochrome,
+  });
+  // Monochrome renders state the art language and the background together, so
+  // the model never has to infer that "no colour" also governs the backdrop.
+  if (strategy === "white") {
+    return "Draw the character as clean monochrome black-and-white manga line art on a completely uniform pure white background. The background must contain no objects, texture, gradient, shadows, pattern, checkerboard, or colour. Isolated single character, complete unbroken silhouette, nothing cropped, no frame, no text, no speech bubbles.";
+  }
+  return isolationInstruction("character", strategy);
 }
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {

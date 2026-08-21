@@ -100,3 +100,13 @@ Two changes follow. First, generation no longer requests transparency it cannot 
 Second, the separate solid flood and checkerboard matte (seed → dilate → erode → largest interior component → hole fill) collapse into one perimeter flood over an N-colour background model. Distance is measured to the segment between background colours so tile seams stay traversable without widening the radius — widening it bridges seams but swallows artwork, since a mid-tone skin fill sits closer to a light tile than the tiles sit to each other. Enclosed whites survive because the flood cannot reach them, which is a structural guarantee rather than a tuned threshold.
 
 The provider cascade from D29 is unchanged and still runs first; the local extractor is simply no longer guaranteed to fail on the most common input.
+
+## D31 — Monochrome characters are generated on white, not a chroma key
+
+D30 replaced the checkerboard prompt with a magenta chroma key. Production showed the cost on black-and-white artwork: the saturated screen reflects onto the subject and the model bakes that spill into hair strands and silhouette edges as part of the drawing. It is not alpha-fringe spill, so no post-process can separate it from intended colour afterwards, and on a monochrome asset a magenta halo is glaring.
+
+The background strategy is now ordered: validated native alpha, then a pure white field for monochrome line art, then the chroma key. White cannot tint anything. It is only viable because extraction is connectivity-based — the perimeter flood never reaches enclosed regions, so eye whites, white clothing, hair highlights, skin, and interior gaps survive even though they are the same colour as the background. A global "near-white becomes transparent" rule could not use this strategy at all. Coloured art keeps the chroma key, because its own palette can occupy the full near-white range where white offers no separation.
+
+The chroma-key extractor is retained unchanged as the fallback, and the monochrome prompt names neither transparency nor chroma key.
+
+Because the failure is created upstream of extraction, generation is also validated after the fact: for a monochrome project style, a result whose visible pixels are meaningfully saturated is refused with "Unexpected color contamination detected" rather than promoted into the library. The threshold ignores anti-aliasing and JPEG ringing (neutral, or tinted only in the single digits) and triggers on real coloured regions.

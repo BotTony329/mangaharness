@@ -13,6 +13,7 @@ import {
   estimateEdgeBackground,
   type BackgroundRemovalProvider,
 } from "./backgroundRemoval";
+import { describeContamination, detectColorContamination } from "./colorContamination";
 
 export interface AssetProcessingResult {
   sourceHasAlpha: boolean;
@@ -37,6 +38,8 @@ export interface AssetProcessingOptions {
   sourceUrl?: string;
   sourceMimeType?: string;
   strategy?: "auto" | "image-edit" | "provider" | "local";
+  /** Project style is black-and-white: refuse a result carrying real colour. */
+  expectMonochrome?: boolean;
 }
 
 const MAX_DECODED_PIXELS = 25_000_000;
@@ -66,6 +69,8 @@ export async function processAssetImage(
   if (alpha.useful) {
     const validation = validateProcessedAlpha(decoded.data, width, height);
     if (!validation.valid) return failed(validation.reason);
+    const contamination = guardMonochrome(decoded.data, width, height, options);
+    if (contamination) return contamination;
     return {
       sourceHasAlpha: true,
       hasAlpha: true,
@@ -110,6 +115,8 @@ export async function processAssetImage(
     const processedData = await sharp(output, { raw: { width, height, channels: 4 } }).png().toBuffer();
     const validation = validateProcessedAlpha(output, width, height);
     if (!validation.valid) return failed(validation.reason);
+    const contamination = guardMonochrome(output, width, height, options);
+    if (contamination) return contamination;
     return {
       sourceHasAlpha: false,
       hasAlpha: true,
@@ -130,6 +137,7 @@ export async function validateTransparentImageBytes(
   data: Buffer,
   processingMethod: string,
   processingProvider: string,
+  options: AssetProcessingOptions = {},
 ): Promise<AssetProcessingResult> {
   let decoded: { data: Buffer; info: sharp.OutputInfo };
   try {
@@ -142,6 +150,8 @@ export async function validateTransparentImageBytes(
   if (!inspectUsefulAlpha(decoded.data, width, height).useful) return failed("Provider cutout did not contain real transparency");
   const validation = validateProcessedAlpha(decoded.data, width, height);
   if (!validation.valid) return failed(validation.reason);
+  const contamination = guardMonochrome(decoded.data, width, height, options);
+  if (contamination) return contamination;
   try {
     return {
       sourceHasAlpha: false,
@@ -200,6 +210,26 @@ function validateProcessedAlpha(data: Buffer, width: number, height: number): { 
   const boxHeight = maxY - minY + 1;
   if (boxWidth < 2 || boxHeight < 2) return { valid: false, reason: "Foreground bounding box was not usable" };
   return { valid: true };
+}
+
+/**
+ * Refuse a monochrome character that came back coloured.
+ *
+ * Runs on the FINAL visible pixels, so it catches spill the extractor could not
+ * remove as well as colour the model painted into the artwork itself. Returning
+ * a failure keeps it out of the library rather than silently promoting a tinted
+ * asset — there is no post-process that can separate unwanted tint from
+ * intended colour after the fact.
+ */
+function guardMonochrome(
+  rgba: Buffer,
+  width: number,
+  height: number,
+  options: AssetProcessingOptions,
+): AssetProcessingResult | null {
+  if (!options.expectMonochrome) return null;
+  const report = detectColorContamination(rgba, width, height);
+  return report.contaminated ? failed(describeContamination(report)) : null;
 }
 
 function failed(reason: string): AssetProcessingResult {
