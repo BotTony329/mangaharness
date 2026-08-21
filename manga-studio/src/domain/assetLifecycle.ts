@@ -1,4 +1,5 @@
 import { cloneDoc, touch } from "./docHelpers";
+import { pruneCharacterStates } from "./characterStateOps";
 import { syncPanelScene } from "./sceneOps";
 import { stateFromAsset } from "@/characters/state";
 import type { ID, ProjectDocument, SourceAsset } from "./types";
@@ -113,6 +114,7 @@ export function deleteAsset(doc: ProjectDocument, assetId: ID, mode: DeleteAsset
   }
   delete next.assets[assetId];
   for (const panelId of affectedPanels) syncPanelScene(next, panelId);
+  pruneCharacterStates(next);
   touch(next);
   return next;
 }
@@ -185,6 +187,7 @@ export function deleteCharacter(doc: ProjectDocument, characterId: ID, mode: Del
     if (item.kind === "asset" && item.characterState?.characterId === characterId) delete item.characterState;
   }
   for (const panelId of Object.keys(next.panels)) syncPanelScene(next, panelId);
+  pruneCharacterStates(next);
   touch(next);
   return next;
 }

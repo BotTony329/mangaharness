@@ -19,7 +19,7 @@ import { pointInPolygon } from "@/domain/geometry";
 import type { ID, Page, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { SOCKET_DRAG_TYPE, decodeSocketDrag, resolveSocketAt } from "@/characters/sockets";
-import { acceptableSockets, patchForSocketDrop } from "@/characters/stateResolver";
+import { acceptableSockets, patchForSocketDrop, propsAfterDrop } from "@/characters/stateResolver";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { useUiStore } from "@/editor/uiStore";
 import { LooseAssetNode } from "@/render/LooseAssetNode";
@@ -237,7 +237,12 @@ export function CanvasStage() {
 
         const socket = resolveSocketAt(item, local, asset?.focusRegions, allowed);
         if (!socket) continue;
-        const patch = patchForSocketDrop(socket, payload);
+        // Props accumulate on the character rather than replacing a value, so
+        // they need the current held set rather than a single-value patch.
+        const patch =
+          payload.dimension === "props"
+            ? { props: propsAfterDrop(item.characterState?.props, payload.value) }
+            : patchForSocketDrop(socket, payload);
         if (!patch) continue;
 
         select({ itemId: item.id, panelId });

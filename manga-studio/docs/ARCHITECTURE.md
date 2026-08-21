@@ -58,6 +58,10 @@ Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the orig
 
 `Panel` carries a `camera` (shot/angle/lens presets deriving pitch, roll, horizon, FOV, plus `mangaPerspectiveStrength`) and a `perspective` (type, horizon, vanishing points). Guides are panel data, never items, so export cannot reach them. `AssetInstance` carries an optional `stage` (depth, ground line, anchor, scale lock) layered over the existing free transform. `domain/stageOps.ts` holds the mutations; `characters/` holds the Character Kit projection, semantic sockets, the pose-rig data model, and the state resolver that answers cache-or-generate for every caller.
 
+## Character rig
+
+`ProjectDocument.characterStates` is the character state graph: semantic nodes carrying pose/expression/outfit/view/props, the parent state a render was derived from, the reference asset actually sent to the provider, the canonical anchor, and the generation delta. `characters/stateGraph.ts` owns traversal and weighted nearest-state search; `characters/stateResolver.ts` is the single cache-or-generate decision (exact render → nearest render → canonical → none) and names the reference that generation must use; `characters/kit.ts` projects one character as a parts box with honest CACHED / AVAILABLE / NEW availability. Nodes are created and pruned inside `libraryOps`/`assetLifecycle`, so the graph cannot diverge from the library.
+
 ## Module rules
 
 - `src/domain/commands.ts` is the canonical mutation facade. UI actions and Agent tools dispatch typed `DomainCommand` values; domain modules remain pure `doc → doc` transformations. Live canvas gestures use `transientDispatch`, which applies the same commands without adding history until the gesture ends.

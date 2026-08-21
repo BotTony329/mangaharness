@@ -16,6 +16,8 @@ import {
 } from "@/ai/clientGeneration";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
+import { referenceOptions } from "@/characters/stateResolver";
+import type { CharacterState } from "@/domain/types";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import type { AssetCategory } from "@/domain/types";
 import {
@@ -57,6 +59,8 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<GenerationApiError | null>(null);
   const [result, setResult] = useState<GenerateApiResult | null>(null);
+  /** Empty = Auto (resolver's pick). Otherwise an explicit reference asset id. */
+  const [referenceChoice, setReferenceChoice] = useState<string>("");
 
   useEffect(() => {
     fetch("/api/provider/status")
@@ -107,13 +111,35 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     processedImageUrl: result?.processedImageUrl,
   });
 
+  /**
+   * Reference options for the state being generated (§3). Built from the state
+   * graph, so "Auto" names the exact render the resolver would anchor on.
+   */
+  const desiredState: CharacterState | undefined =
+    character && isCharacterType
+      ? {
+          characterId: character.id,
+          pose: pose || DEFAULT_CHARACTER_STATE.pose,
+          expression: expression || DEFAULT_CHARACTER_STATE.expression,
+          outfit: DEFAULT_CHARACTER_STATE.outfit,
+          view: DEFAULT_CHARACTER_STATE.view,
+        }
+      : undefined;
+  const references = doc && desiredState ? referenceOptions(doc, desiredState) : [];
+  const activeReference = references.find((option) => (option.assetId ?? "") === referenceChoice) ?? references[0];
+
   const generate = async () => {
     setPhase("generating");
     setError(null);
     setErrorDetails(null);
     try {
+      // Whatever the selector shows is what reaches the provider — the UI does
+      // not display one reference while sending another.
+      const chosenAsset =
+        isCharacterType && activeReference?.assetId ? doc?.assets[activeReference.assetId] : undefined;
+      const identityAsset = chosenAsset ?? (isCharacterType ? referenceAsset : undefined);
       const referenceAssets = provider?.capabilities?.referenceImage
-        ? [isCharacterType ? referenceAsset : undefined, style?.referenceAsset].filter(
+        ? [identityAsset, style?.referenceAsset].filter(
             (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
           )
         : [];
@@ -221,6 +247,29 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
             {request.assetType === "character-pose" && (
               <Field label="Expression (optional)" value={expression} onChange={setExpression} placeholder="happy" />
             )}
+            {isCharacterType && references.length > 0 && (
+              <div className="mb-3">
+                <label className="mb-1 block text-xs text-zinc-400">Reference</label>
+                <select
+                  aria-label="Reference"
+                  className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+                  value={referenceChoice}
+                  onChange={(event) => setReferenceChoice(event.target.value)}
+                >
+                  {references.map((option) => (
+                    <option key={`${option.kind}-${option.assetId ?? "none"}`} value={option.assetId ?? ""}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] leading-4 text-zinc-500">
+                  {activeReference?.automatic
+                    ? "The nearest existing render anchors this generation; identity stays anchored on the canonical image."
+                    : "This reference will be sent to the provider instead of the automatic choice."}
+                </p>
+              </div>
+            )}
+
             <label className="mb-1 block text-xs text-zinc-400">
               {isCharacterType ? "Extra instruction (optional)" : "Description"}
             </label>

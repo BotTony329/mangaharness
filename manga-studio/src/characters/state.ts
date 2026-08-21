@@ -8,6 +8,7 @@ import type {
 } from "@/domain/types";
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
+import { normalizeProps, sameProps } from "./stateGraph";
 
 export const DEFAULT_CHARACTER_STATE = {
   pose: "standing",
@@ -16,7 +17,7 @@ export const DEFAULT_CHARACTER_STATE = {
   view: "front",
 } as const;
 
-export type CharacterStatePatch = Partial<Pick<CharacterState, "pose" | "expression" | "outfit" | "view">>;
+export type CharacterStatePatch = Partial<Pick<CharacterState, "pose" | "expression" | "outfit" | "view" | "props">>;
 
 export function normalizeStateValue(value: string | undefined, fallback: string): string {
   return value?.trim().toLowerCase() || fallback;
@@ -52,13 +53,16 @@ export function stateFromInstance(doc: ProjectDocument, instance: AssetInstance)
 }
 
 export function mergeCharacterState(current: CharacterState, patch: CharacterStatePatch): CharacterState {
+  const props = normalizeProps(patch.props ?? current.props);
   return {
     ...current,
     pose: normalizeStateValue(patch.pose, current.pose),
     expression: normalizeStateValue(patch.expression, current.expression),
     outfit: normalizeStateValue(patch.outfit, current.outfit),
     view: normalizeStateValue(patch.view, current.view),
+    props: props.length > 0 ? props : undefined,
     assetId: undefined,
+    stateId: undefined,
   };
 }
 
@@ -68,7 +72,8 @@ export function sameCharacterState(a: CharacterState, b: CharacterState): boolea
     a.pose === b.pose &&
     a.expression === b.expression &&
     a.outfit === b.outfit &&
-    a.view === b.view
+    a.view === b.view &&
+    sameProps(a.props, b.props)
   );
 }
 
@@ -132,12 +137,15 @@ export function findCompatibleCharacterAsset(
     .sort((a, b) => b.score - a.score || b.asset.createdAt.localeCompare(a.asset.createdAt))[0]?.asset;
 }
 
+/** The string-valued dimensions. `props` is a list and is handled separately. */
+export type CharacterStateValueKey = "pose" | "expression" | "outfit" | "view";
+
 export function availableCharacterStateValues(
   doc: ProjectDocument,
   character: Character,
-  key: keyof CharacterStatePatch,
+  key: CharacterStateValueKey,
 ): string[] {
-  const defaults: Record<keyof CharacterStatePatch, string[]> = {
+  const defaults: Record<CharacterStateValueKey, string[]> = {
     pose: ["standing", "walking", "running", "sitting", "jumping", "pointing", "arms crossed", "looking back"],
     expression: ["neutral", "smile", "laugh", "angry", "crying", "shocked", "embarrassed", "worried"],
     outfit: [DEFAULT_CHARACTER_STATE.outfit, "casual outfit", "school uniform", "formal outfit", "battle outfit"],

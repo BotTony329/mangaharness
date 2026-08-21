@@ -129,9 +129,10 @@ describe("state resolver", () => {
     });
     expect(resolution.status).toBe("needs-generation");
     if (resolution.status === "needs-generation") {
-      // The running render may guide generation, but it is never returned as
-      // though it were the sitting state.
-      expect(resolution.guidanceAssetId).toBe(assetId);
+      // The running render anchors generation, but is never returned as though
+      // it were the sitting state.
+      expect(resolution.reference.assetId).toBe(assetId);
+      expect(resolution.reference.kind).toBe("nearest-state");
       expect(resolution.state.pose).toBe("sitting");
       expect(resolution.canonicalAssetId).toBeTruthy();
     }

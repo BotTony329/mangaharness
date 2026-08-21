@@ -12,28 +12,47 @@
  * component reaching into the asset table itself.
  */
 
-import type { Character, CharacterState, ID, ProjectDocument, SourceAsset } from "@/domain/types";
+import type { Character, CharacterState, CharacterStateRecord, ID, ProjectDocument } from "@/domain/types";
+import {
+  describeRecord,
+  findNearestRenderedState,
+  findRenderedStateRecord,
+  knownProps,
+  renderedStateRecords,
+} from "./stateGraph";
+import { propsAfterDrop } from "./stateResolver";
 import {
   DEFAULT_CHARACTER_STATE,
   availableCharacterStateValues,
   characterReferenceId,
-  findExactCharacterAsset,
-  stateFromAsset,
-  type CharacterStatePatch,
+  type CharacterStateValueKey,
 } from "./state";
 
-export type KitDimension = keyof CharacterStatePatch;
+export type KitDimension = CharacterStateValueKey;
 
 export const KIT_DIMENSIONS: KitDimension[] = ["pose", "expression", "outfit", "view"];
+
+/**
+ * Availability of one kit option, relative to the state being viewed (§4).
+ *
+ * "cached" is deliberately strict: it means the EXACT state exists as a render.
+ * A value that appears in some other combination is "available" — offered, but
+ * honestly marked as requiring generation. Conflating the two is what makes a
+ * product pretend a semantic state exists when only a compatible image does.
+ */
+export type KitAvailability = "cached" | "available" | "new";
 
 export interface KitOption {
   value: string;
   label: string;
+  availability: KitAvailability;
   /** A ready render exists for this value combined with the current state. */
   cached: boolean;
   /** Any ready render uses this value, in some other state combination. */
   known: boolean;
   previewAssetId?: ID;
+  /** Nearest render that would anchor generating this option, when not cached. */
+  referenceLabel?: string;
 }
 
 export interface CharacterKit {
@@ -44,7 +63,10 @@ export interface CharacterKit {
   /** The state the kit is being viewed against; option caching is relative to it. */
   state: CharacterState;
   dimensions: Record<KitDimension, KitOption[]>;
-  /** Every ready, non-canonical render belonging to this character. */
+  /** Props this character has been rendered holding. */
+  props: KitOption[];
+  /** Every rendered node in this character's state graph, newest first. */
+  renderedStates: CharacterStateRecord[];
   renderedStateCount: number;
 }
 
@@ -81,29 +103,50 @@ export function buildCharacterKit(
   state?: CharacterState,
 ): CharacterKit {
   const current = state ?? defaultCharacterState(character.id, character);
-  const renders = character.assetIds
-    .map((id) => doc.assets[id])
-    .filter((asset): asset is SourceAsset => Boolean(asset))
-    .filter((asset) => asset.status !== "archived")
-    .filter((asset) => asset.metadata?.characterAssetRole !== "canonical");
+  const rendered = renderedStateRecords(doc, character.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const optionFor = (candidate: CharacterState, value: string, known: boolean): KitOption => {
+    const exact = findRenderedStateRecord(doc, candidate);
+    if (exact?.assetId) {
+      return {
+        value,
+        label: toLabel(value),
+        availability: "cached",
+        cached: true,
+        known: true,
+        previewAssetId: exact.assetId,
+      };
+    }
+    const nearest = findNearestRenderedState(doc, candidate);
+    return {
+      value,
+      label: toLabel(value),
+      availability: known ? "available" : "new",
+      cached: false,
+      known,
+      referenceLabel: nearest ? describeRecord(nearest.record) : undefined,
+    };
+  };
 
   const dimensions = {} as Record<KitDimension, KitOption[]>;
   for (const dimension of KIT_DIMENSIONS) {
     const values = availableCharacterStateValues(doc, character, dimension);
-    dimensions[dimension] = values.map((value) => {
-      // "Cached" means: switching only this dimension lands on a real render.
-      const candidate: CharacterState = { ...current, [dimension]: value, assetId: undefined };
-      const exact = findExactCharacterAsset(doc, character, candidate);
-      const known = renders.some((asset) => stateFromAsset(asset, character.id)?.[dimension] === value);
-      return {
+    dimensions[dimension] = values.map((value) =>
+      optionFor(
+        { ...current, [dimension]: value, assetId: undefined, stateId: undefined },
         value,
-        label: toLabel(value),
-        cached: Boolean(exact),
-        known,
-        previewAssetId: exact?.id,
-      };
-    });
+        rendered.some((record) => record[dimension] === value),
+      ),
+    );
   }
+
+  const props = knownProps(doc, character).map((prop) =>
+    optionFor(
+      { ...current, props: propsAfterDrop(current.props, prop), assetId: undefined, stateId: undefined },
+      prop,
+      true,
+    ),
+  );
 
   return {
     characterId: character.id,
@@ -112,7 +155,9 @@ export function buildCharacterKit(
     defaultOutfit: character.defaultOutfit?.trim().toLowerCase() || DEFAULT_CHARACTER_STATE.outfit,
     state: current,
     dimensions,
-    renderedStateCount: renders.length,
+    props,
+    renderedStates: rendered,
+    renderedStateCount: rendered.length,
   };
 }
 

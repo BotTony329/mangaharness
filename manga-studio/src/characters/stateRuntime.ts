@@ -8,13 +8,12 @@ import {
   DEFAULT_CHARACTER_STATE,
   characterReferenceId,
   characterIdentityDescription,
-  findCompatibleCharacterAsset,
-  findExactCharacterAsset,
   mergeCharacterState,
   stateFromInstance,
   type CharacterStatePatch,
 } from "./state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
+import { resolveCharacterState, type ResolveOptions } from "./stateResolver";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 
 export type CharacterGenerationRole = "canonical" | "state";
@@ -54,6 +53,8 @@ export async function generateCharacterAssetForState(input: {
   instruction?: string;
   continuityFrom?: CharacterState;
   changedDimensions?: (keyof CharacterStatePatch)[];
+  /** Explicit reference chosen in the selector; omit to use the resolver's pick. */
+  referenceOverride?: ResolveOptions["referenceOverride"];
 }): Promise<ID> {
   const doc = useEditorStore.getState().doc;
   const character = doc?.characters[input.characterId];
@@ -64,14 +65,32 @@ export async function generateCharacterAssetForState(input: {
   const canonicalId = characterReferenceId(character);
   const canonicalCandidate = canonicalId ? doc.assets[canonicalId] : undefined;
   const canonical = isAssetReadyForComposition(canonicalCandidate) ? canonicalCandidate : undefined;
-  const compatible = role === "state" ? findCompatibleCharacterAsset(doc, character, input.state) : undefined;
   const capabilities = await imageProviderCapabilities();
   const supportsReference = capabilities.referenceImage;
-  const useIdentityReference = role === "state" && Boolean(canonical) && supportsReference;
+
+  // The resolver names the identity anchor; this function does not re-derive
+  // it. Whatever the selector shows is what actually reaches the provider (§3).
+  const resolution =
+    role === "state"
+      ? resolveCharacterState(doc, input.state, {
+          forceRegenerate: true,
+          referenceOverride: input.referenceOverride,
+        })
+      : undefined;
+  const chosen = resolution?.status === "needs-generation" ? resolution.reference : undefined;
+  const chosenAsset = chosen?.assetId ? doc.assets[chosen.assetId] : undefined;
+  const chosenUsable = isAssetReadyForComposition(chosenAsset) ? chosenAsset : undefined;
+
+  const useIdentityReference = role === "state" && Boolean(chosenUsable ?? canonical) && supportsReference;
   const referenceAssets = supportsReference
-    ? [role === "state" ? canonical : undefined, role === "state" ? compatible : undefined, style.referenceAsset].filter((asset, index, list) =>
-        Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
-      )
+    ? [
+        // Chosen reference first: providers weight earlier images more heavily.
+        role === "state" ? chosenUsable : undefined,
+        // Canonical always accompanies a derived reference so identity cannot
+        // drift further with each generation down a lineage chain.
+        role === "state" && chosenUsable?.id !== canonical?.id ? canonical : undefined,
+        role === "canonical" ? undefined : style.referenceAsset,
+      ].filter((asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index)
     : [];
   const continuity = buildContinuityInstruction(input.continuityFrom, input.state, input.changedDimensions);
   const assetType = role === "canonical" ? "character" : "character-pose";
@@ -123,6 +142,10 @@ export async function generateCharacterAssetForState(input: {
       characterAssetRole: role,
       canonicalReferenceAssetId: role === "canonical" ? undefined : canonicalId,
       referenceAssetIds: referenceAssets.length > 0 ? referenceAssets.map((asset) => asset!.id) : undefined,
+      // Lineage: which node this render descends from, and what changed.
+      parentStateId: resolution?.status === "needs-generation" ? resolution.parentStateId : undefined,
+      stateDelta: resolution?.status === "needs-generation" ? resolution.delta : undefined,
+      props: input.state.props,
       ...styleMetadata(style),
     },
   });
@@ -134,6 +157,7 @@ export async function applyCharacterStateToInstance(input: {
   generateIfMissing?: boolean;
   forceRegenerate?: boolean;
   instruction?: string;
+  referenceOverride?: ResolveOptions["referenceOverride"];
   onProgress?: (progress: CharacterGenerationProgress) => void;
 }): Promise<{
   assetId: ID;
@@ -141,6 +165,8 @@ export async function applyCharacterStateToInstance(input: {
   source: "cache" | "generated";
   previousAssetId: ID;
   previousState: CharacterState;
+  /** What anchored the generation, so the UI can report it honestly. */
+  reference?: { kind: string; label: string; assetId?: ID };
 }> {
   const initialDoc = useEditorStore.getState().doc;
   const instance = initialDoc?.items[input.instanceId];
@@ -152,15 +178,20 @@ export async function applyCharacterStateToInstance(input: {
   const desired = mergeCharacterState(current, input.patch);
   input.onProgress?.({ stage: "resolving", state: desired });
 
-  const exact = input.forceRegenerate
-    ? undefined
-    : findExactCharacterAsset(initialDoc, character, desired);
+  // One resolver for cache-or-generate, shared with the Agent and the kit UI.
+  const resolution = resolveCharacterState(initialDoc, desired, {
+    forceRegenerate: input.forceRegenerate,
+    referenceOverride: input.referenceOverride,
+  });
   let assetId: ID;
   let source: "cache" | "generated";
-  if (exact) {
-    assetId = exact.id;
+  let reference: { kind: string; label: string; assetId?: ID } | undefined;
+  if (resolution.status === "cached") {
+    assetId = resolution.assetId;
     source = "cache";
   } else {
+    if (resolution.status === "character-not-found") throw new Error("Character no longer exists");
+    reference = { kind: resolution.reference.kind, label: resolution.reference.label, assetId: resolution.reference.assetId };
     if (input.generateIfMissing === false) {
       throw new Error(`No cached ${desired.pose} + ${desired.expression} character state`);
     }
@@ -174,6 +205,7 @@ export async function applyCharacterStateToInstance(input: {
       changedDimensions: (Object.keys(input.patch) as (keyof CharacterStatePatch)[]).filter(
         (key) => input.patch[key] !== undefined,
       ),
+      referenceOverride: input.referenceOverride,
     });
     source = "generated";
     input.onProgress?.({ stage: "saving", state: desired });
@@ -187,6 +219,7 @@ export async function applyCharacterStateToInstance(input: {
     source,
     previousAssetId: instance.sourceAssetId,
     previousState: current,
+    reference,
   };
 }
 

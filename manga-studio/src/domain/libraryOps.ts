@@ -1,6 +1,7 @@
 /** Mutations for source assets, characters, and generation history. */
 
 import { cloneDoc, touch } from "./docHelpers";
+import { recordAssetState } from "./characterStateOps";
 import { newId, now } from "./factory";
 import type {
   AssetCategory,
@@ -76,6 +77,9 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
       next.characters[characterId].canonicalReferenceAssetId = asset.id;
     }
   }
+  // Maintaining the graph here — rather than beside it — is what stops the
+  // state graph and the asset library from ever disagreeing.
+  recordAssetState(next, asset);
   touch(next);
   return { doc: next, assetId: asset.id };
 }

@@ -17,6 +17,7 @@ import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
+import { CharacterKitPanel } from "./CharacterKitPanel";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
 import { getActiveStyleProfile } from "@/styles/profiles";
@@ -29,6 +30,9 @@ import {
 export function CharactersTab() {
   const doc = useEditorStore((s) => s.doc);
   const [creating, setCreating] = useState(false);
+  // Kit is the parts-box view; Library is the existing render browser. Both
+  // read the same document, so switching never changes any state.
+  const [view, setView] = useState<"kit" | "library">("kit");
   if (!doc) return null;
 
   const characters = Object.values(doc.characters);
@@ -40,14 +44,33 @@ export function CharactersTab() {
       >
         + New Character
       </button>
+      {Object.keys(doc.characters).length > 0 && (
+        <div className="flex gap-1 rounded border border-zinc-800 bg-zinc-950 p-0.5 text-[10px]">
+          {(["kit", "library"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setView(mode)}
+              className={`flex-1 rounded px-2 py-1 ${
+                view === mode ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {mode === "kit" ? "Kit" : "Library"}
+            </button>
+          ))}
+        </div>
+      )}
       {characters.length === 0 && (
         <p className="mt-6 text-center text-xs text-zinc-600">
           Create a character, then generate poses and expressions you can reuse in every panel.
         </p>
       )}
-      {characters.map((character) => (
-        <CharacterCard key={character.id} character={character} />
-      ))}
+      {characters.map((character) =>
+        view === "kit" ? (
+          <CharacterKitPanel key={character.id} character={character} />
+        ) : (
+          <CharacterCard key={character.id} character={character} />
+        ),
+      )}
       {creating && <CreateCharacterDialog onClose={() => setCreating(false)} />}
     </div>
   );

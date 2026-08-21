@@ -17,7 +17,7 @@ import { createPanelPerspective, perspectiveGuideLines, vanishingPointCount } fr
 import { depthScale, FAR_PLANE_SCALE } from "./stage";
 import { defaultEffectParams, normalizeEffectParams, suggestSpeedLineDirection } from "./effects";
 import { poseMotionVector } from "@/characters/poseRig";
-import type { AssetInstance, EffectItem, ProjectDocument, SpeechBubbleItem } from "./types";
+import { SCHEMA_VERSION, type AssetInstance, type EffectItem, type ProjectDocument, type SpeechBubbleItem } from "./types";
 
 function studio() {
   let doc = createProjectDocument("Stage");
@@ -425,7 +425,7 @@ describe("backward compatibility", () => {
 
     const migrated = deserializeProject(JSON.stringify(legacy));
 
-    expect(migrated.schemaVersion).toBe(7);
+    expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(migrated.panels[panelIds[0]].camera).toEqual(createPanelCamera());
     expect(migrated.panels[panelIds[0]].perspective!.type).toBe("none");
     // Existing artwork is untouched.

@@ -35,15 +35,21 @@ export interface SocketTarget {
   instanceId: string;
 }
 
+export type SocketDimension = "expression" | "pose" | "outfit" | "props";
+
 /** What each socket changes, so the UI can label a drag without knowing the model. */
-export const SOCKET_DIMENSION: Record<CharacterSocket, "expression" | "pose" | "outfit"> = {
+export const SOCKET_DIMENSION: Record<CharacterSocket, SocketDimension> = {
   face: "expression",
   body: "pose",
   outfit: "outfit",
+  hand: "props",
 };
 
-export function socketForDimension(dimension: "expression" | "pose" | "outfit"): CharacterSocket {
-  return dimension === "expression" ? "face" : dimension === "pose" ? "body" : "outfit";
+export function socketForDimension(dimension: SocketDimension): CharacterSocket {
+  if (dimension === "expression") return "face";
+  if (dimension === "pose") return "body";
+  if (dimension === "props") return "hand";
+  return "outfit";
 }
 
 /**
@@ -62,6 +68,11 @@ export function socketRegions(focusRegions?: FocusRegion[]): SocketRegion[] {
       rect: face?.rect ?? { x: 0.2, y: 0, width: 0.6, height: HEURISTIC_FACE_HEIGHT },
       precise: Boolean(face),
     },
+    // Hands sit at the sides around waist height in a standing full body. This
+    // is a heuristic band, not detection; a prop drop anywhere on the figure
+    // still resolves via `acceptable`, so precision here only affects the
+    // highlight, never whether the drop works.
+    { socket: "hand", rect: { x: 0, y: 0.4, width: 1, height: 0.3 }, precise: false },
     { socket: "body", rect: { x: 0, y: 0, width: 1, height: 1 }, precise: false },
   ];
 }
@@ -114,7 +125,7 @@ export function socketRectPx(instance: AssetInstance, socket: CharacterSocket, f
 export const SOCKET_DRAG_TYPE = "application/x-character-state";
 
 export interface SocketDragPayload {
-  dimension: "expression" | "pose" | "outfit";
+  dimension: SocketDimension;
   value: string;
   characterId?: string;
 }
@@ -127,7 +138,8 @@ export function decodeSocketDrag(raw: string): SocketDragPayload | null {
   try {
     const parsed = JSON.parse(raw) as SocketDragPayload;
     if (!parsed || typeof parsed.value !== "string") return null;
-    if (parsed.dimension !== "expression" && parsed.dimension !== "pose" && parsed.dimension !== "outfit") return null;
+    const dimensions: SocketDimension[] = ["expression", "pose", "outfit", "props"];
+    if (!dimensions.includes(parsed.dimension)) return null;
     return parsed;
   } catch {
     return null;

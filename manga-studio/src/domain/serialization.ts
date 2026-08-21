@@ -9,6 +9,7 @@ import { rectToPoints } from "./geometry";
 import { createPanelCamera } from "./camera";
 import { createPanelPerspective } from "./perspective";
 import { normalizeEffectParams } from "./effects";
+import { rebuildCharacterStates } from "./characterStateOps";
 import { SCHEMA_VERSION, type EffectKind, type ProjectDocument, type Rect } from "./types";
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 import { rebuildAllScenes } from "./sceneOps";
@@ -201,6 +202,19 @@ const MIGRATIONS: Record<number, Migration> = {
 
     return { ...doc, schemaVersion: 7 };
   },
+  /**
+   * v7 → v8: the character state graph (D33).
+   *
+   * Nodes are backfilled from every existing character render, so lineage
+   * exists for prior work too. Parentage is left undefined rather than guessed:
+   * we know what each render IS, but not what it was generated FROM, and
+   * inventing a parent would put false lineage in the graph.
+   */
+  7: (doc) => {
+    const migrated = { ...doc, characterStates: doc.characterStates ?? {}, schemaVersion: 8 } as unknown as ProjectDocument;
+    if (doc.assets && doc.characters && doc.project) rebuildCharacterStates(migrated);
+    return migrated as unknown as Record<string, unknown>;
+  },
 };
 
 function migrate(input: unknown): ProjectDocument {
@@ -227,6 +241,7 @@ function assertDocumentShape(doc: ProjectDocument): void {
   );
   if (missing.length > 0) throw new Error(`Corrupt project document: missing ${missing.join(", ")}`);
   if (!Array.isArray(doc.generationHistory)) doc.generationHistory = [];
+  if (typeof doc.characterStates !== "object" || doc.characterStates === null) doc.characterStates = {};
   if (typeof doc.workspaceItems !== "object" || doc.workspaceItems === null) doc.workspaceItems = {};
   if (!Array.isArray(doc.workspaceOrder)) doc.workspaceOrder = [];
   if (typeof doc.scenes !== "object" || doc.scenes === null) {

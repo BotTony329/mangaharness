@@ -59,6 +59,12 @@ export interface AssetGenerationMetadata {
   canonicalReferenceAssetId?: ID;
   /** Canonical images establish identity; state images are selectable renders. */
   characterAssetRole?: "canonical" | "state";
+  /** State-graph lineage: the node this render was generated FROM. */
+  parentStateId?: ID;
+  /** What changed relative to that parent. */
+  stateDelta?: CharacterStateDelta;
+  /** Props the character holds in this render. */
+  props?: string[];
   /** Snapshot of the project style used for this immutable generation. */
   styleProfileId?: ID;
   styleName?: string;
@@ -141,6 +147,9 @@ export interface Character {
   updatedAt?: ISODate;
 }
 
+/** The semantic dimensions a character state is composed from. */
+export type CharacterStateDimension = "pose" | "expression" | "outfit" | "view";
+
 /** The semantic state of one placed character. Every field is independent. */
 export interface CharacterState {
   characterId: ID;
@@ -148,7 +157,50 @@ export interface CharacterState {
   expression: string;
   outfit: string;
   view: string;
+  /** Held/worn props, normalized lowercase and sorted. Absent means none. */
+  props?: string[];
   assetId?: ID;
+  /** The state-graph node this state corresponds to, once one exists. */
+  stateId?: ID;
+}
+
+/** What a generation changed relative to the reference it was built from. */
+export interface CharacterStateDelta {
+  changed: CharacterStateDimension[];
+  /** True when props differ from the parent as well. */
+  propsChanged?: boolean;
+  from?: Partial<Record<CharacterStateDimension, string>>;
+  to?: Partial<Record<CharacterStateDimension, string>>;
+}
+
+/**
+ * A node in the character state graph (D33).
+ *
+ * The asset is the immutable render; this record is the SEMANTIC node that
+ * knows what the state means and where it came from. Separating them is what
+ * makes lineage answerable: "why does this render look like this?" resolves to
+ * a parent state and the reference image actually sent to the provider, rather
+ * than to a filename.
+ */
+export interface CharacterStateRecord {
+  id: ID;
+  characterId: ID;
+  /** Nearest rendered state this was generated FROM, when one was used. */
+  parentStateId?: ID;
+  /** The image actually sent to the provider as the identity anchor. */
+  referenceAssetId?: ID;
+  /** The character's canonical identity image at generation time. */
+  canonicalReferenceAssetId?: ID;
+  /** The render produced for this state; absent while only requested. */
+  assetId?: ID;
+  delta?: CharacterStateDelta;
+  pose: string;
+  expression: string;
+  outfit: string;
+  view: string;
+  props: string[];
+  styleProfileId: ID;
+  createdAt: ISODate;
 }
 
 // ─── Pages and panels ───────────────────────────────────────────────────────
@@ -331,7 +383,7 @@ export interface InstanceStage {
 }
 
 /** Semantic drop targets on a placed character (§6). Derived, never stored. */
-export type CharacterSocket = "face" | "body" | "outfit";
+export type CharacterSocket = "face" | "body" | "outfit" | "hand";
 
 export type BubbleType = "speech" | "thought" | "shout" | "whisper" | "narration";
 
@@ -466,6 +518,8 @@ export interface ProjectDocument {
   pages: Record<ID, Page>;
   panels: Record<ID, Panel>;
   scenes: Record<ID, PanelScene>;
+  /** The character state graph: semantic nodes with reference lineage. */
+  characterStates: Record<ID, CharacterStateRecord>;
   items: Record<ID, PanelItem>;
   /** Loose objects on the workspace, ordered bottom → top by workspaceOrder. */
   workspaceItems: Record<ID, WorkspaceItem>;
@@ -473,4 +527,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;

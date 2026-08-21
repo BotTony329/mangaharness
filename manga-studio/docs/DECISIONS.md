@@ -144,3 +144,27 @@ What V2 needs before a selector can be correct:
 - only then a UI that exposes and lets the creator override the selected reference.
 
 Building the selector first would produce a control over a model that cannot answer "why this reference?", and it would be rewritten immediately.
+
+## D34 — Character Rig 2.0: the state graph fulfils D33
+
+D33 deferred reference lineage until the model could answer "why this reference?". Phase 2 builds that model.
+
+**`CharacterStateRecord` is a semantic node; the asset is its render.** Keeping them separate is what lets a state be requested before it has an image, and lets a render be replaced without losing history. `ProjectDocument.characterStates` holds the graph.
+
+**The graph is maintained at the asset write path, not beside it.** `libraryOps.addAsset` calls `recordAssetState`, and deletion prunes. There is therefore no way for the graph and the library to disagree — a second source of truth would have drifted within a session.
+
+**Canonical images get no node.** They anchor identity rather than being selectable states; giving them one would make "standing/neutral" appear cached the moment a character was created, before anything had been rendered.
+
+**Nearest-state search is weighted by how much of the drawing a dimension changes** — outfit 8, view 6, pose 4, expression 2, props 3. Re-posing in the same outfit preserves far more of a reference than keeping the pose while swapping the outfit. A `maxCost` ceiling means a wildly different render is never used as a reference merely because it is the only one; re-anchoring to canonical beats inheriting the wrong outfit and view.
+
+**Style is part of usability.** A render made under a different `styleProfileId` is not a valid reference for the current style and is excluded from both cache hits and nearest-state search.
+
+**The resolver names the reference; nobody re-derives it.** `stateRuntime` no longer computes its own reference set — it asks the resolver and sends exactly what the selector displays. Canonical still accompanies a derived reference so identity cannot drift further with each step down a lineage chain.
+
+**Props are part of state identity.** The same pose with and without an umbrella are different states, so `props` participates in the state key. They are additive on drop rather than replacing, and normalized (lowercased, de-duplicated, sorted) so order and case cannot fork a state.
+
+**Kit availability has three values, not two.** CACHED means the exact state has a render; AVAILABLE means the value exists in another combination and this one must be generated; NEW means it has never been rendered. Collapsing these is precisely how a tool starts pretending a semantic state exists when only a compatible image does.
+
+**`view` is not a socket.** There is no region of a drawing that means "camera angle", so it stays a dropdown instead of pretending to be a drop target.
+
+Migration v7 → v8 backfills nodes from existing renders. Parentage is left undefined for prior work: we know what each render is, but not what it was generated from, and inventing lineage would poison the graph it exists to make trustworthy.

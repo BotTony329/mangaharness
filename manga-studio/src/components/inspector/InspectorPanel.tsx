@@ -10,6 +10,7 @@ import {
   availableCharacterStateValues,
   stateFromInstance,
   type CharacterStatePatch,
+  type CharacterStateValueKey,
 } from "@/characters/state";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
@@ -285,7 +286,7 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
     }
   };
 
-  const controls: { key: keyof CharacterStatePatch; label: string }[] = [
+  const controls: { key: CharacterStateValueKey; label: string }[] = [
     { key: "pose", label: "Pose" },
     { key: "expression", label: "Expression" },
     { key: "outfit", label: "Outfit" },
