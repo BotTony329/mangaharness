@@ -16,9 +16,10 @@
  * Girl, because that relationship is not structured project data.
  */
 
-import type { Character, ID, ProjectDocument } from "@/domain/types";
+import type { Character, ID, ProjectDocument, RelationshipType } from "@/domain/types";
 import { relatedCharacters, relationshipTypeFromPhrase } from "@/domain/relationships";
 import { resolveUnmatched, type EntityResolution } from "./entityResolution";
+import { applyAppositions } from "./coreference";
 import { ACTION_VERBS, MOVEMENT_VERBS, SHOUT_VERBS, SPEAK_VERBS, WHISPER_VERBS } from "./sceneIntent";
 
 // ─── Normalization ──────────────────────────────────────────────────────────
@@ -394,6 +395,17 @@ export interface GroundedEntity {
   candidates?: CharacterCandidate[];
   reason?: string;
   /**
+   * Scene-local aliases bound by apposition ("his rival, the bad character
+   * Roachman" → both name THIS participant). See `coreference.ts`. These are
+   * not stored aliases and never reach the relationship graph.
+   */
+  sceneLocalAliases?: string[];
+  /**
+   * The relation an apposition alias asserts ("rival of Supermate"), anchored
+   * to the subject the sentence already established. Scene-local only.
+   */
+  sceneRelation?: { type: RelationshipType; anchorCharacterId?: ID };
+  /**
    * What should HAPPEN about this reference.
    *
    * Separate from `status`, which only says whether the library recognised it.
@@ -421,7 +433,10 @@ export interface GroundingReport {
 export function groundedCharacterId(report: GroundingReport, surface: string): ID | undefined {
   const wanted = normalizeReference(surface);
   return report.entities.find(
-    (entity) => entity.status === "resolved" && normalizeReference(entity.surface) === wanted,
+    (entity) =>
+      entity.status === "resolved" &&
+      (normalizeReference(entity.surface) === wanted ||
+        (entity.sceneLocalAliases ?? []).some((alias) => normalizeReference(alias) === wanted)),
   )?.characterId;
 }
 
@@ -490,7 +505,14 @@ function hasCharacterFrame(prompt: string, surface: string): boolean {
 /**
  * Proper nouns the user wrote that match no character. These are what turn a
  * silent substitution into an explicit "I could not find Yuri".
+ *
+ * A capitalised word directly after a place/linking preposition ("in
+ * Melbourne", "at home") is a LOCATION, not a person — unless the sentence
+ * otherwise treats it as a character. Without this, every named city became a
+ * character the run tried to create.
  */
+const LOCATION_PREP = new Set(["in", "at", "on", "near", "inside", "outside", "behind", "beside", "under", "over", "to", "from", "into"]);
+
 function unmatchedProperNouns(prompt: string, matchedSurfaces: Set<string>): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
@@ -508,6 +530,9 @@ function unmatchedProperNouns(prompt: string, matchedSurfaces: Set<string>): str
     const words = key.split(" ");
     const meaningful = words.filter((word) => !NOT_A_NAME.has(word));
     if (meaningful.length === 0) continue;
+    // "in Melbourne" names a place; "his rival, Roachman" names a person.
+    const preceding = normalizeReference(prompt.slice(Math.max(0, match.index - 16), match.index)).split(" ").pop();
+    if (preceding && LOCATION_PREP.has(preceding)) continue;
     seen.add(key);
     found.push(meaningful.join(" ") === key ? surface : meaningful.join(" "));
   }
@@ -658,6 +683,16 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
   entities.sort((a, b) => (a.promptIndex ?? Number.MAX_SAFE_INTEGER) - (b.promptIndex ?? Number.MAX_SAFE_INTEGER));
 
   /**
+   * Co-reference BEFORE resolution decides outcomes.
+   *
+   * "his rival, the bad character Roachman" is one participant said twice.
+   * Folding the apposition here is what stops the pointing half from blocking
+   * the run while the named half is created — without weakening the rule that
+   * a bare pointing reference ("her sister", no name attached) still blocks.
+   */
+  applyAppositions(input.prompt, entities, input.selectedCharacterId);
+
+  /**
    * Decide what each unmatched reference MEANS before deciding whether to stop.
    *
    * Grounding prefers what already exists; it is not a creation gate. A
@@ -765,7 +800,12 @@ export function groundingContext(report: GroundingReport): string[] {
   const resolvedEntities = report.entities.filter((entity) => entity.status === "resolved");
   if (resolvedEntities.length === 0) lines.push("- none referenced by name");
   for (const entity of resolvedEntities) {
-    lines.push(`- "${entity.surface}" → character ${entity.characterId} (${entity.name})`);
+    const aliases = entity.sceneLocalAliases?.length
+      ? ` — also answers to ${entity.sceneLocalAliases.map((a) => `"${a}"`).join(", ")} in this scene${
+          entity.sceneRelation ? ` (${entity.sceneRelation.type})` : ""
+        }`
+      : "";
+    lines.push(`- "${entity.surface}" → character ${entity.characterId} (${entity.name})${aliases}`);
   }
   /**
    * What the planner is told about everyone else.
@@ -781,10 +821,15 @@ export function groundingContext(report: GroundingReport): string[] {
   const beingCreated = report.entities.filter((entity) => entity.resolution?.status === "create");
   for (const entity of beingCreated) {
     const resolution = entity.resolution as Extract<EntityResolution, { status: "create" }>;
+    const aliases = entity.sceneLocalAliases?.length
+      ? ` The phrase${entity.sceneLocalAliases.length > 1 ? "s" : ""} ${entity.sceneLocalAliases
+          .map((a) => `"${a}"`)
+          .join(", ")} refer to them — do not treat those as separate people.`
+      : "";
     lines.push(
       `- "${entity.surface}" → NEW CHARACTER "${resolution.proposedName}" (${resolution.description}). ` +
         "They are being created and drawn BEFORE your steps run, so plan with them exactly as with an existing " +
-        `character: refer to them as "${resolution.proposedName}". Do NOT refuse, and do NOT substitute anyone else.`,
+        `character: refer to them as "${resolution.proposedName}". Do NOT refuse, and do NOT substitute anyone else.${aliases}`,
     );
   }
   for (const entity of report.entities.filter((e) => e.resolution?.status === "unresolved")) {
