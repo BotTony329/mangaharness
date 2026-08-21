@@ -4,6 +4,11 @@
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
 
+> **2026-08-21 intake:** new lead agent audited the repo at `764350a` — baseline
+> green (851 tests, typecheck/lint/build clean). Findings and the confirmed P0
+> order live in `docs/TAKEOVER_AUDIT.md`. Top open gap: apposition/alias
+> co-resolution ("his rival, the bad character Roachman") is not implemented.
+
 ## Product Identity
 
 **Name:** Kumanga — *kuma* (bear) + *manga*.
