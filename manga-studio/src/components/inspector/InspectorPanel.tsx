@@ -102,6 +102,16 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
 
       {item.kind === "asset" && asset && (
         <>
+          {/* Opened from a placed instance, so the editor can offer to change
+              only THIS panel rather than the reusable asset. */}
+          <button
+            className="w-full rounded border border-indigo-600 bg-indigo-600/20 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/40"
+            onClick={() =>
+              useUiStore.getState().openAssetEditor({ assetId: asset.id, instanceId: item.id })
+            }
+          >
+            Edit Image ✦
+          </button>
           {asset.metadata?.characterId && <CharacterStateControls item={item} />}
         <div>
           <Label>Framing</Label>

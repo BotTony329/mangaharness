@@ -82,6 +82,11 @@ interface UiState {
   compilerCharacterId: ID | null;
   /** Interaction awaiting coordinated generation and review, or null. */
   interactionRequest: { interactionId: ID } | null;
+  /**
+   * Asset open in the detail editor. `instanceId` is present when it was opened
+   * from a placed instance, which is what enables "use only in this panel".
+   */
+  assetEditor: { assetId: ID; instanceId?: ID } | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
@@ -111,6 +116,8 @@ interface UiState {
   closeCompiler(): void;
   openInteraction(request: { interactionId: ID }): void;
   closeInteraction(): void;
+  openAssetEditor(request: { assetId: ID; instanceId?: ID }): void;
+  closeAssetEditor(): void;
   openSettings(): void;
   closeSettings(): void;
   openArtStyle(): void;
@@ -131,6 +138,7 @@ export const useUiStore = create<UiState>((set) => ({
   puppetHandlesInstanceId: null,
   compilerCharacterId: null,
   interactionRequest: null,
+  assetEditor: null,
   settingsOpen: false,
   artStyleOpen: false,
   advancedMode: false,
@@ -152,6 +160,8 @@ export const useUiStore = create<UiState>((set) => ({
   closeCompiler: () => set({ compilerCharacterId: null }),
   openInteraction: (request) => set({ interactionRequest: request }),
   closeInteraction: () => set({ interactionRequest: null }),
+  openAssetEditor: (request) => set({ assetEditor: request }),
+  closeAssetEditor: () => set({ assetEditor: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   setAdvancedMode: (enabled) => set({ advancedMode: enabled }),

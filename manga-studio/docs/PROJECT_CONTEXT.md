@@ -51,6 +51,10 @@ Durable rules. Do not silently reverse these.
 - **CLICK applies to the current selection; DRAG targets another canvas actor.**
 - **A pipeline fix does not reach already-processed assets** — it needs a repair
   path or it is half shipped. (D46)
+- **Provider output is never trusted outside a local edit mask.** The compositor
+  is the enforcement boundary, not the prompt. (D53)
+- **Asset Edit / Instance Edit / Composite Edit** are three scopes; editing an
+  asset must never silently change every panel using it. (D53)
 
 ## Current User-Facing Workflow
 
@@ -106,6 +110,50 @@ UI shows only "Instant" or "Generate". Joint renders record both participants.
 *Limitation:* the Agent has no `create_interaction` tool yet, so "让豆包抱住friend"
 is not yet executed as one interaction.
 
+### Generative Editing — **working, provider-untested**
+`src/assets/localEdit.ts` (compositor), `src/assets/editRequest.ts` (instruction),
+`src/app/api/assets/edit/route.ts`, `src/components/dialogs/AssetDetailEditor.tsx`.
+
+**Asset Detail Editor.** Full-screen workspace opened by double-clicking an
+asset thumbnail, its "Edit Image ✦" context item, or the same button on a
+selected instance in the Inspector. Brush + rectangle selection, zoom/pan,
+prompt, results strip, hold-to-compare, and three save actions.
+
+**SelectionMask** is `{ width, height, data: Uint8Array }` where each byte is
+coverage, 0 = keep original. The editor paints onto a canvas held at the ASSET's
+own pixel dimensions and ships it as a PNG, so the mask arrives already in image
+space.
+
+**Image-space coordinate rule.** Pointer positions convert to image space once,
+at the boundary (`toImage`). Zoom and pan never touch the mask canvas. Verified
+in-browser: the same hand painted at 100% and 156% produced image bounds
+x264-338/y345-417 and x269-335/y345-410 against a hand circle at x266-334/y346-414.
+
+**Outside-mask enforcement.** `compositeLocalEdit` takes provider pixels only
+where the mask is non-zero and copies the original byte-for-byte everywhere
+else. This is the guarantee — the prompt is only a request. Feather runs INWARD
+(blurred mask multiplied back by the drawn mask), so coverage can never appear
+where nothing was painted. Feather radius means what it says: the per-pass box
+radius is a third of the requested value, because three stacked passes reach
+three times as far.
+
+**Transparency.** `restoreAlpha` keeps the original alpha outside the mask
+always, and inside the mask too when the provider returned a flattened frame —
+so a cut-out object cannot gain a white slab.
+
+**Variation model.** A saved edit is a NEW asset with
+`provenance.localEdit { parentAssetId, editPrompt, intent, editedAt }`. A
+`cosmetic` edit deliberately does NOT register a `CharacterStateRecord`: visual
+edit lineage is not semantic character state.
+
+**Asset vs Instance.** Save as Variation (default, safe) · Use only in this
+panel (variation + single `swap-instance-asset`) · Replace original (confirmed,
+warns that existing panels change).
+
+*Limitations:* one result per Generate (no parallel candidates); no lasso; no
+pan drag (zoom only, image is centred); the whole edit path has never run
+against a live image-edit provider.
+
 ### Camera / Stage — **mostly working, discoverability weak**
 `src/domain/camera.ts`, `src/domain/staging.ts`, `src/domain/stageOps.ts`,
 `src/components/canvas/PerspectiveOverlay.tsx`,
@@ -138,12 +186,12 @@ migration.
 
 ## Last Completed Work
 
-**Commit:** see `git log -1` (V3.3 UI consolidation).
-Click-first state cards, discoverable Interactions, Scenes/Objects rename with
-empty states, shared Reference Picker for Scene/Object generation, multi-select
-via shift-click, `docs/PROJECT_CONTEXT.md`.
+**V3.4 — Asset Detail Editor and generative local editing.**
+Selection mask in image space, outside-mask compositor with inward feather,
+`/api/assets/edit` reusing the existing `editImage` provider capability,
+non-destructive variation provenance, and the Asset/Instance/Replace boundary.
 
-**Tests:** 692 passing / 55 files. Typecheck clean, lint clean, production build
+**Tests:** 718 passing / 57 files. Typecheck clean, lint clean, production build
 clean.
 
 ## Known Bugs / UX Problems
@@ -162,9 +210,18 @@ clean.
   "Fix transparency" is run on that character.
 - Three-point perspective renders guides but has no distinct projection
   consequence beyond two-point.
+- Local editing has never run against a live image-edit provider; only the
+  capability-error path was exercised in the browser.
+- The Asset Detail Editor offers one result per Generate, not 2-4 candidates.
+- A cosmetic variation can become the preferred render for that semantic state
+  on FUTURE placements (newest wins in the resolver). Existing instances are
+  never touched.
 
 ## Next Recommended Work
 
+0. **Run the local edit against a real image-edit provider.** Every part of the
+   path is unit- and browser-tested except the provider round trip; identity
+   preservation inside the mask is unproven in practice.
 1. **Agent interaction tool** — `create_interaction` + capability-aware
    execution, so "让豆包抱住friend" runs as one interaction. Highest value: the
    domain layer is finished and unreachable from the Agent.
@@ -186,7 +243,8 @@ src/canvas/          hitStack.ts (one selection resolver)
 src/agent/           grounding.ts, planValidation.ts, executor.ts, contextBuilder.ts
 src/ai/              foregroundPolicy.ts (white policy), promptTemplates.ts, generate.ts
 src/assets/          postProcessor.ts, backgroundRemoval.ts, matteDecontamination.ts,
-                     renderSource.ts (render URL contract), clientProcessing.ts (repair)
+                     renderSource.ts (render URL contract), clientProcessing.ts (repair),
+                     localEdit.ts (outside-mask compositor), editRequest.ts
 src/puppet/          model.ts, transforms.ts, capability.ts, compiler.ts, interaction.ts
 src/editor/          store.ts (doc + undo), projectsStore.ts, uiStore.ts (transient UI)
 src/components/      library/ (left dock), inspector/ (right), canvas/, dialogs/, agent/

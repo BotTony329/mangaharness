@@ -77,9 +77,17 @@ export function addAsset(doc: ProjectDocument, input: NewAssetInput): { doc: Pro
       next.characters[characterId].canonicalReferenceAssetId = asset.id;
     }
   }
-  // Maintaining the graph here — rather than beside it — is what stops the
-  // state graph and the asset library from ever disagreeing.
-  recordAssetState(next, asset);
+  /**
+   * Maintaining the graph here — rather than beside it — is what stops the
+   * state graph and the asset library from ever disagreeing.
+   *
+   * A COSMETIC local edit is deliberately excluded. Fixing a malformed finger
+   * produces better pixels for a state that already exists; registering it as a
+   * new semantic node would fill the character's state graph with entries that
+   * are indistinguishable from one another and mean nothing to a creator.
+   * Visual edit lineage lives in `provenance.localEdit`, not in the graph.
+   */
+  if (asset.provenance?.localEdit?.intent !== "cosmetic") recordAssetState(next, asset);
   touch(next);
   return { doc: next, assetId: asset.id };
 }

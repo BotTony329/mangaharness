@@ -484,3 +484,44 @@ where a creator is standing when they decide two characters should do something.
 
 **Relationship metadata is not a prerequisite for an interaction.** Two actors
 the creator has already selected on canvas need no recorded friendship to hug.
+
+## D53 — Provider output is never trusted outside a local edit mask
+
+A prompt saying "only change the selected area" is a request. Image-edit models
+redraw the whole frame: they re-encode the background, shift line weights, drift
+skin tone and quietly restyle a face while faithfully doing the one thing that
+was asked. Accepting their output wholesale is how a local hand fix silently
+becomes a different character.
+
+**The guarantee comes from our compositor, not the wording.** `compositeLocalEdit`
+takes provider pixels only where the creator's mask is non-zero and copies the
+original byte-for-byte everywhere else. Tested by handing it a provider fixture
+that repaints the entire image magenta and asserting every unmasked byte is
+identical afterwards.
+
+**Feather runs inward.** A symmetric blur would spread coverage outward and let
+provider pixels bleed past the selection. The blurred mask is multiplied back by
+the drawn mask, so coverage outside it is exactly zero by construction. The
+per-pass box radius is a third of the requested feather, because three stacked
+passes reach three times as far — otherwise "feather 6" would have softened
+roughly eighteen pixels and the control would not have meant what it said.
+
+**Masks live in image space.** Zoom, pan and display scaling change what the
+creator looks at; they must never change which pixels are editable. The editor
+converts pointer positions once, at the boundary, and the mask canvas stays at
+the asset's own dimensions.
+
+### Three edit scopes
+
+- **ASSET EDIT** — changes a reusable asset. Default is *Save as Variation*;
+  replacing the original is confirmed separately because existing panels use it.
+- **INSTANCE EDIT** — changes one placement, implemented as a variation plus a
+  single `swap-instance-asset`. Other panels are untouched.
+- **COMPOSITE EDIT** — pixels spanning several actors (Yuri hugging Mio). Not
+  built in this phase; the edit core takes an image, a mask and an instruction,
+  so it does not assume a single asset and can be reused for it later.
+
+**Visual edit lineage is not semantic character state.** A cosmetic repair
+records `provenance.localEdit` and deliberately does not create a
+`CharacterStateRecord` — registering a node for every pixel fix would fill the
+state graph with entries indistinguishable from one another.

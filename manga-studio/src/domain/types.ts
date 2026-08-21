@@ -78,6 +78,31 @@ export interface AssetGenerationMetadata {
   generatedAt?: ISODate;
 }
 
+/**
+ * How a locally edited variation relates to what it came from.
+ *
+ * Deliberately separate from `CharacterStateRecord`: fixing a malformed finger
+ * is a VISUAL repair, not a new semantic state. Creating a state node for every
+ * pixel edit would fill the character's state graph with entries that mean
+ * nothing to a creator and nothing to the resolver.
+ */
+export interface AssetEditProvenance {
+  /** The asset this variation was edited FROM. */
+  parentAssetId: ID;
+  /** What the creator asked for, in their own words. */
+  editPrompt: string;
+  /** The mask actually used, stored as an image rather than inline in the doc. */
+  maskUrl?: string;
+  /** Bounding box of the edit in image space, for a quick "what changed". */
+  editedRegion?: Rect;
+  /**
+   * Whether this edit could plausibly change the character's semantic state.
+   * Supplied explicitly by the caller — no classifier is inferred here.
+   */
+  intent?: "cosmetic" | "state-affecting" | "unknown";
+  editedAt: ISODate;
+}
+
 /** Provider-neutral origin information used for reuse, regeneration and audit. */
 export interface AssetProvenance {
   provider?: string;
@@ -90,6 +115,8 @@ export interface AssetProvenance {
   canonicalReferenceAssetId?: ID;
   projectStyleId?: ID;
   generationType?: string;
+  /** Present when this asset is a locally edited variation of another. */
+  localEdit?: AssetEditProvenance;
   generatedAt?: ISODate;
 }
 

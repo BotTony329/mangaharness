@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { SourceAsset } from "@/domain/types";
 import { assetPreviewUrl } from "@/assets/renderSource";
 import { removeAssetBackground } from "@/assets/clientProcessing";
+import { useUiStore } from "@/editor/uiStore";
 import { BACKGROUND_REMOVAL_FAILED_MESSAGE, assetSatisfiesTransparencyContract, requiresTransparency } from "@/assets/characterAssetContract";
 
 interface AssetThumbProps {
@@ -43,7 +44,8 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
         e.dataTransfer.setData("application/x-asset-id", asset.id);
         e.dataTransfer.effectAllowed = "copy";
       }}
-      title={`${asset.name} — drag into a panel`}
+      title={`${asset.name} — drag into a panel, double-click to edit`}
+      onDoubleClick={() => useUiStore.getState().openAssetEditor({ assetId: asset.id })}
       onContextMenu={(event) => {
         event.preventDefault();
         setMenuOpen(true);
@@ -94,6 +96,7 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
       )}
       {menuOpen && (
         <div className="absolute left-2 top-8 z-40 min-w-40 rounded border border-zinc-600 bg-zinc-900 p-1 text-[11px] shadow-xl">
+          <MenuItem label="Edit Image ✦" onClick={() => useUiStore.getState().openAssetEditor({ assetId: asset.id })} />
           {onUse && <MenuItem label="Use in selected panel" onClick={onUse} />}
           {onRename && <MenuItem label="Rename" onClick={onRename} />}
           {onRegenerate && <MenuItem label="Regenerate and replace" onClick={onRegenerate} />}
