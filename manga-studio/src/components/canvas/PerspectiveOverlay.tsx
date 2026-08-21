@@ -17,6 +17,7 @@ import { panelBoundsPx } from "@/domain/coords";
 import { vanishingPointCount } from "@/domain/perspective";
 import type { Page, Panel, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
+import { PanelRollGroup } from "./PanelRollGroup";
 
 interface PerspectiveOverlayProps {
   doc: ProjectDocument;
@@ -71,7 +72,7 @@ export function PerspectiveOverlay({ doc, page, panel, scale, editable }: Perspe
   });
 
   return (
-    <Group>
+    <PanelRollGroup doc={doc} page={page} panel={panel}>
       {/* Guides are clipped to the panel so they read as construction lines
           inside the frame rather than scribbles across the page. */}
       <Group
@@ -159,6 +160,6 @@ export function PerspectiveOverlay({ doc, page, panel, scale, editable }: Perspe
             </Group>
           );
         })}
-    </Group>
+    </PanelRollGroup>
   );
 }

@@ -30,6 +30,7 @@ import { BubbleTextEditor } from "./BubbleTextEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ShapeEditOverlay } from "./ShapeEditOverlay";
 import { PerspectiveOverlay } from "./PerspectiveOverlay";
+import { usesStagePlacement } from "@/domain/stageOps";
 import { PoseEditOverlay } from "./PoseEditOverlay";
 import { useViewport, type Viewport } from "./useViewport";
 
@@ -137,10 +138,24 @@ export function CanvasStage() {
         select({ panelId });
         setShapeEditPanel(panelId);
       },
-      onItemDragMove: (itemId, cx, cy) => transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } }),
+      // A staged character dragged on a snapping panel walks the floor: its
+      // vertical position becomes depth, so it shrinks and re-grounds live.
+      onItemDragMove: (itemId, cx, cy) => {
+        const current = useEditorStore.getState().doc;
+        if (current && usesStagePlacement(current, itemId)) {
+          transientDispatch({ type: "place-on-stage", instanceId: itemId, at: { x: cx, y: cy } });
+          return;
+        }
+        transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } });
+      },
       onItemDragEnd: (itemId, cx, cy) => {
         if (cx !== undefined && cy !== undefined) {
-          transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } });
+          const current = useEditorStore.getState().doc;
+          if (current && usesStagePlacement(current, itemId)) {
+            transientDispatch({ type: "place-on-stage", instanceId: itemId, at: { x: cx, y: cy } });
+          } else {
+            transientDispatch({ type: "update-instance-transform", instanceId: itemId, patch: { cx, cy } });
+          }
         }
         commitTransient();
         maybeReleaseFromPanel(itemId);

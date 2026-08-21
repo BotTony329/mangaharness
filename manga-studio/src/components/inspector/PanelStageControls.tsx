@@ -22,6 +22,7 @@ import {
   createPanelCamera,
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
+import { cameraChangeRequiresRedraw } from "@/domain/staging";
 import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
@@ -36,6 +37,10 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
 
   const camera = panel.camera ?? createPanelCamera();
   const editingGuides = guideEditPanelId === panelId;
+  // Tell the creator when a camera choice changes composition only.
+  const redraw = cameraChangeRequiresRedraw("angle", camera).requiresRedraw
+    ? cameraChangeRequiresRedraw("angle", camera)
+    : cameraChangeRequiresRedraw("mangaPerspective", camera);
   const perspective = panel.perspective ?? createPanelPerspective();
 
   return (
@@ -90,6 +95,12 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
         </div>
       </section>
 
+      {redraw.requiresRedraw && (
+        <p className="rounded border border-amber-800/60 bg-amber-950/30 p-2 text-[10px] leading-4 text-amber-300">
+          {redraw.reason} Composition is updated now; the artwork itself would need regenerating to match.
+        </p>
+      )}
+
       <section className="space-y-2">
         <Label>Perspective</Label>
         <Row label="Mode">
@@ -132,6 +143,25 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                 <span>Low</span>
               </div>
             </div>
+            <label className="flex items-center gap-2 text-[11px] text-zinc-400">
+              <input
+                type="checkbox"
+                checked={perspective.snapEnabled}
+                onChange={(event) =>
+                  dispatch({ type: "set-panel-perspective", panelId, patch: { snapEnabled: event.target.checked } })
+                }
+              />
+              Snap to Stage
+            </label>
+            <p className="text-[10px] leading-4 text-zinc-600">
+              Drag a staged character up or down the panel to move it through depth. Line art is not snapped.
+            </p>
+            {perspective.type === "three-point" && (
+              <p className="text-[10px] leading-4 text-amber-400/90">
+                Three-point draws guides and tells generation about vertical convergence. It does not re-project
+                existing artwork.
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <button
                 className={`flex-1 rounded border py-1 text-[11px] ${
@@ -199,11 +229,21 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
             onChange={(pitch) => dispatch({ type: "set-panel-camera", panelId, patch: { pitch } })}
           />
           <NumberField
-            label="Roll"
+            label="Roll (dutch tilt)"
             value={camera.roll}
             step={1}
             onChange={(roll) => dispatch({ type: "set-panel-camera", panelId, patch: { roll } })}
           />
+          <NumberField
+            label="Yaw (pans framing)"
+            value={camera.yaw}
+            step={1}
+            onChange={(yaw) => dispatch({ type: "set-panel-camera", panelId, patch: { yaw } })}
+          />
+          <p className="text-[10px] leading-4 text-zinc-600">
+            Yaw pans the framing and tells generation the camera has turned. It cannot show another side of an
+            existing drawing — that needs a redraw.
+          </p>
           <NumberField
             label="Field of view"
             value={camera.fov}

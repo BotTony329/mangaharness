@@ -53,7 +53,19 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
           onDblClick={() => interaction.onPanelDoubleClick?.(panel.id)}
           onDblTap={() => interaction.onPanelDoubleClick?.(panel.id)}
         />
-        {items.map((item) => renderItem(doc, panel.id, item, interactive, interaction))}
+        {/* Camera roll (§2). Scene content rotates about the panel centre while
+            the clip stays on the outer group, so a Dutch angle tilts the shot
+            and the frame stays square. Export walks this same scene graph, so
+            the exported page matches the editor exactly. */}
+        <Group
+          rotation={panel.camera?.roll ?? 0}
+          x={bounds.width / 2}
+          y={bounds.height / 2}
+          offsetX={bounds.width / 2}
+          offsetY={bounds.height / 2}
+        >
+          {items.map((item) => renderItem(doc, panel.id, item, interactive, interaction))}
+        </Group>
       </Group>
       {panel.border.visible && (
         <Line

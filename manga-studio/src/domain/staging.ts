@@ -19,6 +19,7 @@ import { depthScale } from "./stage";
 import type {
   AssetInstance,
   CameraAngle,
+  PanelPerspective,
   GroundAnchor,
   InstanceStage,
   PanelCamera,
@@ -121,6 +122,12 @@ export function projectInstance(input: {
   camera?: PanelCamera;
   baseHeight: number;
   airborne?: boolean;
+  /**
+   * Active perspective horizon. When present the floor RECEDES toward it, so
+   * a distant character's feet sit higher in frame. Absent means there is no
+   * horizon to recede along and every character shares one flat ground line.
+   */
+  horizonY?: number;
 }): StageProjection {
   const { instance, stage, panel, camera, baseHeight } = input;
   const aspect = instance.height === 0 ? 1 : instance.width / instance.height;
@@ -132,18 +139,74 @@ export function projectInstance(input: {
     return { cx: instance.cx, cy: instance.cy, width, height };
   }
 
-  const groundLine = groundY(stage, camera) * panel.height;
+  // An explicit per-instance ground line always wins. Otherwise: a receding
+  // floor when a horizon exists, a flat line when it does not. Both are "the
+  // ground plane" — the receding one just has depth in it, which is what makes
+  // dragging a character up the panel read as walking away.
+  const groundLine =
+    stage.groundY !== undefined
+      ? stage.groundY * panel.height
+      : input.horizonY !== undefined
+        ? groundPointForDepth({ depth: stage.depth, panel, camera, horizonY: input.horizonY })
+        : groundLineFor(camera) * panel.height;
   const cy = anchorOffset(stage.anchor, height, groundLine);
   return { cx: instance.cx, cy, width, height };
 }
 
-function groundY(stage: InstanceStage, camera: PanelCamera | undefined): number {
-  // An explicit per-instance ground line wins; otherwise the camera decides.
-  return stage.groundY ?? groundLineFor(camera);
-}
-
 function anchorOffset(anchor: GroundAnchor, height: number, groundLine: number): number {
   return anchor === "center" ? groundLine : groundLine - height / 2;
+}
+
+// ─── Canonical framing (§1) ─────────────────────────────────────────────────
+
+/**
+ * The one framing vocabulary.
+ *
+ * Two paths used to exist: the panel camera scaled the subject geometrically,
+ * while `compose_character` mapped a different word list onto crop presets —
+ * so "close-up" could mean a real close-up or a `face` crop that silently
+ * degraded to `upper-body` when the asset had no face region. Every framing
+ * request now resolves to a ShotType and goes through `frameSubject`.
+ */
+const FRAMING_ALIASES: Record<string, ShotType> = {
+  "extreme-wide": "extreme-wide",
+  "establishing": "extreme-wide",
+  wide: "wide",
+  "long": "wide",
+  full: "full",
+  "full-body": "full",
+  "medium-full": "wide",
+  "cowboy": "wide",
+  medium: "medium",
+  "upper-body": "medium",
+  "waist-up": "medium",
+  "close-up": "close-up",
+  "close": "close-up",
+  bust: "close-up",
+  face: "extreme-close-up",
+  "extreme-close-up": "extreme-close-up",
+};
+
+/** Resolve any framing word onto the canonical ShotType, or undefined. */
+export function resolveShotType(framing: string | undefined): ShotType | undefined {
+  if (!framing) return undefined;
+  return FRAMING_ALIASES[framing.trim().toLowerCase()];
+}
+
+/**
+ * How much of the panel height the focal subject occupies, as actually laid
+ * out. Used to VERIFY a framing request produced the geometry it claimed (§11).
+ */
+export function subjectCoverage(instance: { height: number }, panel: Rect): number {
+  return panel.height === 0 ? 0 : instance.height / panel.height;
+}
+
+/** Whether a laid-out subject genuinely reads as the requested shot. */
+export function framingMatchesShot(coverage: number, shot: ShotType): boolean {
+  const target = shotCoverage(shot);
+  // Generous band: framing is a composition choice, not a measurement, but a
+  // close-up must not pass as a full shot.
+  return coverage >= target * 0.6 && coverage <= target * 1.6;
 }
 
 // ─── Camera framing ─────────────────────────────────────────────────────────
@@ -161,6 +224,8 @@ export function frameSubject(input: {
   panel: Rect;
   shot: ShotType;
   angle?: CameraAngle;
+  /** Camera pan in degrees; positive turns the camera right (§3). */
+  yaw?: number;
 }): StageProjection {
   const { instance, panel, shot } = input;
   const aspect = instance.height === 0 ? 1 : instance.width / instance.height;
@@ -175,11 +240,26 @@ export function frameSubject(input: {
   // pushes it down so the viewer looks over it.
   const angleShift = input.angle ? ANGLE_FRAMING_SHIFT[input.angle] : 0;
   return {
-    cx: instance.cx,
+    cx: instance.cx + panel.width * yawFramingShift(input.yaw),
     cy: cy + panel.height * angleShift,
     width,
     height,
   };
+}
+
+/**
+ * Yaw as a horizontal pan (§3).
+ *
+ * Turning the camera right moves the subject left in frame. This is the honest
+ * 2.5D consequence of yaw: it cannot re-draw the character from a new side —
+ * that is what `cameraChangeRequiresRedraw` reports — but panning the framing
+ * is real, visible, and physically correct.
+ */
+export function yawFramingShift(yaw: number | undefined): number {
+  if (!yaw) return 0;
+  // ±45° maps to roughly a third of the panel width; clamped so extreme values
+  // cannot push the subject entirely out of frame.
+  return clampRange(-yaw / 45, -1, 1) * 0.33;
 }
 
 /**
@@ -205,9 +285,50 @@ const ANGLE_FRAMING_SHIFT: Record<CameraAngle, number> = {
   dutch: 0,
 };
 
+// ─── Ground-stage placement (§4/§5) ─────────────────────────────────────────
+
+/**
+ * Infer depth from where a character's feet were dropped.
+ *
+ * The panel floor runs from the ground line (nearest the camera, bottom of
+ * frame) up to the horizon (infinitely far). Dropping feet higher up the panel
+ * therefore means "further away", which is how a manga stage reads and how a
+ * creator expects dragging to behave — no gizmo required.
+ *
+ * Returns null when there is no usable floor to infer against, so the caller
+ * can leave the drag as a plain free move rather than inventing a depth.
+ */
+export function depthFromGroundPoint(input: {
+  feetY: number;
+  panel: Rect;
+  camera?: PanelCamera;
+  horizonY?: number;
+}): number | null {
+  const groundLine = groundLineFor(input.camera) * input.panel.height;
+  const horizon = (input.horizonY ?? input.camera?.horizonY ?? 0.5) * input.panel.height;
+  const span = groundLine - horizon;
+  // A floor with no depth to it (horizon at or below the ground line) cannot
+  // tell us anything.
+  if (span <= input.panel.height * 0.05) return null;
+  const t = (groundLine - input.feetY) / span;
+  return Math.max(0, Math.min(1, t));
+}
+
+/** Where a character's feet sit for a depth — the inverse, for snapping. */
+export function groundPointForDepth(input: {
+  depth: number;
+  panel: Rect;
+  camera?: PanelCamera;
+  horizonY?: number;
+}): number {
+  const groundLine = groundLineFor(input.camera) * input.panel.height;
+  const horizon = (input.horizonY ?? input.camera?.horizonY ?? 0.5) * input.panel.height;
+  return groundLine - (groundLine - horizon) * Math.max(0, Math.min(1, input.depth));
+}
+
 // ─── Transform vs redraw boundary (§14) ─────────────────────────────────────
 
-export type CameraChangeKind = "shot" | "angle" | "lens" | "mangaPerspective";
+export type CameraChangeKind = "shot" | "angle" | "lens" | "mangaPerspective" | "yaw" | "perspective";
 
 export interface RedrawDecision {
   /** True when transforms alone cannot honestly represent the change. */
@@ -243,6 +364,21 @@ export function cameraChangeRequiresRedraw(
       reason: `A ${camera.angle.replace("-", " ")} view of the subject cannot be produced by scaling; the character needs redrawing from that angle.`,
     };
   }
+  if (change === "yaw") {
+    // Panning the framing is transform-only; actually seeing another side of
+    // the character is not.
+    if (Math.abs(camera.yaw) < 20) return { requiresRedraw: false };
+    return {
+      requiresRedraw: true,
+      reason: "Turning the camera this far shows a different side of the subject, which needs redrawing.",
+    };
+  }
+  if (change === "perspective") {
+    return {
+      requiresRedraw: true,
+      reason: "Three-point vertical convergence changes how the subject is drawn, not just where it sits.",
+    };
+  }
   if (camera.mangaPerspectiveStrength >= 2) {
     return {
       requiresRedraw: true,
@@ -250,6 +386,32 @@ export function cameraChangeRequiresRedraw(
     };
   }
   return { requiresRedraw: false };
+}
+
+/**
+ * Perspective as generation context (§7).
+ *
+ * Three-point is guide-and-context, not projection: the third vanishing point
+ * gives generation a real vertical-convergence instruction, and the panel draws
+ * its guides — but no raster is warped, and `cameraChangeRequiresRedraw` says so.
+ */
+export function perspectiveGenerationContext(perspective: PanelPerspective | undefined): string[] {
+  if (!perspective || perspective.type === "none") return [];
+  const eyeLevel =
+    perspective.horizonY < 0.35 ? "high above the subject" : perspective.horizonY > 0.65 ? "below the subject" : "at the subject's eye level";
+  switch (perspective.type) {
+    case "one-point":
+      return [`One-point perspective with the horizon ${eyeLevel}.`];
+    case "two-point":
+      return [`Two-point perspective with the horizon ${eyeLevel}; verticals stay parallel.`];
+    case "three-point":
+      return [
+        `Three-point perspective with the horizon ${eyeLevel}.`,
+        perspective.vanishingPoints[2] && perspective.vanishingPoints[2].y > 1
+          ? "Verticals converge downward for a towering low-angle view."
+          : "Verticals converge upward for a steep looking-down view.",
+      ];
+  }
 }
 
 /**

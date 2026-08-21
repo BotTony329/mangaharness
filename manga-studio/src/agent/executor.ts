@@ -37,6 +37,8 @@ import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/s
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
+import { focalInstance } from "@/domain/stageOps";
+import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
 
@@ -651,7 +653,7 @@ function doSetCamera(args: {
   mangaPerspective?: number;
 }): void {
   const panelId = panelIdByNumber(args.panel);
-  dispatch({
+  const result = dispatch({
     type: "set-panel-camera",
     panelId,
     patch: {
@@ -661,6 +663,22 @@ function doSetCamera(args: {
       mangaPerspectiveStrength: args.mangaPerspective,
     },
   });
+
+  // Verify the geometry, not the metadata (§11). A camera step that stored a
+  // value but left the panel unchanged must not report success.
+  const camera = result.doc.panels[panelId].camera!;
+  if (args.shot) {
+    const focal = focalInstance(result.doc, panelId);
+    if (focal) {
+      const rect = panelPxRect(result.doc, panelId);
+      if (!framingMatchesShot(subjectCoverage(focal, rect), args.shot)) {
+        throw new Error(`Camera shot "${args.shot}" did not reframe the focal subject`);
+      }
+    }
+  }
+  if (args.angle === "dutch" && camera.roll === 0) {
+    throw new Error("Dutch angle did not apply any roll");
+  }
 }
 
 function doSetPerspective(args: { panel: number; type: PerspectiveType; horizonY?: number }): void {

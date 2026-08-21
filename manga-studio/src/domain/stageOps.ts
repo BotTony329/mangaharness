@@ -11,7 +11,7 @@ import { cloneDoc, panelPxRect, touch } from "./docHelpers";
 import { normalizeEffectParams, updateEffectParams } from "./effects";
 import { applyPerspectivePatch, createPanelPerspective, moveVanishingPoint, type PerspectivePatch } from "./perspective";
 import { createStage, DEFAULT_STAGE, depthSortKey } from "./stage";
-import { frameSubject, inferBaseHeight, isAirborne, projectInstance } from "./staging";
+import { depthFromGroundPoint, frameSubject, inferBaseHeight, isAirborne, projectInstance } from "./staging";
 import type {
   AssetInstance,
   CharacterState,
@@ -65,7 +65,7 @@ function applyShotFraming(doc: ProjectDocument, panelId: ID): void {
   const focal = focalInstance(doc, panelId);
   if (!focal) return;
   const rect = panelPxRect(doc, panelId);
-  const framed = frameSubject({ instance: focal, panel: rect, shot: camera.shot, angle: camera.angle });
+  const framed = frameSubject({ instance: focal, panel: rect, shot: camera.shot, angle: camera.angle, yaw: camera.yaw });
   focal.cx = framed.cx;
   focal.cy = framed.cy;
   focal.width = framed.width;
@@ -82,6 +82,12 @@ function applyShotFraming(doc: ProjectDocument, panelId: ID): void {
  * Explicit focal item first; otherwise the topmost character in the panel, so
  * a single-character panel needs no setup at all.
  */
+/** The horizon a panel's floor recedes toward, or undefined when flat. */
+function activeHorizon(doc: ProjectDocument, panelId: ID): number | undefined {
+  const perspective = doc.panels[panelId]?.perspective;
+  return perspective && perspective.type !== "none" ? perspective.horizonY : undefined;
+}
+
 export function focalInstance(doc: ProjectDocument, panelId: ID): AssetInstance | undefined {
   const panel = doc.panels[panelId];
   if (!panel) return undefined;
@@ -165,6 +171,7 @@ export function restagePanel(doc: ProjectDocument, panelId: ID, baseHeights?: Ma
       camera,
       baseHeight: baseHeights?.get(itemId) ?? inferBaseHeight(item, item.stage.depth, camera),
       airborne: isAirborne(state?.pose, state?.poseRig?.descriptors),
+      horizonY: activeHorizon(doc, panelId),
     });
     item.cx = projection.cx;
     item.cy = projection.cy;
@@ -213,7 +220,11 @@ export function setPanelPerspective(doc: ProjectDocument, panelId: ID, patch: Pe
   const next = cloneDoc(doc);
   const panel = next.panels[panelId];
   if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+  const baseHeights = captureBaseHeights(next, panelId, panel.camera);
   panel.perspective = applyPerspectivePatch(panel.perspective ?? createPanelPerspective(), patch);
+  // The horizon IS the floor: turning perspective on, off, or moving the eye
+  // level changes where every staged character stands.
+  restagePanel(next, panelId, baseHeights);
   touch(next);
   return next;
 }
@@ -277,6 +288,7 @@ export function setInstanceStage(
       camera,
       baseHeight,
       airborne: isAirborne(state?.pose, state?.poseRig?.descriptors),
+      horizonY: activeHorizon(next, instance.panelId),
     });
     instance.cx = projection.cx;
     instance.cy = projection.cy;
@@ -298,6 +310,68 @@ export function clearInstanceStage(doc: ProjectDocument, instanceId: ID): Projec
   delete instance.stage;
   touch(next);
   return next;
+}
+
+/**
+ * Place a staged character by where it was dropped on the panel floor (§4/§5).
+ *
+ * Horizontal movement is kept as-is; vertical movement becomes depth, so
+ * dragging a character up the panel walks it into the distance and it shrinks
+ * and re-grounds as it goes. Only runs when the panel's stage snapping is on
+ * and the panel actually has a floor to infer against — otherwise the drag
+ * stays an ordinary free move rather than guessing.
+ */
+export function placeOnStage(
+  doc: ProjectDocument,
+  instanceId: ID,
+  point: { x: number; y: number },
+): ProjectDocument {
+  const next = cloneDoc(doc);
+  const instance = requireAssetInstance(next, instanceId);
+  if (!instance.stage) return doc;
+  const panel = next.panels[instance.panelId];
+  if (!panel?.perspective?.snapEnabled) return doc;
+
+  const rect = panelPxRect(next, instance.panelId);
+  const camera = panel.camera;
+  const feetY = point.y + instance.height / 2;
+  const depth = depthFromGroundPoint({
+    feetY,
+    panel: rect,
+    camera,
+    horizonY: panel.perspective.horizonY,
+  });
+  if (depth === null) return doc;
+
+  const baseHeight = inferBaseHeight(instance, instance.stage.depth, camera);
+  const stage = createStage({ ...instance.stage, depth, scaleLocked: false });
+  instance.stage = stage;
+  instance.cx = point.x;
+
+  const state = instance.characterState;
+  const projection = projectInstance({
+    instance,
+    stage,
+    panel: rect,
+    camera,
+    baseHeight,
+    airborne: isAirborne(state?.pose, state?.poseRig?.descriptors),
+    horizonY: panel.perspective.horizonY,
+  });
+  instance.cy = projection.cy;
+  instance.width = projection.width;
+  instance.height = projection.height;
+  instance.cropMode = "custom";
+  if (panel.autoDepthOrder) sortPanelByDepth(next, instance.panelId);
+  touch(next);
+  return next;
+}
+
+/** True when a canvas drag on this instance should become a stage placement. */
+export function usesStagePlacement(doc: ProjectDocument, instanceId: ID): boolean {
+  const item = doc.items[instanceId];
+  if (item?.kind !== "asset" || !item.stage) return false;
+  return Boolean(doc.panels[item.panelId]?.perspective?.snapEnabled);
 }
 
 // ─── Semantic character state ───────────────────────────────────────────────

@@ -81,6 +81,7 @@ export const toolSchemas = {
     expression: z.string().max(80).optional(),
     outfit: z.string().max(120).optional(),
     view: z.string().max(80).optional(),
+    /** Same canonical framing vocabulary the camera Shot uses (§1). */
     framing: z.enum(["full-body", "medium-full", "medium", "upper-body", "close-up", "face"]).optional(),
     position: z.enum(["left", "center", "right"]).optional(),
     facing: z.enum(["left", "right", "camera"]).optional(),
@@ -328,7 +329,7 @@ Available tools (call only these, with exactly these argument shapes):
 - reshape_panel {panel, points} — replace a panel's polygon (3-8 points, normalized 0-1 page coords). Use for dynamic/diagonal action layouts; keep shapes readable and non-overlapping.
 - add_speech_bubble {panel, bubbleType: "speech"|"thought"|"shout"|"narration", text, position?} — add dialogue.
 - add_effect {panel, effectKind: "speed-lines"|"focus-lines"|"screentone"|"impact-burst"} — add a manga effect layer.
-- set_camera {panel, shot?, angle?, lens?, mangaPerspective?} — direct the panel. Use the semantic vocabulary (close-up, low angle) rather than moving objects to fake a shot.
+- set_camera {panel, shot?, angle?, lens?, mangaPerspective?} — direct the panel. "angle: dutch" really tilts the panel content. Shot uses the SAME framing vocabulary as compose_character, so never combine the two to fight each other. Use the semantic vocabulary (close-up, low angle) rather than moving objects to fake a shot.
 - set_perspective {panel, type, horizonY?} — establish construction guides. These are editor guides only and never appear in the exported page.
 - set_character_depth {panel, characterName?, placement?, depth?, groundY?} — place a character in stage depth. Prefer placement ("foreground"|"midground"|"background") over a raw depth number. Size and ground contact follow automatically; do not also set scale or position.
 - set_focal_character {panel, characterName} — name the subject the camera frames. Set this before changing shot, so a close-up frames that character rather than the middle of the panel.

@@ -21,6 +21,7 @@ import {
   isAirborne,
   lensDepthExponent,
   mangaDepthExponent,
+  groundPointForDepth,
   projectedDepthScale,
   shotGenerationContext,
 } from "./staging";
@@ -520,9 +521,24 @@ describe("acceptance A: directing a panel by hand", () => {
     doc = applyDomainCommand(doc, { type: "set-instance-stage", instanceId: mio.id, patch: { depth: 0.15 } }).doc;
     doc = applyDomainCommand(doc, { type: "set-instance-stage", instanceId: yuri.id, patch: { depth: 0.85 } }).doc;
 
-    // Mio visibly larger, Yuri visibly smaller, both grounded, Mio on top.
+    // Mio visibly larger, Yuri visibly smaller, Mio on top.
     expect(inst(doc, mio.id).height).toBeGreaterThan(inst(doc, yuri.id).height * 1.3);
-    expect(feetY(inst(doc, mio.id))).toBeCloseTo(feetY(inst(doc, yuri.id)), 1);
+    // Both stand ON the ground plane. With perspective active that plane
+    // recedes toward the horizon, so the nearer character's feet sit LOWER in
+    // frame rather than at the same y — which is what depth looks like.
+    const rectA = panelPxRect(doc, panelId);
+    const horizon = doc.panels[panelId].perspective!.horizonY;
+    for (const id of [mio.id, yuri.id]) {
+      const item = inst(doc, id);
+      const expected = groundPointForDepth({
+        depth: item.stage!.depth,
+        panel: rectA,
+        camera: doc.panels[panelId].camera,
+        horizonY: horizon,
+      });
+      expect(feetY(item)).toBeCloseTo(expected, 1);
+    }
+    expect(feetY(inst(doc, mio.id))).toBeGreaterThan(feetY(inst(doc, yuri.id)));
     const order = doc.panels[panelId].itemIds;
     expect(order.indexOf(mio.id)).toBeGreaterThan(order.indexOf(yuri.id));
 

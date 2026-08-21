@@ -237,3 +237,25 @@ Phase 1 shipped a complete, tested, serializing camera and perspective model tha
 2. **Angle changes did not reframe.** Framing ran only when the shot changed, so setting a low angle moved the horizon but left the subject where it was.
 3. **Lens changes did nothing** — the base-height cancellation above.
 4. **Depth could not release a framed subject.** Camera framing sets `scaleLocked`, and the Agent's depth tool did not clear it, so "put Mio in the foreground" silently failed after any shot change.
+
+## D38 — Camera integrity: one framing engine, honest controls
+
+Phase 5 made the camera visible. Phase 5.5 removes the places where the UI still claimed control the renderer did not honour. The governing rule: a control either visibly affects composition, is explicitly labelled experimental, or is not exposed.
+
+**One framing vocabulary.** Two paths existed: the panel camera scaled the subject geometrically, while `compose_character` mapped a different word list onto crop presets — so "close-up" could mean a real close-up or a `face` crop that silently degraded to `upper-body` when the asset had no face region. Every framing word now resolves through `resolveShotType` to a canonical `ShotType` and is laid out by `frameSubject`. The two paths are tested to produce identical geometry for the same word.
+
+**Dutch roll is real.** `PanelRenderer` rotates scene content about the panel centre inside the clip, so the shot tilts and the frame stays square. Export walks the same scene graph, so the page matches the editor. `PanelRollGroup` tilts the overlays with it — Konva reports a dragged child's position in its parent's space, so the overlays' existing inverse maths keeps working unrotated inside the rotated group.
+
+**Yaw pans the framing.** That is the honest 2.5D consequence: turning the camera moves the subject in frame. It cannot show another side of an existing drawing, and `cameraChangeRequiresRedraw` says so past 20°. The control is labelled with exactly that boundary rather than hidden.
+
+**Three-point is guide-and-context, and admits it.** The third vanishing point draws guides and contributes a real vertical-convergence instruction to generation, but no raster is re-projected. The UI states this and the redraw decision returns true.
+
+**"Snap to Stage", not "Snap".** The honest name: it snaps staged characters to the ground plane and infers their depth. It does not snap arbitrary line art, and the label says so.
+
+### The contradiction the acceptance test exposed
+
+Two ground models had been built without noticing they disagreed. `projectInstance` placed every character's feet on one flat line, while `depthFromGroundPoint` — written for canvas dragging — assumed a floor receding toward the horizon. Dragging a character "deeper" therefore computed a depth against a floor the renderer was not using.
+
+Resolved by making the floor recede **only when a horizon exists**: with perspective active the plane has depth in it and a distant character's feet sit higher in frame; with perspective off there is no horizon to recede along and the flat line is correct. A Phase 5 test asserting both characters share one screen y encoded the flat model and now asserts the stronger property — each character's feet land exactly on the ground plane at its own depth.
+
+Changing the horizon now restages the panel, for the same reason a camera change does: the horizon *is* the floor.

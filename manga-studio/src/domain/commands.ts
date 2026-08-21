@@ -32,6 +32,7 @@ import type {
 import { validateAndCorrectComposition, type CompositionIssue, type CompositionRequirements } from "./compositionValidation";
 import type { PoseCalibration } from "@/characters/poseRig";
 import { setStateCalibration } from "./characterStateOps";
+import { frameSubject, resolveShotType } from "./staging";
 import type { CameraPatch } from "./camera";
 import type { PerspectivePatch } from "./perspective";
 import {
@@ -43,12 +44,17 @@ import {
   setEffectTarget,
   setInstanceCharacterState,
   setInstanceStage,
+  placeOnStage,
   setPanelAutoDepthOrder,
   setPanelCamera,
   setPanelFocalItem,
   setPanelPerspective,
 } from "./stageOps";
 
+/**
+ * Legacy framing vocabulary kept for existing tool calls. Every value resolves
+ * to a canonical ShotType via `resolveShotType`; there is no second engine.
+ */
 export type SemanticFraming = "full-body" | "medium-full" | "medium" | "upper-body" | "close-up" | "face";
 
 export type DomainCommand =
@@ -114,7 +120,8 @@ export type DomainCommand =
   | { type: "refresh-bubble-tails"; panelId: ID }
   | { type: "set-state-calibration"; stateId: ID; calibration?: PoseCalibration }
   | { type: "set-panel-focal-item"; panelId: ID; itemId?: ID }
-  | { type: "set-panel-auto-depth-order"; panelId: ID; enabled: boolean };
+  | { type: "set-panel-auto-depth-order"; panelId: ID; enabled: boolean }
+  | { type: "place-on-stage"; instanceId: ID; at: Point };
 
 export interface CommandResult {
   doc: ProjectDocument;
@@ -260,6 +267,8 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       return { doc: setPanelFocalItem(doc, command.panelId, command.itemId) };
     case "set-panel-auto-depth-order":
       return { doc: setPanelAutoDepthOrder(doc, command.panelId, command.enabled) };
+    case "place-on-stage":
+      return { doc: placeOnStage(doc, command.instanceId, command.at) };
     case "set-state-calibration": {
       const next = cloneDoc(doc);
       setStateCalibration(next, command.stateId, command.calibration);
@@ -303,23 +312,36 @@ function composeCharacter(
 ): CommandResult {
   const asset = doc.assets[command.assetId];
   if (!asset || asset.metadata?.characterId !== command.characterId) throw new Error("Visual asset does not belong to the Character");
-  const requestedCropMode = framingCropMode(command.framing);
-  const cropMode = requestedCropMode === "face" && !asset.focusRegions?.some((region) => region.kind === "face")
-    ? "upper-body"
-    : requestedCropMode;
-  const placed = placeAsset(doc, command.panelId, command.assetId, { cropMode });
+  const placed = placeAsset(doc, command.panelId, command.assetId, { cropMode: "fit" });
   let next = placed.doc;
   const item = next.items[placed.itemId];
   if (item.kind !== "asset") throw new Error("Character placement failed");
   const panelRect = panelPxRect(next, command.panelId);
   const panelWidth = panelRect.width;
   const positionX = command.position === "left" ? panelWidth * 0.28 : command.position === "right" ? panelWidth * 0.72 : panelWidth * 0.5;
-  const depthScale = command.depth === "foreground" ? 1.18 : command.depth === "background" ? 0.72 : 1;
-  next = updateItemTransform(next, item.id, {
-    cx: positionX,
-    width: item.width * depthScale,
-    height: item.height * depthScale,
-  });
+
+  // ONE framing engine (§1). A framing word resolves to the canonical ShotType
+  // and is laid out by the same `frameSubject` the panel camera uses, so the
+  // camera and a composed character can no longer disagree about what
+  // "close-up" means.
+  const shot = resolveShotType(command.framing);
+  if (shot) {
+    const framed = frameSubject({
+      instance: item,
+      panel: panelRect,
+      shot,
+      angle: next.panels[command.panelId]?.camera?.angle,
+    });
+    next = updateItemTransform(next, item.id, { cx: positionX, width: framed.width, height: framed.height });
+    next = updateItemTransform(next, item.id, { cy: framed.cy });
+  } else {
+    const depthScale = command.depth === "foreground" ? 1.18 : command.depth === "background" ? 0.72 : 1;
+    next = updateItemTransform(next, item.id, {
+      cx: positionX,
+      width: item.width * depthScale,
+      height: item.height * depthScale,
+    });
+  }
   next = updateItemProps(next, item.id, { flipX: command.facing === "left" });
   next = setSceneCharacterSemantics(next, item.id, {
     role: command.role,
@@ -330,8 +352,4 @@ function composeCharacter(
   return { doc: next, createdId: item.id };
 }
 
-function framingCropMode(framing: SemanticFraming | undefined): CropMode {
-  if (framing === "medium" || framing === "upper-body") return "upper-body";
-  if (framing === "close-up" || framing === "face") return "face";
-  return "fit";
-}
+
