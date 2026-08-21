@@ -159,6 +159,33 @@ export function scopeForSubject(scope: AgentRunScope, subject: SubjectResolution
   };
 }
 
+/**
+ * Widen the scope when the request names panels the selection does not cover.
+ *
+ * "下一格Yuri说你好" is an explicit statement about WHERE, exactly as naming a
+ * character is a statement about WHO. A selection-locked scope then rejects the
+ * very panel the creator asked for — the same class of failure as a selected
+ * lamp overruling a named character, arriving through the other axis.
+ *
+ * The widening is bounded by the panels the sequence actually needs, and the
+ * reason is recorded so the run log can explain it.
+ */
+export function scopeForPanels(scope: AgentRunScope, panelNumbers: number[]): AgentRunScope {
+  if (scope.kind === "current-page" || scope.kind === "whole-project") return scope;
+  const outside = panelNumbers.filter((number) => number !== scope.panelNumber);
+  if (outside.length === 0) return scope;
+  return {
+    ...scope,
+    kind: "current-page",
+    itemId: undefined,
+    panelId: undefined,
+    panelNumber: undefined,
+    label: `Current Page · ${scope.pageName}`,
+    demotedFrom: scope.kind,
+    demotionReason: `The request names panel${outside.length > 1 ? "s" : ""} ${outside.join(", ")}, so the run covers the page rather than the current selection.`,
+  };
+}
+
 function inferSelectionScope(selection: Selection): AgentScopeKind {
   if (selection.itemId) return "selected-object";
   if (selection.panelId) return "selected-panel";

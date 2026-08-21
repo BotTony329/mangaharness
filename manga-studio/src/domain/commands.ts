@@ -164,7 +164,7 @@ export type DomainCommand =
   | { type: "record-interaction-render"; input: Omit<InteractionRender, "id" | "createdAt"> }
   | { type: "set-project-style"; styleId: ID }
   | { type: "add-custom-style"; input: Omit<StyleProfile, "id" | "family"> }
-  | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements }
+  | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements; before?: ProjectDocument }
   // ── Virtual manga stage ──
   | { type: "set-panel-camera"; panelId: ID; patch: CameraPatch }
   | { type: "set-panel-perspective"; panelId: ID; patch: PerspectivePatch }
@@ -455,7 +455,7 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
       return { doc: next };
     }
     case "validate-composition": {
-      const result = validateAndCorrectComposition(doc, command.panelIds, command.requirements);
+      const result = validateAndCorrectComposition(doc, command.panelIds, command.requirements, command.before);
       return { doc: result.doc, issues: result.issues };
     }
   }

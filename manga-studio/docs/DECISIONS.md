@@ -755,3 +755,61 @@ in the hit stack, so the gesture means "and this one too" rather than "nothing".
 The Layers list also accepts shift-click, and highlights both rows. Canvas hit
 testing has to tell two overlapping images apart; a list never does, so the
 two-character workflow has one path that cannot degrade.
+
+## D67 — A sequence plan, not a suggestion
+
+The scene intent knew "run toward the camera, THEN shout" was two moments, and
+nothing enforced it: the planner was told, and whether beat two landed in its
+own panel depended on what the model chose to emit. Advisory structure is not
+structure.
+
+`agent/sequencePlan.ts` carries the panel on every beat, resolved by
+`agent/panelAllocation.ts`, and compiles to ordinary editor commands — so it
+still passes through the same validation, routing, transaction and
+post-conditions as any other run. There is no privileged path.
+
+Three details that are decisions, not mechanics:
+
+- **The connective stays with its fragment.** A plain split consumed 下一格, so
+  the beat lost the one word saying which panel it belonged in.
+- **Panel targets are resolved before growth**, because growth depends on the
+  highest panel the sequence reaches. Allocating first produced a plan that
+  asked for panel 2 on a page grown only to hold panel 1.
+- **Every fragment yields a beat.** "第一格，Yuri在前景，用广角低机位" has no verb
+  at all; dropping it discarded the camera direction attached to it.
+
+Simultaneity is not sequence. 同时 / meanwhile folds into the previous moment,
+because inventing a panel the creator did not ask for is as wrong as collapsing
+two they did.
+
+## D68 — Camera language compiles; it does not leak
+
+"Close up on Yuri" used to survive only as a hint to the planner. It is now
+parsed into a typed `CameraIntent` and compiled into `set_camera`,
+`set_perspective`, `set_character_depth` and `set_focal_character`. No second
+camera system exists, and no raw natural-language camera instruction reaches
+renderer code.
+
+**Depth is order, never coordinates.** "Mori behind Yuri" is a constraint
+between two actors; it resolves to depth bands and the existing stage projection
+turns that into scale and ground position. An LLM emitting pixel values would be
+guessing at arithmetic the harness can do exactly.
+
+Relations are read CLAUSE BY CLAUSE. "Yuri在前景，Mori站在她身后的街道上" is two
+statements, and reading the whole fragment at once let the two clauses share
+their mentions — which put the wrong actor in front.
+
+Camera work is editing. Every command this emits is an `EDITOR_OP`, so a closer
+shot re-frames existing artwork and never redraws a character.
+
+## D69 — Blame only what the run did
+
+Validation failed a run because a character was completely obscured — by a
+pile-up that existed before the run started. The Agent was being blamed for
+damage it had not caused, and nothing could ever be edited on a crowded panel.
+`validateAndCorrectComposition` now receives the pre-run document: a
+pre-existing breach is a warning, and only a NEW one is fatal.
+
+Relatedly, being MENTIONED is not being the actor. "她回头看Mori" needs Mori in
+the panel so she can be looked at, but the pose belongs to Yuri alone; the
+compiled plan applies action and expression only to the beat's actor.

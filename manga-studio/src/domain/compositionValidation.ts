@@ -68,6 +68,15 @@ export function validateAndCorrectComposition(
   doc: ProjectDocument,
   panelIds: ID[],
   requirements: CompositionRequirements = {},
+  /**
+   * The document as it was before the run.
+   *
+   * A character already buried under a pile of earlier placements is not a
+   * fault this run introduced, and failing the run for it means nothing can
+   * ever be edited on a crowded panel. Pre-existing breaches are reported as
+   * warnings; only NEW ones are fatal.
+   */
+  before?: ProjectDocument,
 ): { doc: ProjectDocument; issues: CompositionIssue[] } {
   const next = cloneDoc(doc);
   const issues: CompositionIssue[] = [];
@@ -120,7 +129,19 @@ export function validateAndCorrectComposition(
           contains(itemRect(other), itemRect(item))
         );
       });
-      if (obscured) issues.push({ code: "character-obscured", panelId, itemId: item.id, message: "Character is completely obscured by a higher layer", corrected: false , severity: severityFor("character-obscured", false) });
+      if (obscured) {
+        const alreadyObscured = before ? wasObscured(before, panelId, item.id) : false;
+        issues.push({
+          code: "character-obscured",
+          panelId,
+          itemId: item.id,
+          message: alreadyObscured
+            ? "Character was already hidden behind a higher layer before this run"
+            : "Character is completely obscured by a higher layer",
+          corrected: false,
+          severity: alreadyObscured ? "warning" : severityFor("character-obscured", false),
+        });
+      }
     }
   }
   if (issues.some((issue) => issue.corrected)) touch(next);
@@ -160,6 +181,24 @@ export function validateScopeIntegrity(
     }
   }
   return issues;
+}
+
+/** Was this item already completely covered before the run? */
+function wasObscured(before: ProjectDocument, panelId: ID, itemId: ID): boolean {
+  const panel = before.panels[panelId];
+  const item = before.items[itemId];
+  if (!panel || item?.kind !== "asset") return false;
+  const index = panel.itemIds.indexOf(itemId);
+  if (index < 0) return false;
+  return panel.itemIds.slice(index + 1).some((otherId) => {
+    const other = before.items[otherId];
+    return (
+      other?.kind === "asset" &&
+      other.visible !== false &&
+      other.opacity >= 0.95 &&
+      contains(itemRect(other), itemRect(item))
+    );
+  });
 }
 
 function itemRect(item: AssetInstance): Rect {

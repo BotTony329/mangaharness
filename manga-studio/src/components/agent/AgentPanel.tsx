@@ -12,9 +12,11 @@ import { buildAgentContext } from "@/agent/contextBuilder";
 import { countGenerations, describeStep, executePlan, type RunGuards, type StepProgress } from "@/agent/executor";
 import { groundPrompt, type GroundingReport } from "@/agent/grounding";
 import { validateGroundedPlan } from "@/agent/planValidation";
-import { resolveAgentScope, scopeForSubject, type AgentScopePreference } from "@/agent/scope";
+import { resolveAgentScope, scopeForPanels, scopeForSubject, type AgentScopePreference } from "@/agent/scope";
 import { resolveSubject, type SubjectResolution } from "@/agent/subject";
 import { deriveSceneIntent, describeIntent, type SceneIntent } from "@/agent/sceneIntent";
+import { buildSequencePlan, compileSequencePlan, describeSequencePlan, type SequencePlan } from "@/agent/sequencePlan";
+import { describeCameraIntent } from "@/agent/cameraIntent";
 import type { AgentPlan } from "@/agent/tools/schemas";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -71,6 +73,7 @@ export function AgentPanel() {
   const [grounding, setGrounding] = useState<GroundingReport | null>(null);
   const [subject, setSubject] = useState<SubjectResolution | null>(null);
   const [intent, setIntent] = useState<SceneIntent | null>(null);
+  const [sequence, setSequence] = useState<SequencePlan | null>(null);
   const [runScope, setRunScope] = useState<{ label: string; demotionReason?: string } | null>(null);
   const [guards, setGuards] = useState<RunGuards | null>(null);
   const [assetTrace, setAssetTrace] = useState<string[]>([]);
@@ -135,6 +138,7 @@ export function AgentPanel() {
       setGrounding(report);
       setIntent(null);
       setSubject(null);
+      setSequence(null);
 
       // A reference we could not ground stops the run here — before the model
       // is paid for, before anything is generated, before anything is mutated.
@@ -167,6 +171,32 @@ export function AgentPanel() {
       setIntent(sceneIntent);
       setActivity((current) => [...current, "Scene intent"]);
 
+      /**
+       * The sequence plan is the ENFORCED structure.
+       *
+       * Beat-to-panel mapping, layout growth and camera compilation are decided
+       * here, deterministically, before the model is asked for anything. When
+       * the request has explicit structure — sequential moments, a named panel,
+       * or camera language — these compiled steps are what runs, and the
+       * planner is not given the opportunity to collapse two moments into one
+       * panel or to quietly drop a framing instruction.
+       */
+      const plan = buildSequencePlan({
+        doc: state.doc,
+        intent: sceneIntent,
+        scope,
+        characterIds: resolvedSubject.characterIds.length > 0
+          ? resolvedSubject.characterIds
+          : report.entities.filter((e) => e.characterId).map((e) => e.characterId as ID),
+      });
+      // A named panel widens the scope, just as a named character does.
+      scope = scopeForPanels(scope, plan.allocation.panelNumbers);
+      setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
+      setSequence(plan);
+      const compiled = compileSequencePlan(plan, state.doc);
+      const deterministic = compiled.length > 0 && (plan.requiredPanelCount > 1 || plan.beats.some((beat) => beat.camera));
+      setActivity((current) => [...current, "Panel allocation"]);
+
       const context = buildAgentContext({
         doc: state.doc,
         currentPageId: state.currentPageId,
@@ -192,12 +222,22 @@ export function AgentPanel() {
 
       // Bind names to IDs and refuse anything unresolvable, unauthorized, or
       // already satisfied by the library — all before the first mutation.
+      /**
+       * Deterministic steps replace the model's for structured requests. The
+       * model still ran — its reading of the sentence produced nothing we keep,
+       * but it remains the interpretation layer for prompts with no explicit
+       * structure, which is the majority.
+       */
+      const sourcePlan = deterministic
+        ? { ...received.plan, steps: compiled, summary: received.plan.summary || plan.allocation.reason }
+        : received.plan;
+
       const validated = validateGroundedPlan({
-        plan: received.plan,
+        plan: sourcePlan,
         doc: state.doc,
         grounding: report,
         scope,
-        panelCount: scope.panelCount,
+        panelCount: Math.max(scope.panelCount, ...plan.allocation.panelNumbers, 1),
       });
       setPlan(validated.plan);
       setAssetTrace(validated.rejected.map((entry) => `${entry.tool}: ${entry.error}`));
@@ -226,7 +266,7 @@ export function AgentPanel() {
         setPhase("confirm");
         return;
       }
-      await execute(validated.plan, runGuards);
+      await execute(validated.plan, runGuards, plan);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent failed");
       setPhase("error");
@@ -235,7 +275,7 @@ export function AgentPanel() {
     }
   };
 
-  const execute = async (planToRun: AgentPlan, runGuards?: RunGuards) => {
+  const execute = async (planToRun: AgentPlan, runGuards?: RunGuards, sequencePlan?: SequencePlan | null) => {
     setPhase("executing");
     setActivity((current) => [...current, "Asset search", "Composition"]);
     setStatusLine("Composing…");
@@ -246,6 +286,7 @@ export function AgentPanel() {
         if (status === "running") setStatusLine(describeStep(planToRun.steps[index]) + "…");
       },
       runGuards ?? guards ?? { creationAuthorized: false, authorizedCreationNames: [] },
+      sequencePlan ?? sequence ?? undefined,
     );
     setActivity((current) => [...current, "Validation"]);
 
@@ -434,6 +475,33 @@ export function AgentPanel() {
               <ul className="mt-0.5 space-y-0.5 text-[10px] text-[var(--text-secondary)]">
                 {describeIntent(intent, doc).map((line) => (
                   <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/*
+            Panel allocation and camera are shown BEFORE the run, because they
+            are the two things a creator cannot infer from the result — a beat
+            in the wrong panel and a dropped framing instruction both look like
+            "the Agent ignored me".
+          */}
+          {sequence && doc && (
+            <div className="mt-1.5">
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Panel allocation · {sequence.requiredPanelCount} {sequence.requiredPanelCount === 1 ? "moment" : "moments"}
+              </p>
+              <p className="text-[10px] text-[var(--text-muted)]">{sequence.allocation.reason}</p>
+              <ul className="mt-0.5 space-y-1 text-[10px] text-[var(--text-secondary)]">
+                {sequence.beats.map((beat, index) => (
+                  <li key={beat.beatId}>
+                    {describeSequencePlan(sequence, doc)[index]}
+                    {beat.camera && (
+                      <span className="block pl-3 text-[var(--text-muted)]">
+                        {describeCameraIntent(beat.camera, doc).join(" · ")}
+                      </span>
+                    )}
+                  </li>
                 ))}
               </ul>
             </div>

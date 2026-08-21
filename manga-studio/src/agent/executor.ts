@@ -53,6 +53,8 @@ import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
+import { resolveDepthPlacements } from "./cameraIntent";
+import type { SequencePlan } from "./sequencePlan";
 import { couldGenerate } from "./capabilityRouter";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
@@ -185,6 +187,8 @@ export async function executePlan(
   plan: AgentPlan,
   onProgress: (index: number, status: StepStatus, detail?: string) => void,
   guards: RunGuards = DENY_ALL_CREATION,
+  /** The enforced semantic structure, when the request had one. */
+  sequence?: SequencePlan,
 ): Promise<ExecutionSummary> {
   const store = useEditorStore.getState();
   const before = store.doc;
@@ -236,7 +240,10 @@ export async function executePlan(
     }
 
     if (!abortReason) {
-      validationIssues = validatePlanResult(plan, before);
+      validationIssues = [
+        ...validatePlanResult(plan, before),
+        ...(sequence ? validateSequencePostConditions(sequence, before, currentDoc()) : []),
+      ];
       const fatal = validationIssues.find((issue) => issue.severity === "fatal");
       if (fatal) abortReason = fatal.message;
     }
@@ -1062,10 +1069,139 @@ function validatePlanResult(plan: AgentPlan, before: ProjectDocument): Compositi
     : plan.targetScope?.kind === "selected-object" || plan.targetScope?.kind === "selected-panel"
       ? [plan.targetScope.panelId].filter((id): id is ID => Boolean(id))
       : page.panelIds;
-  const validated = dispatch({ type: "validate-composition", panelIds });
+  const validated = dispatch({ type: "validate-composition", panelIds, before });
   const after = validated.doc;
   const scopeIssues = plan.targetScope ? validateScopeIntegrity(before, after, plan.targetScope) : [];
   return [...(validated.issues ?? []), ...scopeIssues, ...validateIdentityPostConditions(plan, before, after)];
+}
+
+
+/**
+ * Validate the SEMANTIC plan, not merely that commands ran.
+ *
+ * A run can execute every step it was given and still have failed the request:
+ * both beats in one panel, the dialogue attached to the wrong frame, a camera
+ * instruction quietly dropped. These invariants are checked against the
+ * document that actually exists, and any breach is fatal — a half-executed
+ * sequence is worse than none, because the creator has to work out which half.
+ */
+function validateSequencePostConditions(
+  sequence: SequencePlan,
+  before: ProjectDocument,
+  after: ProjectDocument,
+): CompositionIssue[] {
+  const issues: CompositionIssue[] = [];
+  const page = after.pages[sequence.pageId];
+  if (!page) return issues;
+
+  const panelId = (number: number): ID | undefined => page.panelIds[number - 1];
+  const fatal = (code: CompositionIssue["code"], panel: ID | undefined, message: string) =>
+    issues.push({ code, panelId: panel ?? page.panelIds[0] ?? "", message, corrected: false, severity: "fatal" });
+
+  // 1. The panels the sequence needs must exist.
+  const wanted = new Set(sequence.beats.map((beat) => beat.panelNumber));
+  for (const number of wanted) {
+    if (!panelId(number)) {
+      fatal("required-character-missing", undefined, `Panel ${number} was needed for this sequence but does not exist`);
+    }
+  }
+  if (wanted.size < sequence.requiredPanelCount) {
+    fatal("required-character-missing", undefined, `The request needed ${sequence.requiredPanelCount} separate moments but only ${wanted.size} panels were used`);
+  }
+
+  for (const beat of sequence.beats) {
+    const id = panelId(beat.panelNumber);
+    if (!id) continue;
+    const panel = after.panels[id];
+    const items = (panel?.itemIds ?? []).map((itemId) => after.items[itemId]);
+
+    // 2. Every subject is actually in its beat's panel.
+    for (const characterId of beat.subjects) {
+      const present = items.some((item) => {
+        if (item?.kind !== "asset") return false;
+        const owner = item.characterState?.characterId ?? after.assets[item.sourceAssetId]?.metadata?.characterId;
+        return owner === characterId || charactersInAsset(after, item.sourceAssetId).includes(characterId);
+      });
+      if (!present) {
+        fatal("required-character-missing", id, `${after.characters[characterId]?.name ?? characterId} is missing from panel ${beat.panelNumber}`);
+      }
+    }
+
+    // 3. Dialogue exists, in the right panel, with the right words.
+    if (beat.dialogue) {
+      const bubble = items.find((item) => item?.kind === "bubble" && item.text.trim() === beat.dialogue!.text.trim());
+      if (!bubble) {
+        fatal("required-character-missing", id, `The line “${beat.dialogue.text}” is not in panel ${beat.panelNumber}`);
+      }
+    }
+
+    // 4. Camera intent reached the document.
+    if (beat.camera) {
+      const camera = panel?.camera;
+      if (beat.camera.shot && camera?.shot !== beat.camera.shot) {
+        fatal("scope-integrity", id, `Panel ${beat.panelNumber} should be a ${beat.camera.shot.replace(/-/g, " ")} shot`);
+      }
+      if (beat.camera.angle && camera?.angle !== beat.camera.angle) {
+        fatal("scope-integrity", id, `Panel ${beat.panelNumber} should be a ${beat.camera.angle.replace(/-/g, " ")} angle`);
+      }
+      if (beat.camera.lens && camera?.lens !== beat.camera.lens) {
+        fatal("scope-integrity", id, `Panel ${beat.panelNumber} should use the ${beat.camera.lens} lens`);
+      }
+      if (beat.camera.perspective && panel?.perspective?.type !== beat.camera.perspective) {
+        fatal("scope-integrity", id, `Panel ${beat.panelNumber} should use ${beat.camera.perspective.replace(/-/g, " ")} perspective`);
+      }
+
+      /**
+       * Depth is checked as ORDER, not as a number: the request said who is in
+       * front, and only the relative result is a promise we made.
+       */
+      const depthOf = (characterId: ID): number | undefined => {
+        const item = items.find((entry) => {
+          if (entry?.kind !== "asset") return false;
+          const owner = entry.characterState?.characterId ?? after.assets[entry.sourceAssetId]?.metadata?.characterId;
+          return owner === characterId;
+        });
+        return item?.kind === "asset" ? item.stage?.depth : undefined;
+      };
+      for (const relation of beat.camera.relations ?? []) {
+        const near = depthOf(relation.nearerCharacterId);
+        const far = depthOf(relation.fartherCharacterId);
+        if (near !== undefined && far !== undefined && near > far) {
+          fatal(
+            "scope-integrity",
+            id,
+            `${after.characters[relation.nearerCharacterId]?.name ?? "one character"} should be nearer the camera than ${after.characters[relation.fartherCharacterId]?.name ?? "the other"}`,
+          );
+        }
+      }
+      for (const placement of resolveDepthPlacements(beat.camera)) {
+        const item = items.find((entry) => {
+          if (entry?.kind !== "asset") return false;
+          const owner = entry.characterState?.characterId ?? after.assets[entry.sourceAssetId]?.metadata?.characterId;
+          return owner === placement.characterId;
+        });
+        if (item?.kind === "asset" && item.stage && placement.placement === "foreground" && item.stage.depth > 0.5) {
+          fatal("scope-integrity", id, `${after.characters[placement.characterId]?.name ?? "a character"} should be in the foreground of panel ${beat.panelNumber}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * 5. Panels the sequence never mentioned keep their content. Growing a layout
+   * is allowed to move items between panel records, so this compares the SET of
+   * items on the page rather than per-panel membership.
+   */
+  const beforeItems = new Set(
+    (before.pages[sequence.pageId]?.panelIds ?? []).flatMap((id) => before.panels[id]?.itemIds ?? []),
+  );
+  const afterItems = new Set(page.panelIds.flatMap((id) => after.panels[id]?.itemIds ?? []));
+  const lost = [...beforeItems].filter((id) => !afterItems.has(id));
+  if (lost.length > 0) {
+    fatal("unexpected-deletion", undefined, `${lost.length} existing item${lost.length !== 1 ? "s" : ""} disappeared while laying out the sequence`);
+  }
+
+  return issues;
 }
 
 /**

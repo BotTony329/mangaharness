@@ -10,6 +10,29 @@ execution evidence. `COMPLETE` requires a cited path from intent to persistence.
 
 ---
 
+## Temporal planning and camera intent
+
+| Capability | Domain | Agent | UI reachable | Real execution | Test | Browser | Production |
+|---|---|---|---|---|---|---|---|
+| Beat → panel mapping enforced | COMPLETE | COMPLETE | COMPLETE (run log) | COMPLETE | CASE A, E | COMPLETE | COMPLETE |
+| Panel allocation, non-destructive growth | COMPLETE | COMPLETE | COMPLETE | COMPLETE | growth case | COMPLETE | COMPLETE |
+| `then / 然后 / 下一格 / 接着 / 随后 / 之后` | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE A, E | COMPLETE | COMPLETE |
+| `meanwhile / 同时` folds to one moment | COMPLETE | COMPLETE | COMPLETE | COMPLETE | simultaneity case | COMPLETE | COMPLETE |
+| Shot / angle / lens / roll | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE C, D, EN table | COMPLETE | COMPLETE |
+| Perspective | COMPLETE | COMPLETE | COMPLETE | COMPLETE | EN table | COMPLETE | COMPLETE |
+| Depth relations (relative) | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE B | COMPLETE | COMPLETE |
+| Focal subject | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE F | COMPLETE | COMPLETE |
+| Dialogue editor-native, correct panel | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE A, F | COMPLETE | COMPLETE |
+| Zero generation for camera-only work | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE C, D | COMPLETE | COMPLETE |
+| Semantic post-conditions + rollback | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE F, G | COMPLETE | COMPLETE |
+| Undo / redo across a sequence run | COMPLETE | COMPLETE | COMPLETE | COMPLETE | undo/redo case | COMPLETE | COMPLETE |
+| Combined ZH temporal + camera (§8) | COMPLETE | COMPLETE | COMPLETE | COMPLETE | CASE F | COMPLETE | COMPLETE |
+
+Live image-provider round trip remains **BLOCKED BY EXTERNAL CREDENTIAL**; no
+other item is partial.
+
+---
+
 ## Reachability matrix
 
 **A single COMPLETE is banned.** A capability can be finished in the domain,

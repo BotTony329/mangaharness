@@ -69,6 +69,108 @@ exactly how the Inspector lost its tabs in production.
 product. Confirm the deployed commit SHA matches HEAD before claiming a UI
 behaviour works.
 
+## MVP FREEZE
+
+The MVP feature scope is **FROZEN**. Anything not listed as COMPLETE below is
+POST-MVP, and no unfinished MVP work has been moved there.
+
+| Area | Status |
+|---|---|
+| Core creator loop | COMPLETE |
+| Asset generation | COMPLETE |
+| Local asset editing | COMPLETE |
+| Character relationships | COMPLETE |
+| Multi-character interactions | COMPLETE |
+| Camera / stage | COMPLETE |
+| Agent grounding | COMPLETE |
+| Temporal planning | COMPLETE |
+| Transactional execution | COMPLETE |
+| Project lifecycle | COMPLETE |
+
+One external dependency is unresolved and cannot be resolved from here:
+**live image-provider round trip — no API credential in this environment.** The
+adapter, request construction, routing and failure reporting are all complete
+and reach `POST /api/generate`; only the far side of that call is unverified.
+
+## The semantic execution architecture
+
+```
+USER PROMPT
+  ↓  agent/grounding.ts        WHO — names, aliases, pronouns, relationships
+  ↓  agent/subject.ts          precedence: name > relationship > pronoun > selection
+  ↓  agent/scope.ts            WHERE — never asks what KIND of object is selected
+  ↓  agent/sceneIntent.ts      moments and beats, EN + ZH, derived deterministically
+  ↓  agent/sequencePlan.ts     SequencePlan: beat → panel, camera per beat
+  ↓  agent/panelAllocation.ts  panel numbers, layout growth, preservation
+  ↓  agent/capabilityRouter.ts EDITOR_OP | LOCAL_ASSET_OP | AI_GENERATION
+  ↓  compileSequencePlan       editor commands — the ONLY thing that mutates
+  ↓  editor/store transaction  snapshot → execute → validate → commit OR rollback
+  ↓  post-condition validation semantic invariants, not "did the commands run"
+```
+
+**The planner interprets; the harness decides.** When a prompt carries explicit
+structure — sequential moments, a named panel, or camera language — the
+deterministic compiler's steps are what execute. The model is not given the
+opportunity to collapse two moments into one panel or to drop a framing
+instruction.
+
+### Temporal rules
+
+- Beats split on `then / next / after that / 然后 / 接着 / 下一格 / 随后 / 之后`.
+  The connective is KEPT with the fragment it introduces, because "下一格" is the
+  word that says which panel the beat belongs in.
+- `meanwhile / 同时 / 与此同时 / while / 一边` marks SIMULTANEITY. It folds into
+  the previous moment and never creates a panel.
+- Explicit panel names (`第一格`, `panel 2`) override allocation order.
+  `下一格` means the panel after the previous beat's, or after the panel the
+  creator is working in when it is the first thing they said.
+- Panel targets are resolved BEFORE growth, because growth depends on the
+  highest panel the sequence reaches.
+- Every fragment yields at least one beat, so a staging-only moment
+  ("第一格，Yuri在前景，用广角低机位") is not silently dropped.
+
+### Camera-intent mappings
+
+`agent/cameraIntent.ts` parses and compiles into existing commands only:
+
+| Language | Compiles to |
+|---|---|
+| close-up / 特写 / 拉近 · wide / 远景 · full / 全身 · medium / 中景 | `set_camera { shot }` |
+| low angle / 低机位 / 仰拍 · high / 俯拍 · overhead / 俯瞰 · eye level / 平视 | `set_camera { angle }` |
+| dutch / 斜角 | `set_camera { angle: dutch }` + roll |
+| wide-angle / 广角 · telephoto / 长焦 | `set_camera { lens }` |
+| one/two/three-point perspective / 一点·两点·三点透视 | `set_perspective { type }` |
+| foreground / 前景 · background / 背景 | `set_character_depth { placement }` |
+| A in front of B / A 在 B 前面 · behind / 身后 | relative → depth ORDER → `set_character_depth` |
+| focus on X / 聚焦 / 镜头拉近X | `set_focal_character` |
+
+Depth is always resolved as **order**, never as coordinates. Relations are read
+clause by clause; a clause naming one character relates it to the beat's
+subject, which is who the pronoun means.
+
+**Camera work never generates.** Every compiled camera command is an
+`EDITOR_OP`. A closer shot re-frames artwork that already exists.
+
+### Agent AI / Image AI boundary
+
+- **Agent AI** understands and plans. It never writes to the document.
+- **Image AI** renders one requested asset for an already-approved beat. It
+  never invents manga structure.
+- `agent/capabilityRouter.ts` decides which is which; an unclassified tool is
+  treated as generative so a new tool cannot spend money silently.
+
+### Preservation invariants (all FATAL, all roll back)
+
+- Panels the request never named come back byte-identical.
+- Existing items never disappear from a run that was only meant to add.
+- Layout growth only ADDS panels; content is carried forward.
+- Every beat's subjects are present in that beat's panel.
+- Dialogue exists, in the beat's panel, with the requested text.
+- Camera shot / angle / lens / perspective reached the panel.
+- Relative depth order is satisfied.
+- A character already obscured BEFORE the run is a warning, not a fatal — the
+  Agent is not blamed for a pile-up it did not create.
+
 ## Permanent Agent rules
 
 **Scope defines where the Agent may operate. Grounding defines what entities the
@@ -268,6 +370,19 @@ migration.
 
 ## Last Completed Work
 
+**Temporal planning and camera intent closed; MVP frozen.**
+
+- `agent/sequencePlan.ts` is the enforced structure: every beat carries its
+  panel, resolved by `agent/panelAllocation.ts`, and compiles to editor
+  commands. Structured prompts no longer depend on what the model emits.
+- `agent/cameraIntent.ts` parses EN + ZH camera language into a typed intent and
+  compiles it into the existing camera, perspective, depth and focus commands.
+- Post-conditions validate the SEMANTIC plan; any breach rolls back.
+- Golden cases A–G in `agent/sequenceGolden.test.ts` run the real pipeline with
+  only the model call stubbed.
+- Fixed on the way: a pre-existing pile-up was rolling back unrelated runs, and
+  a merely-mentioned character adopted the actor's pose.
+
 **Character identity resolver + production-verified interaction UI.**
 
 - Reported from production: a character selected on the canvas showed no State /
@@ -329,39 +444,27 @@ the item-by-item classification.
 
 ## Known Bugs / UX Problems
 
-- No path has been exercised against a live provider in this environment
-  (`/api/generate` → 503, `/api/assets/edit` → 422). Joint generation, local
-  editing and character generation are IMPLEMENTED — PROVIDER-INTEGRATION
-  UNVERIFIED.
-- No corner-pin. Konva has no perspective transform; it needs the same mesh work
-  as P2, and an affine-only version would misrepresent itself.
-- Objects cannot be attached to a character's hand from the UI.
-- Assets generated before the white-background policy still carry a magenta
-  matte until "Fix transparency" is run on that character.
-- Three-point perspective renders guides but has no distinct projection
-  consequence beyond two-point.
+These are POST-MVP. None is unfinished MVP work.
+
+- No path has been exercised against a live image provider in this environment
+  (`POST /api/generate` → 503). Everything up to that call is complete.
 - Local editing on a composite (two-character) asset treats it as one image;
   there is no per-participant escalation.
-- Placing into a snap-enabled panel does not auto-stage the new instance; the
-  creator still presses "Place on Stage".
-- The brand pass touched surfaces and buttons, not layout. Several panels
-  (`PoseEditControls`, `PuppetControls`, `PanelStageControls`) still use raw
-  `zinc-*` utilities rather than tokens; they read correctly but will drift if
-  the palette changes.
-- `LifecycleDialogs` and `InteractionControls` still carry a few bordered chips
-  that could become tone-only.
+- Three-point perspective renders guides but has no distinct projection
+  consequence beyond two-point.
+- Objects cannot be attached to a character's hand from the UI.
+- Assets generated before the white-background policy keep a magenta matte until
+  "Fix transparency" is run on that character.
+- A sequence needing more than four panels overflows rather than adding a page.
+- Camera vocabulary is EN + ZH; other languages fall back to the planner.
 
-## Next Recommended Work
+## Next Recommended Work (POST-MVP)
 
-1. **Run every generation path against a real provider** — character state,
-   joint interaction, local edit. Everything else about them is tested; identity
-   preservation in practice is not.
-2. **Composite/local-edit escalation** — editing a hug should be able to fall
-   back to regenerating the interaction rather than inpainting the composite.
-3. **Object → hand attachment** — connect Objects to the existing puppet sockets.
-4. **Mesh deformation + corner-pin** (P2), which unblock real perspective
-   placement of flat artwork.
-5. **Auto-stage on drop** into a snap-enabled panel.
+1. Run every generation path against a real provider.
+2. Per-participant escalation for local edits on composite assets.
+3. Mesh deformation and corner-pin, which unblock real perspective placement.
+4. Object → hand attachment through the existing puppet sockets.
+5. Multi-page sequence overflow.
 
 ## Important Files / Modules
 
