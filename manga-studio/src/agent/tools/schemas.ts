@@ -165,6 +165,17 @@ export const toolSchemas = {
     groundY: z.number().min(0).max(1).optional().describe("Ground contact line in the panel"),
   }),
 
+  set_character_pose_rig: z.object({
+    panel: panelIndex,
+    characterName: z.string().max(80).optional(),
+    basePose: z.string().max(80).optional().describe("Preset to start from; omit to keep the current pose"),
+    /** Same semantic vocabulary the joint editor produces (§12). */
+    adjustments: z
+      .array(z.string().max(60))
+      .max(8)
+      .describe('Pose descriptors, e.g. ["right arm raised", "head turned left"]'),
+  }),
+
   attach_bubble: z.object({
     panel: panelIndex,
     characterName: z.string().max(80),
@@ -259,6 +270,7 @@ const PANEL_TOOLS = new Set<ToolName>([
   "set_perspective",
   "set_character_depth",
   "attach_bubble",
+  "set_character_pose_rig",
 ]);
 
 /** Pure guard used both while validating model output and immediately before execution. */
@@ -311,6 +323,7 @@ Available tools (call only these, with exactly these argument shapes):
 - set_camera {panel, shot?, angle?, lens?, mangaPerspective?} — direct the panel. Use the semantic vocabulary (close-up, low angle) rather than moving objects to fake a shot.
 - set_perspective {panel, type, horizonY?} — establish construction guides. These are editor guides only and never appear in the exported page.
 - set_character_depth {panel, characterName?, depth, groundY?} — place a character in stage depth. 0 is nearest the camera, 1 is furthest; size follows depth automatically.
+- set_character_pose_rig {panel, characterName?, basePose?, adjustments} — adjust a placed character's pose semantically, e.g. basePose "walking" with adjustments ["right arm raised","head turned left"]. Identity, expression, outfit, view and props are preserved; only pose geometry changes. Prefer this over regenerating a character to change a limb.
 - attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).
 `.trim();

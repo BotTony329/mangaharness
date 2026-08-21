@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import type { ID } from "@/domain/types";
+import type { PoseRigState } from "@/characters/poseRig";
 
 export interface GeneratorRequest {
   assetType: "character" | "character-pose" | "character-expression" | "background" | "prop";
@@ -27,12 +28,22 @@ interface UiState {
   generator: GeneratorRequest | null;
   /** Panel currently in shape-edit mode (double-click a panel to enter). */
   shapeEditPanelId: ID | null;
+  /**
+   * Character instance currently in pose-edit mode, plus the draft rig.
+   * The draft is editor state on purpose: dragging joints must not create undo
+   * entries or touch the document until Apply (§5/§13).
+   */
+  poseEditInstanceId: ID | null;
+  poseDraft: PoseRigState | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
   openGenerator(request: GeneratorRequest): void;
   closeGenerator(): void;
   setShapeEditPanel(panelId: ID | null): void;
+  beginPoseEdit(instanceId: ID, rig: PoseRigState): void;
+  setPoseDraft(rig: PoseRigState): void;
+  endPoseEdit(): void;
   openSettings(): void;
   closeSettings(): void;
   openArtStyle(): void;
@@ -42,11 +53,16 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   generator: null,
   shapeEditPanelId: null,
+  poseEditInstanceId: null,
+  poseDraft: null,
   settingsOpen: false,
   artStyleOpen: false,
   openGenerator: (request) => set({ generator: request }),
   closeGenerator: () => set({ generator: null }),
   setShapeEditPanel: (panelId) => set({ shapeEditPanelId: panelId }),
+  beginPoseEdit: (instanceId, rig) => set({ poseEditInstanceId: instanceId, poseDraft: rig }),
+  setPoseDraft: (rig) => set({ poseDraft: rig }),
+  endPoseEdit: () => set({ poseEditInstanceId: null, poseDraft: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   openArtStyle: () => set({ artStyleOpen: true }),

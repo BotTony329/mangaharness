@@ -23,6 +23,7 @@ import type {
   SourceAsset,
 } from "@/domain/types";
 import { DEFAULT_CHARACTER_STATE, normalizeStateValue } from "./state";
+import { describePoseRig, poseRigKey } from "./poseRig";
 
 export const STATE_DIMENSIONS: CharacterStateDimension[] = ["pose", "expression", "outfit", "view"];
 
@@ -56,11 +57,16 @@ export function sameProps(a: string[] | undefined, b: string[] | undefined): boo
 }
 
 /** Full semantic identity of a state, ignoring which asset happens to render it. */
-export function stateKey(state: Pick<CharacterState, CharacterStateDimension | "characterId" | "props">): string {
+export function stateKey(
+  state: Pick<CharacterState, CharacterStateDimension | "characterId" | "props" | "poseRig">,
+): string {
   return [
     state.characterId,
     ...STATE_DIMENSIONS.map((dimension) => normalizeStateValue(state[dimension], DEFAULT_CHARACTER_STATE[dimension])),
     normalizeProps(state.props).join("+"),
+    // Descriptors, not joints: "right arm raised" is the identity, the exact
+    // pixel the hand landed on is not.
+    poseRigKey(state.poseRig),
   ].join("|");
 }
 
@@ -76,6 +82,7 @@ export function stateFromRecord(record: CharacterStateRecord): CharacterState {
     outfit: record.outfit,
     view: record.view,
     props: record.props.length > 0 ? [...record.props] : undefined,
+    poseRig: record.poseRig,
     assetId: record.assetId,
     stateId: record.id,
   };
@@ -140,6 +147,11 @@ export function stateDistance(record: CharacterStateRecord, desired: CharacterSt
   }
   const propsChanged = !sameProps(record.props, desired.props);
   if (propsChanged) cost += PROPS_WEIGHT;
+  // An authored pose edit is a pose change even when the preset name matches.
+  if (poseRigKey(record.poseRig) !== poseRigKey(desired.poseRig) && !changed.includes("pose")) {
+    changed.push("pose");
+    cost += DIMENSION_WEIGHT.pose;
+  }
   return { record, cost, changed, propsChanged };
 }
 
@@ -211,8 +223,8 @@ export function lineageOf(doc: ProjectDocument, stateId: ID): CharacterStateReco
 }
 
 /** Human-readable state label, e.g. "Walking · Shocked". */
-export function describeState(state: Pick<CharacterState, CharacterStateDimension | "props">): string {
-  const parts = [state.pose, state.expression];
+export function describeState(state: Pick<CharacterState, CharacterStateDimension | "props" | "poseRig">): string {
+  const parts = [describePoseRig(state.poseRig, state.pose), state.expression];
   const outfit = normalizeStateValue(state.outfit, DEFAULT_CHARACTER_STATE.outfit);
   if (outfit !== DEFAULT_CHARACTER_STATE.outfit) parts.push(outfit);
   const view = normalizeStateValue(state.view, DEFAULT_CHARACTER_STATE.view);

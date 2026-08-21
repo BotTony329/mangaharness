@@ -62,6 +62,10 @@ Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the orig
 
 `ProjectDocument.characterStates` is the character state graph: semantic nodes carrying pose/expression/outfit/view/props, the parent state a render was derived from, the reference asset actually sent to the provider, the canonical anchor, and the generation delta. `characters/stateGraph.ts` owns traversal and weighted nearest-state search; `characters/stateResolver.ts` is the single cache-or-generate decision (exact render → nearest render → canonical → none) and names the reference that generation must use; `characters/kit.ts` projects one character as a parts box with honest CACHED / AVAILABLE / NEW availability. Nodes are created and pruned inside `libraryOps`/`assetLifecycle`, so the graph cannot diverge from the library.
 
+## Pose rig
+
+`characters/poseRig.ts` holds the 14-joint semantic rig: presets, normalized sparse joint overrides, corrective (non-IK) constraints, and `deriveDescriptors`, which reads joint positions back as sentences. Descriptors are the pose's identity via `poseRigKey` and participate in the state key; raw coordinates never do. `components/canvas/PoseEditOverlay.tsx` draws the draggable skeleton on the overlay layer and writes only to `uiStore.poseDraft`, so nothing enters the document until Apply routes through the normal resolver and state runtime.
+
 ## Module rules
 
 - `src/domain/commands.ts` is the canonical mutation facade. UI actions and Agent tools dispatch typed `DomainCommand` values; domain modules remain pure `doc → doc` transformations. Live canvas gestures use `transientDispatch`, which applies the same commands without adding history until the gesture ends.

@@ -105,6 +105,10 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Move ${args.characterName ?? "character"} to depth ${args.depth} in panel ${args.panel}`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
+    case "set_character_pose_rig": {
+      const adjustments = Array.isArray(args.adjustments) ? args.adjustments.join(", ") : "";
+      return `Adjust ${args.characterName ?? "character"} pose in panel ${args.panel}${adjustments ? `: ${adjustments}` : ""}`;
+    }
   }
 }
 
@@ -198,6 +202,8 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doSetCharacterDepth(args);
     case "attach_bubble":
       return doAttachBubble(args);
+    case "set_character_pose_rig":
+      return doSetCharacterPoseRig(args);
     case "remove_items":
       return doRemoveItems(args);
   }
@@ -719,5 +725,35 @@ function doAttachBubble(args: {
     itemId: created.createdId,
     characterId,
     instanceId: instance.id,
+  });
+}
+
+/**
+ * Semantic pose adjustment (§12).
+ *
+ * Builds the SAME PoseRigState the joint editor produces and routes it through
+ * the same state runtime, so there is no agent-only pose path. The model
+ * supplies meaning; descriptors are the pose's identity, so an agent request
+ * and a hand-dragged pose that mean the same thing share one cached render.
+ */
+async function doSetCharacterPoseRig(args: {
+  panel: number;
+  characterName?: string;
+  basePose?: string;
+  adjustments: string[];
+}): Promise<void> {
+  const panelId = panelIdByNumber(args.panel);
+  const doc = currentDoc();
+  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const current = stateFromInstance(doc, instance);
+  if (!current) throw new Error("The targeted instance is not a character");
+
+  const basePose = (args.basePose ?? current.poseRig?.basePose ?? current.pose).trim().toLowerCase();
+  const descriptors = [...new Set(args.adjustments.map((value) => value.trim().toLowerCase()).filter(Boolean))].sort();
+  if (descriptors.length === 0) throw new Error("set_character_pose_rig needs at least one adjustment");
+
+  await applyCharacterStateToInstance({
+    instanceId: instance.id,
+    patch: { poseRig: { basePose, joints: {}, descriptors } },
   });
 }

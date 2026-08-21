@@ -29,6 +29,7 @@ import { PAGE_STAGE_ID } from "@/render/constants";
 import { BubbleTextEditor } from "./BubbleTextEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ShapeEditOverlay } from "./ShapeEditOverlay";
+import { PoseEditOverlay } from "./PoseEditOverlay";
 import { useViewport, type Viewport } from "./useViewport";
 
 export function CanvasStage() {
@@ -39,6 +40,8 @@ export function CanvasStage() {
   const transientDispatch = useEditorStore((s) => s.transientDispatch);
   const commitTransient = useEditorStore((s) => s.commitTransient);
   const shapeEditPanelId = useUiStore((s) => s.shapeEditPanelId);
+  const poseEditInstanceId = useUiStore((s) => s.poseEditInstanceId);
+  const poseDraft = useUiStore((s) => s.poseDraft);
   const setShapeEditPanel = useUiStore((s) => s.setShapeEditPanel);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -105,10 +108,10 @@ export function CanvasStage() {
     const stage = stageRef.current;
     if (!transformer || !stage) return;
     const nodeId = selection.itemId ? `#item-${selection.itemId}` : selection.workspaceItemId ? `#loose-${selection.workspaceItemId}` : null;
-    const node = nodeId && !shapeEditPanelId ? stage.findOne(nodeId) : null;
+    const node = nodeId && !shapeEditPanelId && !poseEditInstanceId ? stage.findOne(nodeId) : null;
     const locked = selection.itemId && doc ? doc.items[selection.itemId]?.locked : false;
     transformer.nodes(node && !locked ? [node] : []);
-  }, [selection.itemId, selection.workspaceItemId, shapeEditPanelId, doc]);
+  }, [selection.itemId, selection.workspaceItemId, shapeEditPanelId, poseEditInstanceId, doc]);
 
   // ── Escape leaves shape-edit mode ─────────────────────────────────────────
   useEffect(() => {
@@ -288,6 +291,8 @@ export function CanvasStage() {
   const editingBubble = editingBubbleId ? doc.items[editingBubbleId] : null;
   const hoveredPanel = hoveredPanelId ? doc.panels[hoveredPanelId] : null;
   const shapeEditPanel = shapeEditPanelId ? doc.panels[shapeEditPanelId] : null;
+  const poseEditCandidate = poseEditInstanceId ? doc.items[poseEditInstanceId] : null;
+  const poseEditInstance = poseEditCandidate?.kind === "asset" ? poseEditCandidate : null;
   const looseItems = doc.workspaceOrder.map((id) => doc.workspaceItems[id]).filter(Boolean);
 
   return (
@@ -347,6 +352,9 @@ export function CanvasStage() {
             <PanelOutline doc={doc} page={page} panelId={hoveredPanel.id} color="#22d3ee" scale={view.scale} />
           )}
           {shapeEditPanel && <ShapeEditOverlay doc={doc} page={page} panel={shapeEditPanel} scale={view.scale} />}
+          {poseEditInstance && poseDraft && (
+            <PoseEditOverlay doc={doc} page={page} instance={poseEditInstance} rig={poseDraft} scale={view.scale} />
+          )}
           <Transformer
             ref={transformerRef}
             rotateEnabled

@@ -54,8 +54,9 @@ export function recordAssetState(doc: ProjectDocument, asset: SourceAsset): Char
     expression: normalize(metadata?.expression, DEFAULTS.expression),
     outfit: normalize(metadata?.outfit, DEFAULTS.outfit),
     view: normalize(metadata?.view, DEFAULTS.view),
-    props: normalizeProps(asset.provenance?.characterState?.props),
+    props: normalizeProps(asset.provenance?.characterState?.props ?? metadata?.props),
   };
+  const poseRig = metadata?.poseRig;
 
   const existing = Object.values(doc.characterStates).find(
     (record) => keyOf(record) === keyOf(candidate) && record.assetId === asset.id,
@@ -64,6 +65,7 @@ export function recordAssetState(doc: ProjectDocument, asset: SourceAsset): Char
   const record: CharacterStateRecord = {
     id,
     ...candidate,
+    poseRig,
     assetId: asset.id,
     parentStateId: metadata?.parentStateId ?? existing?.parentStateId,
     referenceAssetId: metadata?.referenceAssetIds?.[0] ?? metadata?.canonicalReferenceAssetId,

@@ -8,6 +8,7 @@
  */
 
 import type { EffectParams } from "./effects";
+import type { PoseRigState } from "@/characters/poseRig";
 
 // ─── Shared primitives ──────────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ export interface AssetGenerationMetadata {
   stateDelta?: CharacterStateDelta;
   /** Props the character holds in this render. */
   props?: string[];
+  /** Authored pose edit baked into this render. */
+  poseRig?: PoseRigState;
   /** Snapshot of the project style used for this immutable generation. */
   styleProfileId?: ID;
   styleName?: string;
@@ -159,6 +162,12 @@ export interface CharacterState {
   view: string;
   /** Held/worn props, normalized lowercase and sorted. Absent means none. */
   props?: string[];
+  /**
+   * Authored pose edit. Absent means the pose is exactly the named preset.
+   * Its DESCRIPTORS participate in state identity; its joints do not, so a
+   * drag that means the same thing reuses the same render.
+   */
+  poseRig?: PoseRigState;
   assetId?: ID;
   /** The state-graph node this state corresponds to, once one exists. */
   stateId?: ID;
@@ -199,6 +208,8 @@ export interface CharacterStateRecord {
   outfit: string;
   view: string;
   props: string[];
+  /** Authored pose edit for this state, when one was applied. */
+  poseRig?: PoseRigState;
   styleProfileId: ID;
   createdAt: ISODate;
 }

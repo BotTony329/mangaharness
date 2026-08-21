@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
 import { normalizeProps, sameProps } from "./stateGraph";
+import { poseRigKey } from "./poseRig";
 
 export const DEFAULT_CHARACTER_STATE = {
   pose: "standing",
@@ -17,7 +18,9 @@ export const DEFAULT_CHARACTER_STATE = {
   view: "front",
 } as const;
 
-export type CharacterStatePatch = Partial<Pick<CharacterState, "pose" | "expression" | "outfit" | "view" | "props">>;
+export type CharacterStatePatch = Partial<
+  Pick<CharacterState, "pose" | "expression" | "outfit" | "view" | "props" | "poseRig">
+>;
 
 export function normalizeStateValue(value: string | undefined, fallback: string): string {
   return value?.trim().toLowerCase() || fallback;
@@ -26,12 +29,18 @@ export function normalizeStateValue(value: string | undefined, fallback: string)
 export function stateFromAsset(asset: SourceAsset, characterId?: ID): CharacterState | null {
   const id = characterId ?? asset.metadata?.characterId;
   if (!id) return null;
+  // Every dimension the render declares must be read back, or swapping an
+  // instance to this asset would silently drop the ones we forgot — which is
+  // exactly how props and an authored pose went missing after a swap.
+  const props = normalizeProps(asset.provenance?.characterState?.props ?? asset.metadata?.props);
   return {
     characterId: id,
     pose: normalizeStateValue(asset.metadata?.pose, DEFAULT_CHARACTER_STATE.pose),
     expression: normalizeStateValue(asset.metadata?.expression, DEFAULT_CHARACTER_STATE.expression),
     outfit: normalizeStateValue(asset.metadata?.outfit, DEFAULT_CHARACTER_STATE.outfit),
     view: normalizeStateValue(asset.metadata?.view, DEFAULT_CHARACTER_STATE.view),
+    props: props.length > 0 ? props : undefined,
+    poseRig: asset.metadata?.poseRig,
     assetId: asset.id,
   };
 }
@@ -48,19 +57,32 @@ export function stateFromInstance(doc: ProjectDocument, instance: AssetInstance)
     expression: normalizeStateValue(stored?.expression ?? fallback?.expression, DEFAULT_CHARACTER_STATE.expression),
     outfit: normalizeStateValue(stored?.outfit ?? fallback?.outfit, DEFAULT_CHARACTER_STATE.outfit),
     view: normalizeStateValue(stored?.view ?? fallback?.view, DEFAULT_CHARACTER_STATE.view),
+    props: stored?.props,
+    poseRig: stored?.poseRig,
     assetId: instance.sourceAssetId,
   };
 }
 
 export function mergeCharacterState(current: CharacterState, patch: CharacterStatePatch): CharacterState {
   const props = normalizeProps(patch.props ?? current.props);
+  const pose = normalizeStateValue(patch.pose, current.pose);
+  // Switching preset discards an authored edit built on the old preset: a
+  // preset is a starting pose (§8), and "walking, arm raised" says nothing
+  // about where the arm should be while running.
+  const poseRig =
+    patch.poseRig !== undefined
+      ? patch.poseRig
+      : patch.pose !== undefined && pose !== current.pose
+        ? undefined
+        : current.poseRig;
   return {
     ...current,
-    pose: normalizeStateValue(patch.pose, current.pose),
+    pose,
     expression: normalizeStateValue(patch.expression, current.expression),
     outfit: normalizeStateValue(patch.outfit, current.outfit),
     view: normalizeStateValue(patch.view, current.view),
     props: props.length > 0 ? props : undefined,
+    poseRig,
     assetId: undefined,
     stateId: undefined,
   };
@@ -73,7 +95,8 @@ export function sameCharacterState(a: CharacterState, b: CharacterState): boolea
     a.expression === b.expression &&
     a.outfit === b.outfit &&
     a.view === b.view &&
-    sameProps(a.props, b.props)
+    sameProps(a.props, b.props) &&
+    poseRigKey(a.poseRig) === poseRigKey(b.poseRig)
   );
 }
 

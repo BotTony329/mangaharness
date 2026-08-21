@@ -14,6 +14,7 @@ import {
 } from "./state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { resolveCharacterState, type ResolveOptions } from "./stateResolver";
+import { describePoseRig } from "./poseRig";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 
 export type CharacterGenerationRole = "canonical" | "state";
@@ -109,6 +110,7 @@ export async function generateCharacterAssetForState(input: {
           characterName: character.name,
           characterDescription: characterIdentityDescription(character),
           ...input.state,
+          pose: describePoseRig(input.state.poseRig, input.state.pose),
           description: [continuity, input.instruction].filter(Boolean).join(" ") || undefined,
           hasReference: useIdentityReference,
           style: style.profile,
@@ -146,6 +148,7 @@ export async function generateCharacterAssetForState(input: {
       parentStateId: resolution?.status === "needs-generation" ? resolution.parentStateId : undefined,
       stateDelta: resolution?.status === "needs-generation" ? resolution.delta : undefined,
       props: input.state.props,
+      poseRig: input.state.poseRig,
       ...styleMetadata(style),
     },
   });

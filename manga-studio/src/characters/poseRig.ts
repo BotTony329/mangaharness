@@ -208,3 +208,218 @@ export function jointPositionPx(
     y: box.cy - box.height / 2 + position.y * box.height,
   };
 }
+
+// ─── Phase 3: interactive rig ───────────────────────────────────────────────
+
+/**
+ * A pose the creator authored by dragging joints.
+ *
+ * `joints` holds only what was MOVED, normalized to the character's own bounds,
+ * so a pose survives scaling, moving, reframing, and save/load (§4).
+ *
+ * `descriptors` are the semantic reading of those joints, and they — not the
+ * raw coordinates — are the pose's identity. Keying cached states on pixel
+ * positions would fork a new state on every pixel of drag; keying on meaning
+ * means two different drags that both say "right arm raised" reuse one render.
+ */
+export interface PoseRigState {
+  /** Preset the edit started from. A preset is a starting pose, not a lock (§8). */
+  basePose: string;
+  /** Only the joints that differ from the base pose. */
+  joints: Partial<Record<JointId, JointPosition>>;
+  /** Sorted semantic reading, e.g. ["right arm raised", "head turned left"]. */
+  descriptors: string[];
+}
+
+/** One semantic change relative to the base pose (§3). */
+export interface PoseDelta {
+  basePose: string;
+  descriptors: string[];
+  movedJoints: JointId[];
+}
+
+const LIMB_CHAINS: { root: JointId; mid: JointId; tip: JointId }[] = [
+  { root: "shoulderLeft", mid: "elbowLeft", tip: "handLeft" },
+  { root: "shoulderRight", mid: "elbowRight", tip: "handRight" },
+  { root: "hips", mid: "kneeLeft", tip: "footLeft" },
+  { root: "hips", mid: "kneeRight", tip: "footRight" },
+];
+
+/** Bones drawn by the overlay, and the connections constraints must preserve. */
+export const BONES: [JointId, JointId][] = [
+  ["head", "neck"],
+  ["neck", "torso"],
+  ["torso", "shoulderLeft"],
+  ["torso", "shoulderRight"],
+  ["shoulderLeft", "elbowLeft"],
+  ["elbowLeft", "handLeft"],
+  ["shoulderRight", "elbowRight"],
+  ["elbowRight", "handRight"],
+  ["torso", "hips"],
+  ["hips", "kneeLeft"],
+  ["kneeLeft", "footLeft"],
+  ["hips", "kneeRight"],
+  ["kneeRight", "footRight"],
+];
+
+/** Joints the creator may drag. Torso and neck follow the body, not the mouse. */
+export const DRAGGABLE_JOINTS: JointId[] = [
+  "head",
+  "shoulderLeft",
+  "shoulderRight",
+  "elbowLeft",
+  "elbowRight",
+  "handLeft",
+  "handRight",
+  "hips",
+  "kneeLeft",
+  "kneeRight",
+  "footLeft",
+  "footRight",
+];
+
+export function createPoseRigState(basePose: string): PoseRigState {
+  return { basePose: basePose.trim().toLowerCase(), joints: {}, descriptors: [] };
+}
+
+/** Resolved joint positions: the base pose with the creator's edits applied. */
+export function resolveJoints(rig: PoseRigState): Record<JointId, JointPosition> {
+  const base = findPoseDefinition(rig.basePose)?.joints ?? STANDING;
+  return { ...base, ...rig.joints } as Record<JointId, JointPosition>;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Lightweight constraints (§10). Deliberately NOT inverse kinematics: a moved
+ * joint keeps the position the creator chose, and only its dependent middle
+ * joint is nudged back onto its limb. Solving the whole chain would fight the
+ * drag and make the rig feel like it is resisting the user.
+ */
+export function applyConstraints(joints: Record<JointId, JointPosition>): Record<JointId, JointPosition> {
+  const next = { ...joints };
+  for (const id of JOINT_IDS) {
+    next[id] = { x: clamp01(next[id].x), y: clamp01(next[id].y) };
+  }
+  for (const { root, mid, tip } of LIMB_CHAINS) {
+    const midpoint = { x: (next[root].x + next[tip].x) / 2, y: (next[root].y + next[tip].y) / 2 };
+    const drift = Math.hypot(next[mid].x - midpoint.x, next[mid].y - midpoint.y);
+    // Only correct an elbow/knee that has drifted implausibly far off its limb;
+    // a bent joint is supposed to sit away from the midpoint.
+    const maxDrift = 0.28;
+    if (drift > maxDrift) {
+      const scale = maxDrift / drift;
+      next[mid] = {
+        x: midpoint.x + (next[mid].x - midpoint.x) * scale,
+        y: midpoint.y + (next[mid].y - midpoint.y) * scale,
+      };
+    }
+  }
+  return next;
+}
+
+/** Move one joint, returning a rig state with constraints applied. */
+export function moveJoint(rig: PoseRigState, joint: JointId, position: JointPosition): PoseRigState {
+  const base = findPoseDefinition(rig.basePose)?.joints ?? STANDING;
+  const resolved = applyConstraints({ ...resolveJoints(rig), [joint]: position });
+
+  const joints: Partial<Record<JointId, JointPosition>> = {};
+  for (const id of JOINT_IDS) {
+    const moved = Math.hypot(resolved[id].x - base[id].x, resolved[id].y - base[id].y) > 0.012;
+    if (moved) joints[id] = resolved[id];
+  }
+  return { ...rig, joints, descriptors: deriveDescriptors(rig.basePose, resolved) };
+}
+
+export function resetPoseRig(rig: PoseRigState): PoseRigState {
+  return createPoseRigState(rig.basePose);
+}
+
+export function isPoseEdited(rig: PoseRigState | undefined): boolean {
+  return Boolean(rig && Object.keys(rig.joints).length > 0);
+}
+
+/**
+ * Read semantic meaning out of joint positions (§3).
+ *
+ * Thresholds are intentionally coarse. A pose descriptor has to survive being
+ * turned into a sentence for an image model, so "slightly higher than before"
+ * is not a useful distinction — only changes big enough to draw differently
+ * should register.
+ */
+export function deriveDescriptors(basePose: string, joints: Record<JointId, JointPosition>): string[] {
+  const base = findPoseDefinition(basePose)?.joints ?? STANDING;
+  const out: string[] = [];
+  const moved = (id: JointId) => ({ dx: joints[id].x - base[id].x, dy: joints[id].y - base[id].y });
+
+  for (const [side, hand, elbow, shoulder] of [
+    ["left", "handLeft", "elbowLeft", "shoulderLeft"],
+    ["right", "handRight", "elbowRight", "shoulderRight"],
+  ] as [string, JointId, JointId, JointId][]) {
+    const h = moved(hand);
+    if (h.dy < -0.12) out.push(`${side} arm raised`);
+    else if (h.dy > 0.12) out.push(`${side} arm lowered`);
+    if (Math.abs(h.dx) > 0.12) out.push(`${side} arm extended ${h.dx > 0 ? "right" : "left"}`);
+    // A bent elbow reads as the elbow sitting well off the shoulder-hand line.
+    const midX = (joints[shoulder].x + joints[hand].x) / 2;
+    const midY = (joints[shoulder].y + joints[hand].y) / 2;
+    if (Math.hypot(joints[elbow].x - midX, joints[elbow].y - midY) > 0.1) out.push(`${side} elbow bent`);
+  }
+
+  const head = moved("head");
+  if (Math.abs(head.dx) > 0.05) out.push(`head turned ${head.dx > 0 ? "right" : "left"}`);
+  if (head.dy < -0.05) out.push("head tilted up");
+  else if (head.dy > 0.05) out.push("head tilted down");
+
+  const hips = moved("hips");
+  if (Math.abs(hips.dx) > 0.06) out.push(`torso leaning ${hips.dx > 0 ? "left" : "right"}`);
+
+  for (const [side, knee, foot] of [
+    ["left", "kneeLeft", "footLeft"],
+    ["right", "kneeRight", "footRight"],
+  ] as [string, JointId, JointId][]) {
+    const f = moved(foot);
+    if (f.dy < -0.1) out.push(`${side} leg lifted`);
+    const k = moved(knee);
+    if (Math.abs(k.dx) > 0.1 || k.dy < -0.1) out.push(`${side} knee bent`);
+  }
+
+  return [...new Set(out)].sort();
+}
+
+export function poseDelta(rig: PoseRigState): PoseDelta {
+  return {
+    basePose: rig.basePose,
+    descriptors: [...rig.descriptors],
+    movedJoints: Object.keys(rig.joints) as JointId[],
+  };
+}
+
+/** One sentence for the inspector and for the generation prompt (§11). */
+export function describePoseRig(rig: PoseRigState | undefined, fallbackPose: string): string {
+  const base = rig?.basePose ?? fallbackPose;
+  const label = findPoseDefinition(base)?.label ?? titleCase(base);
+  if (!rig || rig.descriptors.length === 0) return label;
+  return `${label}, ${rig.descriptors.join(", ")}`;
+}
+
+/**
+ * Semantic identity of a pose for cache lookups.
+ *
+ * Descriptors only — never raw joints. Keying on coordinates would make every
+ * drag a distinct uncached state and defeat the whole point of the cache.
+ */
+export function poseRigKey(rig: PoseRigState | undefined): string {
+  if (!rig || rig.descriptors.length === 0) return "";
+  return `${rig.basePose}#${[...rig.descriptors].sort().join("|")}`;
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(" ");
+}

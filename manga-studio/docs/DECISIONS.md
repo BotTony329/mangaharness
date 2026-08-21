@@ -168,3 +168,25 @@ D33 deferred reference lineage until the model could answer "why this reference?
 **`view` is not a socket.** There is no region of a drawing that means "camera angle", so it stays a dropdown instead of pretending to be a drop target.
 
 Migration v7 → v8 backfills nodes from existing renders. Parentage is left undefined for prior work: we know what each render is, but not what it was generated from, and inventing lineage would poison the graph it exists to make trustworthy.
+
+## D35 — Interactive pose rig: meaning is the identity, coordinates are the authoring
+
+Phase 3 makes the action-figure metaphor real: a draggable skeleton over the selected character, still with no IK, no Live2D, and no raster warping.
+
+**Descriptors, not joints, are the pose's identity.** `poseRigKey` hashes the semantic reading ("right arm raised", "head turned left"), never the coordinates. Keying the cache on pixels would fork a distinct uncached state on every pixel of drag and defeat the cache entirely; keying on meaning lets two different drags — and an Agent request phrased the same way — share one render.
+
+**Joints are stored normalized and sparse.** Only moved joints are kept, as 0–1 fractions of the instance box, so a pose survives scaling, moving, reframing, depth changes, and save/load. The overlay derives pixels on the fly and therefore follows the character for free.
+
+**The draft never touches the document.** Pose-edit mode and the draft rig live in `uiStore`; dragging creates no undo entries, no commands, and no network calls. Only Apply consults the resolver, which reuses an exact cached render when one exists and generates otherwise. Cancel discards the draft with nothing to roll back.
+
+**Constraints are corrective, not solved.** A dragged joint keeps exactly the position the creator chose; only a dependent elbow or knee that has drifted implausibly far off its limb is nudged back. Running a full IK solve would fight the drag and make the rig feel like it is resisting the user.
+
+**A preset is a starting pose, not a lock.** Switching the base preset discards an edit built on the previous one — "walking, right arm raised" says nothing about where that arm belongs while running. Every other dimension keeps the edit.
+
+**Overlay-only by construction.** The rig is drawn on the overlay layer and creates no document item, so it cannot reach an exported page. That is structural rather than a rule to remember.
+
+**One pose path for the Agent.** `set_character_pose_rig` builds the same `PoseRigState` the joint editor produces and routes it through the same state runtime. There is no agent-only pose code.
+
+### Bug found by the acceptance test
+
+`swapInstanceAsset` rebuilt an instance's semantic state via `stateFromAsset`, which had never been taught to read the dimensions Phase 2 and 3 added. Swapping an instance therefore dropped `props` and `poseRig` silently. Fixed at the root: `stateFromAsset` now reads every dimension a render declares. Any dimension added later must be added there too, or the same class of silent loss returns.
