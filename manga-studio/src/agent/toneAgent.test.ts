@@ -11,6 +11,7 @@ import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { ID, ProjectDocument, ToneItem } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { toneForMood } from "@/tones/mood";
+import { TONE_PRESETS } from "@/domain/tones";
 import { executePlan } from "./executor";
 import { validatePlan } from "./tools/schemas";
 
@@ -138,5 +139,44 @@ describe("the Agent uses the creator's own editor", () => {
 
     useEditorStore.getState().undo();
     expect(useEditorStore.getState().doc!.panels[panelIds[0]].itemIds).toHaveLength(before);
+  });
+});
+
+/**
+ * A tool the runtime accepts but the model is never told about is a tool that
+ * does not exist. `apply_tone` was exactly that for one commit — registered in
+ * the schema, absent from the documentation the planner actually reads — which
+ * is the same shape as the "CHARACTER CREATION: FORBIDDEN" failure.
+ */
+describe("every tool the runtime accepts is documented to the planner", () => {
+  it("documents apply_tone, with the presets it may name", async () => {
+    const { TOOL_DOCS } = await import("./tools/schemas");
+    expect(TOOL_DOCS).toContain("apply_tone");
+    expect(TOOL_DOCS).toContain("gloom");
+    expect(TOOL_DOCS).toContain("maskToCharacterName");
+    // The property that makes tone safe for an agent to reach for at all.
+    expect(TOOL_DOCS).toContain("NON-DESTRUCTIVE");
+  });
+
+  it("leaves no tool undocumented", async () => {
+    const { TOOL_DOCS, toolSchemas } = await import("./tools/schemas");
+    // Derived from the schema itself, so the next tool added cannot slip
+    // through the same gap apply_tone did.
+    const undocumented = Object.keys(toolSchemas).filter((name) => !TOOL_DOCS.includes(name));
+    expect(undocumented).toEqual([]);
+  });
+
+  it("names only presets that actually exist", async () => {
+    const { TOOL_DOCS } = await import("./tools/schemas");
+    const line = TOOL_DOCS.slice(TOOL_DOCS.indexOf("apply_tone")).split("\n")[0];
+    // The explicit run of ids between "dot-10/20/30/40/50" and "otherwise".
+    const listed = line.slice(line.indexOf("dot-10"), line.indexOf("otherwise"));
+    const advertised = (listed.match(/\b[a-z]+-[a-z]+\b/g) ?? []).filter((id) => id !== "built-in");
+    const unknown = advertised.filter((id) => !TONE_PRESETS.some((preset) => preset.id === id));
+    expect(unknown).toEqual([]);
+    // And the shorthand really does cover the numbered dot presets.
+    for (const id of ["dot-10", "dot-20", "dot-30", "dot-40", "dot-50"]) {
+      expect(TONE_PRESETS.some((preset) => preset.id === id)).toBe(true);
+    }
   });
 });
