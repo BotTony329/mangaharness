@@ -15,6 +15,14 @@ const layoutIds = ["single", "two-vertical", "two-horizontal", "three-vertical",
 const cropModes = ["fit", "fill", "upper-body", "face", "custom"] as const;
 const panelIndex = z.number().int().min(1).max(12).describe("1-based panel number in reading order");
 
+/**
+ * Stable character identity. Entity grounding resolves every name to one of
+ * these BEFORE the plan executes and writes it back into the step, so the
+ * executor never re-matches a display name. The model may also emit an ID
+ * directly from the project inventory.
+ */
+const characterId = z.string().min(1).max(64).optional();
+
 export const toolSchemas = {
   create_character: z.object({
     name: z.string().min(1).max(80),
@@ -26,6 +34,7 @@ export const toolSchemas = {
 
   generate_character_asset: z.object({
     characterName: z.string().min(1).max(80),
+    characterId,
     kind: z.enum(["reference", "pose", "expression"]),
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
@@ -52,6 +61,7 @@ export const toolSchemas = {
     panel: panelIndex.optional().describe("Omit with target:'workspace' to stage the asset beside the page"),
     target: z.enum(["panel", "workspace"]).optional(),
     characterName: z.string().max(80).optional(),
+    characterId,
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
     outfit: z.string().max(120).optional(),
@@ -65,6 +75,7 @@ export const toolSchemas = {
   place_character: z.object({
     panel: panelIndex,
     characterName: z.string().min(1).max(80),
+    characterId,
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
     outfit: z.string().max(120).optional(),
@@ -77,6 +88,7 @@ export const toolSchemas = {
   compose_character: z.object({
     panel: panelIndex,
     characterName: z.string().min(1).max(80),
+    characterId,
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
     outfit: z.string().max(120).optional(),
@@ -100,11 +112,14 @@ export const toolSchemas = {
     subjectCharacterName: z.string().min(1).max(80),
     action: z.string().min(1).max(160),
     targetCharacterName: z.string().min(1).max(80).optional(),
+    subjectCharacterId: characterId,
+    targetCharacterId: characterId,
   }),
 
   set_character_slot: z.object({
     panel: panelIndex.optional().describe("Omit to target the user's selected character instance"),
     characterName: z.string().max(80).optional(),
+    characterId,
     pose: z.string().max(80).optional(),
     expression: z.string().max(80).optional(),
     outfit: z.string().max(120).optional(),
@@ -125,6 +140,7 @@ export const toolSchemas = {
   set_crop_mode: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
+    characterId,
     category: z.enum(["character", "background", "prop", "upload"]).optional(),
     mode: z.enum(cropModes),
   }),
@@ -141,6 +157,7 @@ export const toolSchemas = {
     effectKind: z.enum(["speed-lines", "focus-lines", "screentone", "impact-burst", "emotion"]),
     /** Semantic attachment: the character the effect describes (§16). */
     targetCharacterName: z.string().max(80).optional(),
+    targetCharacterId: characterId,
     intensity: z.number().min(0).max(1).optional(),
   }),
 
@@ -162,6 +179,7 @@ export const toolSchemas = {
   set_character_depth: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
+    characterId,
     /** Semantic placement; preferred over a raw number (§16). */
     placement: z.enum(["foreground", "midground", "background"]).optional(),
     depth: z.number().min(0).max(1).optional().describe("0 nearest the camera, 1 furthest away"),
@@ -172,12 +190,14 @@ export const toolSchemas = {
   set_puppet_expression: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
+    characterId,
     expression: z.string().min(1).max(60),
   }),
 
   set_puppet_joint: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
+    characterId,
     joint: z.enum([
       "head",
       "shoulderLeft",
@@ -193,11 +213,13 @@ export const toolSchemas = {
   set_focal_character: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).describe("The subject camera framing works around"),
+    characterId,
   }),
 
   set_character_pose_rig: z.object({
     panel: panelIndex,
     characterName: z.string().max(80).optional(),
+    characterId,
     basePose: z.string().max(80).optional().describe("Preset to start from; omit to keep the current pose"),
     /** Same semantic vocabulary the joint editor produces (§12). */
     adjustments: z
@@ -209,6 +231,7 @@ export const toolSchemas = {
   attach_bubble: z.object({
     panel: panelIndex,
     characterName: z.string().max(80),
+    characterId,
     bubbleType: z.enum(["speech", "thought", "shout", "whisper", "narration"]),
     text: z.string().min(1).max(300),
   }),
@@ -338,14 +361,14 @@ export function validateStepScope(tool: ToolName, args: Record<string, unknown>,
 export const TOOL_DOCS = `
 Available tools (call only these, with exactly these argument shapes):
 
-- create_character {name, appearance?, personalityNotes?} — add a new character identity. Appearance describes physical identity; never put rendering style here because the project Art Style is applied automatically.
-- generate_character_asset {characterName, kind: "reference"|"pose"|"expression", pose?, expression?, outfit?, view?, instruction?} — AI-generate a reusable full-state character asset. "reference" creates the canonical identity image.
+- create_character {name, appearance?, personalityNotes?} — add a NEW character identity. PRIVILEGED: plan this only when the user explicitly asked for a new character ("create a character called Hana", "add a new teacher"). Never plan it because a name could not be found in the inventory — that is a resolution failure, not a creation request, and the runtime will reject it.
+- generate_character_asset {characterName, characterId, kind: "reference"|"pose"|"expression", pose?, expression?, outfit?, view?, instruction?} — AI-generate a reusable full-state character asset. "reference" creates the canonical identity image.
 - generate_background {description, name?} — AI-generate a reusable background.
 - generate_prop {description, name?} — AI-generate a reusable prop.
 - set_page_layout {layout: "single"|"two-vertical"|"two-horizontal"|"three-vertical"|"four-grid"|"yonkoma"} — replace the current page's panel arrangement (existing content is preserved).
 - place_asset {panel?, target?, characterName?, pose?, expression?, outfit?, view?, assetName?, category?, cropMode?, flipX?} — place a library asset. Default target is the given panel; target:"workspace" stages it as a loose reference beside the page instead.
-- place_character {panel, characterName, pose?, expression?, outfit?, view?, cropMode?, flipX?, generateIfMissing?} — preferred semantic character placement. Resolve the Character entity first, reuse a cached asset matching every requested state field, and generate the missing state only when needed.
-- compose_character {panel, characterName, pose?, expression?, outfit?, view?, framing?, position?, facing?, depth?, role?, generateIfMissing?} — preferred scene-aware placement. Resolve or generate the semantic Character state, then compose it with explicit shot, position, facing, depth, and narrative role.
+- place_character {panel, characterName, characterId, pose?, expression?, outfit?, view?, cropMode?, flipX?, generateIfMissing?} — preferred semantic character placement. Resolve the Character entity first, reuse a cached asset matching every requested state field, and generate the missing state only when needed.
+- compose_character {panel, characterName, characterId, pose?, expression?, outfit?, view?, framing?, position?, facing?, depth?, role?, generateIfMissing?} — preferred scene-aware placement. Resolve or generate the semantic Character state, then compose it with explicit shot, position, facing, depth, and narrative role.
 - reuse_scene_background {sourcePanel, targetPanel} — reuse the exact same background asset and continuity metadata; never regenerate a merely similar location.
 - add_scene_relationship {panel, subjectCharacterName, action, targetCharacterName?} — record semantic action/interaction in the panel scene graph.
 - set_puppet_expression {panel, characterName?, expression} — change a puppet character's face LOCALLY and instantly. Prefer this over any generation tool whenever the character has a puppet: it changes nothing but the face, costs nothing, and is immediate.

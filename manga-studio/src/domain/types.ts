@@ -137,6 +137,12 @@ export interface Character {
   id: ID;
   projectId: ID;
   name: string;
+  /**
+   * Explicitly stored alternative names ("Yu-chan", "Class President").
+   * Entity grounding resolves these; it never infers a nickname or a
+   * relationship that is not recorded here as structured data.
+   */
+  aliases?: string[];
   description?: string;
   /** Identity facts only — rendering instructions belong to Project Art Style. */
   appearance?: string;

@@ -285,3 +285,17 @@ Every workaround we built confirmed it. Phase 3 gave the rig joints, but Apply h
 **Semantic state, puppet parameters and generated lineage are three different things** (§14). `CharacterState` stays semantic (walking, shocked, school uniform). `PuppetInstanceState` is how that state is currently rendered locally. Only generation creates graph nodes — a five-degree elbow move must not litter the lineage with meaningless ancestry.
 
 Legacy flattened characters keep working untouched. Migration v9 → v10 is purely additive: no asset is reinterpreted as puppet parts, and no character gains a puppet it did not have.
+
+## D40 — Entity grounding precedes creative planning; NOT_FOUND never means create
+
+The Manga Agent was inconsistently resolving existing characters: a prompt naming Yuri could place Cute Girl, or invent a second "Yuri". The cause was not prompt quality.
+
+**Identity was resolved at execution time, per call site, by a bidirectional substring match.** `findCharacter` ran `name.includes(query) || query.includes(name)` and returned `.find()`'s first hit in insertion order. It had no concept of ambiguity, so two plausible characters silently became one arbitrary answer. Six executor call sites each ran it independently. The planner was told to "reference characters by their exact names"; the context listed names without IDs and truncated at 6000 characters, so a large project could hide a character from the model entirely — and the most natural repair for a character the model cannot see is to create one. `create_character` was unconditionally available, and a failed step did not stop the run, so a plan could fail on Yuri and still place Cute Girl.
+
+**Grounding now runs before the model is called.** `resolveCharacterReference` is the one canonical resolver and returns only RESOLVED, AMBIGUOUS, or NOT_FOUND. Its ladder is deterministic — id, exact name, normalized name, stored alias, pronoun-from-context, then whole-token containment anchored on the name's leading token. It never matches a bare substring, never resolves a description ("the black-haired girl") or a relationship ("Yuri's friend"), and returns AMBIGUOUS rather than choosing when more than one character matches. A suspected misspelling ("Yu ri") is reported for confirmation instead of bound silently.
+
+**Creation is privileged and gated by the user's own words**, not by whether resolution succeeded. `detectCreationIntent` reads the prompt; "Create a new character named Hana" authorizes creation, "Yuri walks into the room" never does. The authorization is enforced twice — in plan validation and again at the executor's creation boundary — because the first protects against a bad plan and the second against a bad caller.
+
+**An unresolvable reference blocks the whole run rather than failing one step.** The remaining steps were written assuming that step succeeded; executing them is precisely how a panel ends up holding the wrong character.
+
+**Execution runs on IDs.** Plan validation binds every character argument to a `characterId` before anything mutates, and rewrites the display name to the bound character's real name so a step label can never read "Yuri" while operating on someone else. The library is re-checked at the generation boundary against the *current* document, because the plan was validated against an older one. Post-conditions then verify the document itself: the requested character is in the requested panel, and no Character exists that the run was not authorized to create.

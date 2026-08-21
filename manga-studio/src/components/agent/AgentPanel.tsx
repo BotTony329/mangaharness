@@ -9,9 +9,12 @@
 
 import { useEffect, useState } from "react";
 import { buildAgentContext } from "@/agent/contextBuilder";
-import { countGenerations, describeStep, executePlan, type StepProgress } from "@/agent/executor";
+import { countGenerations, describeStep, executePlan, type RunGuards, type StepProgress } from "@/agent/executor";
+import { groundPrompt, type GroundingReport } from "@/agent/grounding";
+import { validateGroundedPlan } from "@/agent/planValidation";
 import { resolveAgentScope, type AgentScopePreference } from "@/agent/scope";
 import type { AgentPlan } from "@/agent/tools/schemas";
+import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 
@@ -54,6 +57,9 @@ export function AgentPanel() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const [plan, setPlan] = useState<AgentPlan | null>(null);
+  const [grounding, setGrounding] = useState<GroundingReport | null>(null);
+  const [guards, setGuards] = useState<RunGuards | null>(null);
+  const [assetTrace, setAssetTrace] = useState<string[]>([]);
   const [skillsUsed, setSkillsUsed] = useState<string[]>([]);
   const [steps, setSteps] = useState<StepProgress[]>([]);
   const [activity, setActivity] = useState<string[]>([]);
@@ -79,6 +85,9 @@ export function AgentPanel() {
     setError(null);
     setErrorDetails(null);
     setPlan(null);
+    setGrounding(null);
+    setGuards(null);
+    setAssetTrace([]);
     setSteps([]);
     setActivity(["Understanding"]);
     setStatusLine("Understanding request…");
@@ -97,11 +106,34 @@ export function AgentPanel() {
         prompt: requestPrompt,
         preference: scopePreference,
       });
+      /**
+       * Entity grounding runs BEFORE the model is called. Identity is decided
+       * deterministically from the project, and the planner is handed the
+       * answer instead of being asked to guess it.
+       */
+      const report = groundPrompt({
+        doc: state.doc,
+        prompt: requestPrompt,
+        selectedCharacterId: selectedCharacterId(state.doc, state.selection.itemId),
+        selectedInstanceId: state.selection.itemId,
+        sceneCharacterIds: panelCharacterIds(state.doc, scope.panelId),
+      });
+      setGrounding(report);
+
+      // A reference we could not ground stops the run here — before the model
+      // is paid for, before anything is generated, before anything is mutated.
+      if (report.blocking.length > 0) {
+        setStatusLine(report.blocking[0]);
+        setPhase("done");
+        return;
+      }
+
       const context = buildAgentContext({
         doc: state.doc,
         currentPageId: state.currentPageId,
         selection: state.selection,
         scope,
+        grounding: report,
       });
       const response = await fetch("/api/agent", {
         method: "POST",
@@ -117,21 +149,44 @@ export function AgentPanel() {
       const received = body as typeof body & { plan: AgentPlan; skillsUsed: string[]; rejected: { tool: string; error: string }[] };
       setSkillsUsed(received.skillsUsed);
       setActivity((current) => [...current, "Scene plan"]);
-      setPlan(received.plan);
-      setStatusLine(received.diagnostics?.provider ? `Plan received from ${received.diagnostics.provider}.` : "Plan received.");
-      setSteps(received.plan.steps.map((s) => ({ label: describeStep(s), status: "pending" })));
 
-      if (received.plan.steps.length === 0) {
-        setStatusLine(received.plan.summary || "The agent had nothing to do for that request.");
+      // Bind names to IDs and refuse anything unresolvable, unauthorized, or
+      // already satisfied by the library — all before the first mutation.
+      const validated = validateGroundedPlan({
+        plan: received.plan,
+        doc: state.doc,
+        grounding: report,
+        scope,
+        panelCount: scope.panelCount,
+      });
+      setPlan(validated.plan);
+      setAssetTrace(validated.rejected.map((entry) => `${entry.tool}: ${entry.error}`));
+      setSteps(validated.plan.steps.map((s) => ({ label: describeStep(s), status: "pending" })));
+
+      if (validated.blocked) {
+        setStatusLine(validated.blockReason ?? "The plan referenced a character that could not be resolved.");
         setPhase("done");
         return;
       }
-      if (countGenerations(received.plan) > CONFIRM_THRESHOLD) {
-        setStatusLine(`This plan generates ${countGenerations(received.plan)} images.`);
+      if (validated.plan.steps.length === 0) {
+        setStatusLine(validated.plan.summary || "The agent had nothing to do for that request.");
+        setPhase("done");
+        return;
+      }
+      const runGuards: RunGuards = {
+        creationAuthorized: validated.creationAuthorized,
+        authorizedCreationNames: validated.authorizedCreationNames,
+        selectedCharacterId: report.selectedCharacterId,
+      };
+      setGuards(runGuards);
+      setStatusLine(received.diagnostics?.provider ? `Plan received from ${received.diagnostics.provider}.` : "Plan received.");
+
+      if (countGenerations(validated.plan) > CONFIRM_THRESHOLD) {
+        setStatusLine(`This plan generates ${countGenerations(validated.plan)} images.`);
         setPhase("confirm");
         return;
       }
-      await execute(received.plan);
+      await execute(validated.plan, runGuards);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent failed");
       setPhase("error");
@@ -140,14 +195,18 @@ export function AgentPanel() {
     }
   };
 
-  const execute = async (planToRun: AgentPlan) => {
+  const execute = async (planToRun: AgentPlan, runGuards?: RunGuards) => {
     setPhase("executing");
     setActivity((current) => [...current, "Asset search", "Composition"]);
     setStatusLine("Composing…");
-    const summary = await executePlan(planToRun, (index, status, detail) => {
-      setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, status, detail } : s)));
-      if (status === "running") setStatusLine(describeStep(planToRun.steps[index]) + "…");
-    });
+    const summary = await executePlan(
+      planToRun,
+      (index, status, detail) => {
+        setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, status, detail } : s)));
+        if (status === "running") setStatusLine(describeStep(planToRun.steps[index]) + "…");
+      },
+      runGuards ?? guards ?? { creationAuthorized: false, authorizedCreationNames: [] },
+    );
     setActivity((current) => [...current, "Validation", "Done"]);
     const unresolved = summary.validationIssues.filter((issue) => !issue.corrected);
     setStatusLine(
@@ -246,6 +305,50 @@ export function AgentPanel() {
         <p className="text-[10px] text-zinc-500">Skills: {skillsUsed.join(" · ")}</p>
       )}
 
+      {grounding && grounding.entities.length > 0 && (
+        <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2" aria-label="Agent understanding">
+          <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Understanding</p>
+          <ul className="space-y-0.5">
+            {grounding.entities.map((entity) => (
+              <li key={entity.surface} className="flex items-start gap-1.5">
+                <span className={entity.status === "resolved" ? "text-emerald-400" : "text-red-400"}>
+                  {entity.status === "resolved" ? "✓" : "✕"}
+                </span>
+                <span className={entity.status === "resolved" ? "text-zinc-300" : "text-red-300"}>
+                  {entity.status === "resolved" ? (
+                    <>
+                      {entity.surface} → existing Character &ldquo;{entity.name}&rdquo;
+                    </>
+                  ) : (
+                    <>
+                      Could not resolve &ldquo;{entity.surface}&rdquo;
+                      {entity.reason && <span className="block text-[10px] text-red-400/80">{entity.reason}</span>}
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {/* Creation is only ever announced when the user actually asked for it. */}
+          {grounding.creation.allowed && (
+            <p className="mt-1 text-[10px] text-amber-300">
+              ✓ New character requested{grounding.creation.requestedNames.length > 0 ? `: ${grounding.creation.requestedNames.join(", ")}` : ""}
+            </p>
+          )}
+        </div>
+      )}
+
+      {assetTrace.length > 0 && (
+        <div className="rounded border border-amber-900/60 bg-amber-950/20 p-2" aria-label="Rejected steps">
+          <p className="mb-1 text-[10px] uppercase tracking-wider text-amber-500">Rejected before execution</p>
+          <ul className="space-y-0.5 text-[10px] text-amber-200/90">
+            {assetTrace.map((entry) => (
+              <li key={entry}>○ {entry}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {statusLine && <p className="text-zinc-300">{statusLine}</p>}
       {activity.length > 0 && (
         <p className="text-[10px] text-zinc-500" aria-label="Agent activity">
@@ -309,7 +412,7 @@ export function AgentPanel() {
             <div className="mt-3 flex gap-2">
               <button
                 className="rounded bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
-                onClick={() => execute(plan)}
+                onClick={() => execute(plan, guards ?? undefined)}
               >
                 Continue ({countGenerations(plan)} generations)
               </button>
@@ -338,6 +441,24 @@ export function AgentPanel() {
       )}
     </div>
   );
+}
+
+/** The character behind the user's selection — the pronoun anchor of §13. */
+function selectedCharacterId(doc: ProjectDocument, itemId?: ID): ID | undefined {
+  const item = itemId ? doc.items[itemId] : undefined;
+  if (item?.kind !== "asset") return undefined;
+  const instance = item as AssetInstance;
+  return instance.characterState?.characterId ?? doc.assets[instance.sourceAssetId]?.metadata?.characterId;
+}
+
+function panelCharacterIds(doc: ProjectDocument, panelId?: ID): ID[] {
+  const panel = panelId ? doc.panels[panelId] : undefined;
+  if (!panel) return [];
+  return panel.itemIds
+    .map((id) => doc.items[id])
+    .filter((item): item is AssetInstance => item?.kind === "asset")
+    .map((item) => item.characterState?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId)
+    .filter((id): id is ID => Boolean(id));
 }
 
 function formatMs(value: number): string {

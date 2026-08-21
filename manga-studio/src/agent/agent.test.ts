@@ -201,15 +201,33 @@ describe("asset resolver", () => {
 
 describe("buildAgentContext", () => {
   it("includes the reusable inventory and page structure", () => {
-    const { doc } = libraryDoc();
+    const { doc, akariId } = libraryDoc();
     const pageId = Object.keys(doc.pages)[0];
     const context = buildAgentContext({ doc, currentPageId: pageId, selection: {} });
     expect(context).toContain("Akari");
-    expect(context).toContain("pose:running");
-    expect(context).toContain("expression:crying");
+    // §12: the inventory is structured and carries stable IDs, so the planner
+    // is never reduced to matching a display name.
+    expect(context).toContain(`ID: ${akariId}`);
+    expect(context).toContain("running/neutral/default outfit/front");
+    expect(context).toContain("standing/crying/default outfit/front");
     expect(context).toContain("Classroom A");
     expect(context).toContain("Panel 1:");
     expect(context).toContain("- empty");
+  });
+
+  it("never truncates the character inventory, however large the page is", () => {
+    let doc = createProjectDocument("Big");
+    const ids: string[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      const added = addCharacter(doc, `Character ${i}`, "x".repeat(300));
+      doc = added.doc;
+      ids.push(added.characterId);
+    }
+    const pageId = Object.keys(doc.pages)[0];
+    const context = buildAgentContext({ doc, currentPageId: pageId, selection: {} });
+    // A planner that cannot see a character has no way to know it exists, and
+    // the most natural repair for a missing character is to invent one.
+    for (const id of ids) expect(context).toContain(id);
   });
 
   it("marks the selection so contextual prompts can target it", () => {

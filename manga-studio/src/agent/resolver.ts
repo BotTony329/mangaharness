@@ -8,16 +8,54 @@
 
 import { DEFAULT_CHARACTER_STATE, stateFromAsset } from "@/characters/state";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
-import type { AssetCategory, Character, CharacterState, ProjectDocument, SourceAsset } from "@/domain/types";
+import type { AssetCategory, Character, CharacterState, ID, ProjectDocument, SourceAsset } from "@/domain/types";
+import { resolveCharacterReference } from "./grounding";
 
-export function findCharacter(doc: ProjectDocument, name: string): Character | null {
-  const wanted = name.trim().toLowerCase();
-  const characters = Object.values(doc.characters);
-  return (
-    characters.find((c) => c.id === name) ??
-    characters.find((c) => c.name.toLowerCase() === wanted) ??
-    characters.find((c) => c.name.toLowerCase().includes(wanted) || wanted.includes(c.name.toLowerCase())) ??
-    null
+/**
+ * Character lookup, delegated to the one canonical grounding resolver.
+ *
+ * This used to be a bidirectional substring match that returned the first
+ * arbitrary hit — `name.includes(query) || query.includes(name)` — with no
+ * ambiguity detection. That is the defect that let "Yuri" land on "Cute Girl".
+ * It now returns a character only on an unambiguous RESOLVED verdict; AMBIGUOUS
+ * and NOT_FOUND both return null so the caller reports rather than substitutes.
+ */
+export function findCharacter(doc: ProjectDocument, nameOrId: string): Character | null {
+  const resolution = resolveCharacterReference({
+    query: nameOrId,
+    projectCharacters: Object.values(doc.characters),
+  });
+  return resolution.status === "resolved" ? doc.characters[resolution.characterId] ?? null : null;
+}
+
+/**
+ * Identity lookup for execution. Prefers the ID that grounding already bound
+ * to this step; falls back to the strict resolver and refuses to guess.
+ */
+export function requireCharacter(
+  doc: ProjectDocument,
+  args: { characterId?: string; characterName?: string },
+  context: { selectedCharacterId?: ID; sceneCharacterIds?: ID[] } = {},
+): Character {
+  if (args.characterId) {
+    const byId = doc.characters[args.characterId];
+    if (byId) return byId;
+    throw new Error(`Character ${args.characterId} no longer exists in this project.`);
+  }
+  const query = args.characterName?.trim();
+  if (!query) throw new Error("No character was specified.");
+  const resolution = resolveCharacterReference({
+    query,
+    projectCharacters: Object.values(doc.characters),
+    selectedCharacterId: context.selectedCharacterId,
+    sceneCharacterIds: context.sceneCharacterIds,
+  });
+  if (resolution.status === "resolved") return doc.characters[resolution.characterId]!;
+  if (resolution.status === "ambiguous") {
+    throw new Error(`${resolution.reason} Refusing to guess which character "${query}" means.`);
+  }
+  throw new Error(
+    `Character "${query}" does not exist in this project. Refusing to substitute another character or create one.`,
   );
 }
 

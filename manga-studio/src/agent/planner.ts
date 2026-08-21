@@ -132,7 +132,16 @@ Respond with ONLY a JSON object:
 Rules:
 - Maximum 30 steps. Keep plans minimal — every generation step costs money.
 - Steps execute strictly in order; a generated asset can be placed by a later step.
-- Reference characters by their exact names from the context.
+- Character identity is ALREADY RESOLVED for you. Use the IDs from RESOLVED
+  ENTITIES and the CHARACTERS inventory, passing characterId alongside
+  characterName. Never rename, substitute, or approximate a character.
+- The CHARACTERS list is exhaustive. If the user names someone who is not in it,
+  do NOT create them and do NOT use a different character — return
+  {"summary": "...", "steps": []} explaining who could not be found.
+- create_character is only for an explicit request for a NEW character. A failed
+  lookup is never a reason to create one; the runtime will reject it.
+- Reuse before generating: if the inventory already lists the state you need,
+  place it instead of planning a generation step.
 - The AUTHORITATIVE TARGET SCOPE in project context is a hard boundary. Never plan a tool call outside it.
 - A selected panel means ONLY that panel unless the target scope explicitly says Current Page or Whole Project.
 - If the request is unclear or impossible with these tools, return

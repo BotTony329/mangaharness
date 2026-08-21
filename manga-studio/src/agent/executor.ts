@@ -18,6 +18,8 @@ import { panelPxRect } from "@/domain/docHelpers";
 import type {
   AssetInstance,
   BubbleType,
+  Character,
+  SourceAsset,
   CropMode,
   EffectKind,
   ID,
@@ -35,7 +37,9 @@ import type {
 import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
-import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
+import { findUnreadyCharacterAsset, requireCharacter, requestedCharacterState, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
+import { hasExactState } from "./planValidation";
+import { normalizeReference } from "./grounding";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
 import { isPuppetInstance } from "@/domain/puppetOps";
 import type { PuppetJoint } from "@/puppet/model";
@@ -123,6 +127,36 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
   }
 }
 
+/**
+ * Runtime authorization for one agent run.
+ *
+ * This is the §19 generation boundary. It is deliberately *not* derived from
+ * the plan or from anything the model said: it comes from the grounding phase,
+ * which read the user's own prompt. A planner that decides to create a
+ * character cannot widen its own permission.
+ */
+export interface RunGuards {
+  creationAuthorized: boolean;
+  /** Empty means "one unnamed new character"; otherwise creation is limited to these. */
+  authorizedCreationNames: string[];
+  selectedCharacterId?: ID;
+  /** Characters the run is expected to touch, keyed by step index for post-conditions. */
+  expectedCharacterIds?: ID[];
+}
+
+const DENY_ALL_CREATION: RunGuards = { creationAuthorized: false, authorizedCreationNames: [] };
+
+/**
+ * Module-scoped because a run is strictly sequential in the browser and every
+ * handler would otherwise need the same parameter threaded through it. Set and
+ * cleared by `executePlan`, so a handler can never read a stale authorization
+ * from a previous run.
+ */
+let activeGuards: RunGuards = DENY_ALL_CREATION;
+
+/** Characters actually created during this run, for post-condition checking. */
+let createdCharacterIds: ID[] = [];
+
 export function countGenerations(plan: AgentPlan): number {
   return plan.steps.filter((s) => s.tool.startsWith("generate_")).length;
 }
@@ -130,6 +164,7 @@ export function countGenerations(plan: AgentPlan): number {
 export async function executePlan(
   plan: AgentPlan,
   onProgress: (index: number, status: StepStatus, detail?: string) => void,
+  guards: RunGuards = DENY_ALL_CREATION,
 ): Promise<ExecutionSummary> {
   const store = useEditorStore.getState();
   const before = store.doc;
@@ -138,6 +173,8 @@ export async function executePlan(
   let failed = 0;
   let validationIssues: CompositionIssue[] = [];
 
+  activeGuards = guards;
+  createdCharacterIds = [];
   store.beginTransaction();
   try {
     for (let i = 0; i < plan.steps.length; i++) {
@@ -154,6 +191,7 @@ export async function executePlan(
     validationIssues = validatePlanResult(plan, before);
   } finally {
     useEditorStore.getState().endTransaction();
+    activeGuards = DENY_ALL_CREATION;
   }
   return { completed, failed, validationIssues };
 }
@@ -246,33 +284,77 @@ function panelIdByNumber(panel: number): ID {
   return panelId;
 }
 
+/**
+ * Persistent Character creation — the privileged operation.
+ *
+ * The guard here is the last line of defence and repeats the plan-validation
+ * check on purpose: plan validation protects against a bad plan, this protects
+ * against a bad *executor caller*. Failing to resolve a name is never grounds
+ * for creating a character, so an unauthorized run throws instead of quietly
+ * adding one to the library.
+ */
 function doCreateCharacter(args: { name: string; appearance?: string; personalityNotes?: string; description?: string }): void {
+  const doc = currentDoc();
   // Idempotent: re-creating an existing character would fork the library.
-  if (findCharacter(currentDoc(), args.name)) return;
-  dispatch({
+  const existing = requireCharacterOrNull(doc, { characterName: args.name });
+  if (existing) return;
+
+  if (!activeGuards.creationAuthorized) {
+    throw new Error(
+      `Refusing to create the character "${args.name}": this run has no character-creation authorization. Ask for a new character explicitly.`,
+    );
+  }
+  const authorized = activeGuards.authorizedCreationNames;
+  if (authorized.length > 0 && !authorized.includes(normalizeReference(args.name))) {
+    throw new Error(`Creation was authorized for ${authorized.join(", ")}, not "${args.name}".`);
+  }
+  const created = dispatch({
     type: "create-character",
     name: args.name,
     appearance: args.appearance ?? args.description,
     personalityNotes: args.personalityNotes,
   });
+  if (created.createdId) createdCharacterIds.push(created.createdId);
+}
+
+/** Resolution that reports "no unambiguous match" rather than throwing. */
+function requireCharacterOrNull(
+  doc: ProjectDocument,
+  args: { characterId?: string; characterName?: string },
+): ReturnType<typeof requireCharacter> | null {
+  try {
+    return requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId });
+  } catch {
+    return null;
+  }
 }
 
 async function doGenerateCharacterAsset(
-  args: { characterName: string; kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; outfit?: string; view?: string; instruction?: string },
+  args: { characterName: string; characterId?: ID; kind: "reference" | "pose" | "expression"; pose?: string; expression?: string; outfit?: string; view?: string; instruction?: string },
 ): Promise<void> {
-  const character = findCharacter(currentDoc(), args.characterName);
-  if (!character) throw new Error(`Character "${args.characterName}" not found`);
+  const doc = currentDoc();
+  const character = requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId });
+
+  const desired = {
+    characterId: character.id,
+    pose: args.pose?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.pose,
+    expression: args.expression?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.expression,
+    outfit: args.outfit?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.outfit,
+    view: args.view?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.view,
+  };
+  // §9: re-check at the generation boundary, against the CURRENT document.
+  // The plan was validated against an older document; an earlier step in this
+  // same run may have produced exactly this asset.
+  if (args.kind !== "reference" && hasExactState(doc, character, desired)) {
+    throw new Error(
+      `${character.name} already has a ${desired.pose}/${desired.expression} state — reused instead of generating a duplicate.`,
+    );
+  }
   const assetId = await generateCharacterAssetForState({
     characterId: character.id,
     role: args.kind === "reference" ? "canonical" : "state",
     instruction: args.instruction,
-    state: {
-      characterId: character.id,
-      pose: args.pose?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.pose,
-      expression: args.expression?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.expression,
-      outfit: args.outfit?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.outfit,
-      view: args.view?.toLowerCase() ?? DEFAULT_CHARACTER_STATE.view,
-    },
+    state: desired,
   });
   stageOnWorkspace(assetId);
 }
@@ -336,6 +418,7 @@ async function doPlaceAsset(args: {
   panel?: number;
   target?: "panel" | "workspace";
   characterName?: string;
+  characterId?: ID;
   pose?: string;
   expression?: string;
   outfit?: string;
@@ -368,6 +451,7 @@ async function doPlaceCharacter(args: {
   panel?: number;
   target?: "panel" | "workspace";
   characterName: string;
+  characterId?: ID;
   pose?: string;
   expression?: string;
   outfit?: string;
@@ -376,34 +460,10 @@ async function doPlaceCharacter(args: {
   flipX?: boolean;
   generateIfMissing?: boolean;
 }): Promise<void> {
-  let doc = currentDoc();
-  const resolution = resolveCharacterState(doc, args.characterName, {
-    pose: args.pose,
-    expression: args.expression,
-    outfit: args.outfit,
-    view: args.view,
-  });
-  if (resolution.status === "character-not-found") throw new Error(`Character "${args.characterName}" not found`);
-  const { character } = resolution;
-  let asset = resolution.asset;
-  if (!asset) {
-    const blocked = findUnreadyCharacterAsset(doc, character, resolution.desired);
-    if (blocked) {
-      throw new Error(`Background removal failed for "${blocked.name}" — retry it in the library before composing.`);
-    }
-    if (args.generateIfMissing === false) {
-      throw new Error(`No cached state matches ${character.name}; generation was disabled`);
-    }
-    const assetId = await generateCharacterAssetForState({
-      characterId: character.id,
-      role: "state",
-      state: resolution.desired,
-      instruction: `Create the missing reusable state requested for placement in the manga page.`,
-    });
-    doc = currentDoc();
-    asset = doc.assets[assetId];
-  }
-  if (!asset || !isAssetReadyForComposition(asset)) throw new Error(`Unable to resolve a ready reusable state for ${character.name}`);
+  const { asset } = await resolveOrGenerateState(
+    args,
+    "Create the missing reusable state requested for placement in the manga page.",
+  );
 
   if (args.target === "workspace" || args.panel === undefined) {
     stageOnWorkspace(asset.id);
@@ -414,9 +474,68 @@ async function doPlaceCharacter(args: {
   if (args.flipX && placed.createdId) dispatch({ type: "set-instance-props", instanceId: placed.createdId, patch: { flipX: true } });
 }
 
+
+/**
+ * REUSE → MODIFY → GENERATE, in that order, for one character state (§8/§9).
+ *
+ * Identity is resolved first and exactly once, from the ID grounding bound to
+ * the step. Only then is the asset searched. The library is re-checked
+ * immediately before generation against the CURRENT document, because the plan
+ * was validated against an older one and an earlier step in this same run may
+ * already have produced the asset.
+ */
+async function resolveOrGenerateState(
+  args: {
+    characterName: string;
+    characterId?: ID;
+    pose?: string;
+    expression?: string;
+    outfit?: string;
+    view?: string;
+    generateIfMissing?: boolean;
+  },
+  instruction: string,
+): Promise<{ character: Character; asset: SourceAsset }> {
+  let doc = currentDoc();
+  const character = requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId });
+  const query = { pose: args.pose, expression: args.expression, outfit: args.outfit, view: args.view };
+  const desired = requestedCharacterState(character.id, query);
+
+  let asset = resolveCharacterAsset(doc, character, query);
+  if (!asset) {
+    const blocked = findUnreadyCharacterAsset(doc, character, desired);
+    if (blocked) {
+      throw new Error(`Background removal failed for "${blocked.name}" — retry it in the library before composing.`);
+    }
+    if (args.generateIfMissing === false) {
+      throw new Error(`No cached state matches ${character.name}; generation was disabled`);
+    }
+    // Independent re-check at the generation boundary.
+    doc = currentDoc();
+    const recheck = resolveCharacterAsset(doc, character, query);
+    if (recheck) {
+      asset = recheck;
+    } else {
+      const assetId = await generateCharacterAssetForState({
+        characterId: character.id,
+        role: "state",
+        state: desired,
+        instruction,
+      });
+      doc = currentDoc();
+      asset = doc.assets[assetId] ?? null;
+    }
+  }
+  if (!asset || !isAssetReadyForComposition(asset)) {
+    throw new Error(`Unable to resolve a ready reusable state for ${character.name}`);
+  }
+  return { character, asset };
+}
+
 async function doComposeCharacter(args: {
   panel: number;
   characterName: string;
+  characterId?: ID;
   pose?: string;
   expression?: string;
   outfit?: string;
@@ -428,35 +547,14 @@ async function doComposeCharacter(args: {
   role?: string;
   generateIfMissing?: boolean;
 }): Promise<void> {
-  let doc = currentDoc();
-  const resolution = resolveCharacterState(doc, args.characterName, {
-    pose: args.pose,
-    expression: args.expression,
-    outfit: args.outfit,
-    view: args.view,
-  });
-  if (resolution.status === "character-not-found") throw new Error(`Character "${args.characterName}" not found`);
-  let asset = resolution.asset;
-  if (!asset) {
-    const blocked = findUnreadyCharacterAsset(doc, resolution.character, resolution.desired);
-    if (blocked) {
-      throw new Error(`Background removal failed for "${blocked.name}" — retry it in the library before composing.`);
-    }
-    if (args.generateIfMissing === false) throw new Error(`No cached state matches ${resolution.character.name}; generation was disabled`);
-    const assetId = await generateCharacterAssetForState({
-      characterId: resolution.character.id,
-      role: "state",
-      state: resolution.desired,
-      instruction: "Create the missing reusable character state for semantic scene composition.",
-    });
-    doc = currentDoc();
-    asset = doc.assets[assetId];
-  }
-  if (!asset || !isAssetReadyForComposition(asset)) throw new Error(`Unable to resolve a ready reusable state for ${resolution.character.name}`);
+  const { character, asset } = await resolveOrGenerateState(
+    args,
+    "Create the missing reusable character state for semantic scene composition.",
+  );
   dispatch({
     type: "compose-character",
     panelId: panelIdByNumber(args.panel),
-    characterId: resolution.character.id,
+    characterId: character.id,
     assetId: asset.id,
     framing: args.framing,
     position: args.position,
@@ -477,14 +575,20 @@ function doReuseSceneBackground(args: { sourcePanel: number; targetPanel: number
 function doAddSceneRelationship(args: {
   panel: number;
   subjectCharacterName: string;
+  subjectCharacterId?: ID;
   action: string;
   targetCharacterName?: string;
+  targetCharacterId?: ID;
 }): void {
   const doc = currentDoc();
-  const subject = findCharacter(doc, args.subjectCharacterName);
-  if (!subject) throw new Error(`Character "${args.subjectCharacterName}" not found`);
-  const target = args.targetCharacterName ? findCharacter(doc, args.targetCharacterName) : null;
-  if (args.targetCharacterName && !target) throw new Error(`Character "${args.targetCharacterName}" not found`);
+  const subject = requireCharacter(doc, {
+    characterId: args.subjectCharacterId,
+    characterName: args.subjectCharacterName,
+  });
+  const target =
+    args.targetCharacterId ?? args.targetCharacterName
+      ? requireCharacter(doc, { characterId: args.targetCharacterId, characterName: args.targetCharacterName })
+      : null;
   dispatch({
     type: "add-scene-relationship",
     panelId: panelIdByNumber(args.panel),
@@ -501,7 +605,7 @@ function doAddSceneRelationship(args: {
  * the composition stays put.
  */
 async function doSetCharacterSlot(
-  args: { panel?: number; characterName?: string; pose?: string; expression?: string; outfit?: string; view?: string; generateIfMissing?: boolean },
+  args: { panel?: number; characterName?: string; characterId?: ID; pose?: string; expression?: string; outfit?: string; view?: string; generateIfMissing?: boolean },
   scope?: AgentRunScope,
 ): Promise<void> {
   if (!args.pose && !args.expression && !args.outfit && !args.view) {
@@ -520,11 +624,14 @@ async function doSetCharacterSlot(
 /** Resolve which character instance a slot change targets: explicit panel/name, else the user's selection. */
 function findTargetInstance(
   doc: ProjectDocument,
-  args: { panel?: number; characterName?: string },
+  args: { panel?: number; characterName?: string; characterId?: ID },
   scope?: AgentRunScope,
 ): AssetInstance {
   const state = useEditorStore.getState();
-  const characterByName = args.characterName ? findCharacter(doc, args.characterName) : null;
+  const characterByName =
+    args.characterId ?? args.characterName
+      ? requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId })
+      : null;
 
   if (scope?.kind === "selected-object" && scope.itemId) {
     const item = doc.items[scope.itemId];
@@ -572,6 +679,7 @@ function doReshapePanel(args: { panel: number; points: Point[] }): void {
 function doSetCropMode(args: {
   panel: number;
   characterName?: string;
+  characterId?: ID;
   category?: "character" | "background" | "prop" | "upload";
   mode: CropMode;
 }): void {
@@ -585,9 +693,9 @@ function doSetCropMode(args: {
     .filter((item) => {
       const asset = doc.assets[(item as { sourceAssetId: ID }).sourceAssetId];
       if (!asset) return false;
-      if (args.characterName) {
-        const character = findCharacter(doc, args.characterName);
-        return Boolean(character && asset.metadata?.characterId === character.id);
+      if (args.characterId ?? args.characterName) {
+        const character = requireCharacter(doc, args);
+        return asset.metadata?.characterId === character.id;
       }
       if (args.category) return asset.category === args.category;
       return asset.category === "character"; // default target: the character shot
@@ -648,7 +756,65 @@ function validatePlanResult(plan: AgentPlan, before: ProjectDocument): Compositi
   const validated = dispatch({ type: "validate-composition", panelIds });
   const after = validated.doc;
   const scopeIssues = plan.targetScope ? validateScopeIntegrity(before, after, plan.targetScope) : [];
-  return [...(validated.issues ?? []), ...scopeIssues];
+  return [...(validated.issues ?? []), ...scopeIssues, ...validateIdentityPostConditions(plan, before, after)];
+}
+
+/**
+ * Post-condition validation (§15): check the DOCUMENT, not the return value.
+ *
+ * "Place Yuri in Panel 2" is only satisfied when panel 2 actually contains an
+ * instance whose characterId is Yuri's. A command that returned success while
+ * placing someone else — the exact production failure — is reported here as a
+ * run failure rather than passing silently.
+ */
+function validateIdentityPostConditions(
+  plan: AgentPlan,
+  before: ProjectDocument,
+  after: ProjectDocument,
+): CompositionIssue[] {
+  const issues: CompositionIssue[] = [];
+  const page = after.pages[plan.targetScope?.pageId ?? ""] ?? null;
+
+  const PLACEMENT_TOOLS = new Set<ToolName>(["place_character", "compose_character", "place_asset"]);
+  for (const step of plan.steps) {
+    if (!PLACEMENT_TOOLS.has(step.tool)) continue;
+    const characterId = step.args.characterId;
+    const panelNumber = step.args.panel;
+    if (typeof characterId !== "string" || typeof panelNumber !== "number") continue;
+    if (step.args.target === "workspace") continue;
+    const panelId = page?.panelIds[panelNumber - 1];
+    if (!panelId) continue;
+    const present = (after.panels[panelId]?.itemIds ?? []).some((itemId) => {
+      const item = after.items[itemId];
+      if (item?.kind !== "asset") return false;
+      const owner = item.characterState?.characterId ?? after.assets[item.sourceAssetId]?.metadata?.characterId;
+      return owner === characterId;
+    });
+    if (!present) {
+      issues.push({
+        code: "identity-mismatch",
+        panelId,
+        message: `${after.characters[characterId]?.name ?? characterId} was requested in panel ${panelNumber} but is not there`,
+        corrected: false,
+      });
+    }
+  }
+
+  /**
+   * No persistent Character may appear that this run was not authorized to
+   * create. This catches creation through any path, not just create_character.
+   */
+  const authorized = new Set(createdCharacterIds);
+  for (const id of Object.keys(after.characters)) {
+    if (before.characters[id] || authorized.has(id)) continue;
+    issues.push({
+      code: "unauthorized-character-creation",
+      panelId: plan.targetScope?.panelId ?? page?.panelIds[0] ?? "",
+      message: `A new Character "${after.characters[id]?.name ?? id}" was created without authorization`,
+      corrected: false,
+    });
+  }
+  return issues;
 }
 
 // ─── Virtual manga stage (§18) ──────────────────────────────────────────────
@@ -700,10 +866,36 @@ function doSetPerspective(args: { panel: number; type: PerspectiveType; horizonY
   });
 }
 
-/** Find the character instance a semantic panel operation refers to. */
-function characterInstanceInPanel(doc: ProjectDocument, panelId: ID, characterName?: string): AssetInstance {
-  const wanted = characterName ? findCharacter(doc, characterName) : null;
-  if (characterName && !wanted) throw new Error(`Character "${characterName}" not found`);
+/** Characters currently present in a panel — the pronoun context of §13. */
+function panelCharacterIds(doc: ProjectDocument, panelId: ID): ID[] {
+  const panel = doc.panels[panelId];
+  if (!panel) return [];
+  return panel.itemIds
+    .map((id) => doc.items[id])
+    .filter((item): item is AssetInstance => item?.kind === "asset")
+    .map((item) => item.characterState?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId)
+    .filter((id): id is ID => Boolean(id));
+}
+
+/**
+ * Find the character instance a semantic panel operation refers to.
+ *
+ * Identity comes from the ID grounding bound to the step. When only a name
+ * survives, `requireCharacter` refuses ambiguity rather than picking the first
+ * plausible character, which is what made "make Yuri shocked" reach Cute Girl.
+ */
+function characterInstanceInPanel(
+  doc: ProjectDocument,
+  panelId: ID,
+  ref: { characterName?: string; characterId?: ID },
+): AssetInstance {
+  const named = Boolean(ref.characterId ?? ref.characterName);
+  const wanted = named
+    ? requireCharacter(doc, ref, {
+        selectedCharacterId: activeGuards.selectedCharacterId,
+        sceneCharacterIds: panelCharacterIds(doc, panelId),
+      })
+    : null;
   const panel = doc.panels[panelId];
   if (!panel) throw new Error("Unknown panel");
   const matches = panel.itemIds
@@ -729,12 +921,13 @@ const PLACEMENT_DEPTH: Record<string, number> = { foreground: 0.15, midground: 0
 function doSetCharacterDepth(args: {
   panel: number;
   characterName?: string;
+  characterId?: ID;
   placement?: "foreground" | "midground" | "background";
   depth?: number;
   groundY?: number;
 }): void {
   const panelId = panelIdByNumber(args.panel);
-  const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
+  const instance = characterInstanceInPanel(currentDoc(), panelId, args);
   const depth = args.placement ? PLACEMENT_DEPTH[args.placement] : args.depth;
   if (depth === undefined) throw new Error("set_character_depth needs a placement or a depth");
   dispatch({
@@ -751,12 +944,13 @@ function doSetCharacterDepth(args: {
 function doAttachBubble(args: {
   panel: number;
   characterName: string;
+  characterId?: ID;
   bubbleType: BubbleType;
   text: string;
 }): void {
   const panelId = panelIdByNumber(args.panel);
   const doc = currentDoc();
-  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const instance = characterInstanceInPanel(doc, panelId, args);
   const characterId = instance.characterState?.characterId ?? doc.assets[instance.sourceAssetId]?.metadata?.characterId;
   const rect = panelPxRect(doc, panelId);
   // Place the balloon above the speaker, clear of the face.
@@ -785,12 +979,13 @@ function doAttachBubble(args: {
 async function doSetCharacterPoseRig(args: {
   panel: number;
   characterName?: string;
+  characterId?: ID;
   basePose?: string;
   adjustments: string[];
 }): Promise<void> {
   const panelId = panelIdByNumber(args.panel);
   const doc = currentDoc();
-  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const instance = characterInstanceInPanel(doc, panelId, args);
   const current = stateFromInstance(doc, instance);
   if (!current) throw new Error("The targeted instance is not a character");
 
@@ -805,9 +1000,9 @@ async function doSetCharacterPoseRig(args: {
   await applyCharacterStateToInstance({ instanceId: instance.id, patch: { poseRig: intent } });
 }
 
-function doSetFocalCharacter(args: { panel: number; characterName: string }): void {
+function doSetFocalCharacter(args: { panel: number; characterName: string; characterId?: ID }): void {
   const panelId = panelIdByNumber(args.panel);
-  const instance = characterInstanceInPanel(currentDoc(), panelId, args.characterName);
+  const instance = characterInstanceInPanel(currentDoc(), panelId, args);
   dispatch({ type: "set-panel-focal-item", panelId, itemId: instance.id });
 }
 
@@ -820,10 +1015,10 @@ function doSetFocalCharacter(args: { panel: number; characterName: string }): vo
  * exists, so "make Yuri shocked" swaps a face rather than redrawing a person.
  * The error names the fallback explicitly rather than silently generating.
  */
-function doSetPuppetExpression(args: { panel: number; characterName?: string; expression: string }): void {
+function doSetPuppetExpression(args: { panel: number; characterName?: string; characterId?: ID; expression: string }): void {
   const panelId = panelIdByNumber(args.panel);
   const doc = currentDoc();
-  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const instance = characterInstanceInPanel(doc, panelId, args);
   if (!isPuppetInstance(doc, instance.id)) {
     throw new Error(
       `${args.characterName ?? "That character"} has no puppet, so the face cannot be changed locally. Use set_character_slot to generate the expression instead.`,
@@ -836,12 +1031,13 @@ function doSetPuppetExpression(args: { panel: number; characterName?: string; ex
 function doSetPuppetJoint(args: {
   panel: number;
   characterName?: string;
+  characterId?: ID;
   joint: PuppetJoint;
   degrees: number;
 }): void {
   const panelId = panelIdByNumber(args.panel);
   const doc = currentDoc();
-  const instance = characterInstanceInPanel(doc, panelId, args.characterName);
+  const instance = characterInstanceInPanel(doc, panelId, args);
   if (!isPuppetInstance(doc, instance.id)) {
     throw new Error(
       `${args.characterName ?? "That character"} has no puppet, so the pose cannot be adjusted locally. Use set_character_pose_rig to generate the pose instead.`,

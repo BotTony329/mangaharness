@@ -9,15 +9,21 @@ import { isAssetReadyForComposition } from "@/assets/renderSource";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
+import { groundingContext, type GroundingReport } from "./grounding";
+
+/** Context budget. Identity is exempt; only panel detail is trimmed to fit. */
+const MAX_CONTEXT_CHARS = 8000;
 
 export interface AgentContextInput {
   doc: ProjectDocument;
   currentPageId: ID | null;
   selection: { itemId?: ID; panelId?: ID; workspaceItemId?: ID };
   scope?: AgentRunScope;
+  /** Deterministic entity grounding, resolved before the planner is called. */
+  grounding?: GroundingReport;
 }
 
-export function buildAgentContext({ doc, currentPageId, selection, scope }: AgentContextInput): string {
+export function buildAgentContext({ doc, currentPageId, selection, scope, grounding }: AgentContextInput): string {
   const runScope = scope ?? resolveAgentScope({ doc, currentPageId, selection, prompt: "" });
   const lines: string[] = [`PROJECT: ${doc.project.name}`];
   lines.push(scopeInstruction(runScope));
@@ -28,9 +34,11 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
     "All new visual generation inherits this style automatically; do not repeat style language in character identity.",
   );
 
-  // ── Characters and their reusable slots ──
+  // ── Characters: a structured inventory, not a free-text summary (§12) ──
+  // Every character carries its stable ID and its available states, because a
+  // planner that cannot see an existing character is a planner that invents one.
   const characters = Object.values(doc.characters);
-  lines.push("", `CHARACTERS (${characters.length}):`);
+  lines.push("", `CHARACTERS (${characters.length}) — these are the ONLY characters that exist:`);
   if (characters.length === 0) lines.push("- none yet");
   for (const character of characters) {
     const assets = character.assetIds.map((id) => doc.assets[id]).filter(isAssetReadyForComposition);
@@ -38,13 +46,21 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
       const state = stateFromAsset(asset!, character.id);
       return asset!.metadata?.characterAssetRole === "canonical" || !state
         ? "canonical-reference"
-        : `pose:${state.pose} expression:${state.expression} outfit:${state.outfit} view:${state.view}`;
+        : `${state.pose}/${state.expression}/${state.outfit}/${state.view}`;
     });
+    lines.push(`- ${character.name}`);
+    lines.push(`  ID: ${character.id}`);
+    if (character.aliases?.length) lines.push(`  aliases: ${character.aliases.join(", ")}`);
+    const identity = character.appearance ?? character.description;
+    if (identity) lines.push(`  identity: ${identity.slice(0, 100)}`);
+    if (character.personalityNotes) lines.push(`  notes: ${character.personalityNotes.slice(0, 80)}`);
     lines.push(
-      `- ${character.name}${character.appearance ?? character.description ? ` — ${(character.appearance ?? character.description)!.slice(0, 100)}` : ""}${character.personalityNotes ? `; ${character.personalityNotes.slice(0, 80)}` : ""}`,
-      `  assets: ${slots.length > 0 ? [...new Set(slots)].join(", ") : "NONE (needs a reference before poses/expressions)"}`,
+      `  available states: ${slots.length > 0 ? [...new Set(slots)].join(", ") : "NONE (needs a reference before poses/expressions)"}`,
     );
   }
+
+  // Everything above this point is identity and is never truncated.
+  const panelSectionStart = lines.length;
 
   // ── Backgrounds and props ──
   for (const category of ["background", "prop"] as const) {
@@ -108,9 +124,20 @@ export function buildAgentContext({ doc, currentPageId, selection, scope }: Agen
   lines.push("", `CURRENT SELECTION: ${describeSelection(doc, currentPageId, selection)}`);
   lines.push(`TARGET SCOPE: ${runScope.label}`);
 
-  // Hard cap so a huge project can't blow the model context.
-  const text = lines.join("\n");
-  return text.length > 6000 ? `${text.slice(0, 6000)}\n…(truncated)` : text;
+  if (grounding) lines.push(...groundingContext(grounding));
+
+  /**
+   * Hard cap so a huge project cannot blow the model context.
+   *
+   * The character inventory is exempt. Truncating it was itself a cause of
+   * invented characters: a planner that cannot see Yuri has no way to know
+   * Yuri exists, and the most natural repair for a missing character is to
+   * create one. Panel detail is trimmed instead; identity never is.
+   */
+  const head = lines.slice(0, panelSectionStart).join("\n");
+  const tail = lines.slice(panelSectionStart).join("\n");
+  const budget = Math.max(0, MAX_CONTEXT_CHARS - head.length);
+  return tail.length > budget ? `${head}\n${tail.slice(0, budget)}\n…(panel detail truncated)` : `${head}\n${tail}`;
 }
 
 function describeSelection(

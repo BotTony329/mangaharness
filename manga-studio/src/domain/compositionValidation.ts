@@ -7,7 +7,11 @@ export type CompositionIssueCode =
   | "character-too-small"
   | "background-missing"
   | "character-obscured"
-  | "scope-integrity";
+  | "scope-integrity"
+  /** A step asked for one character and the document ended up with another. */
+  | "identity-mismatch"
+  /** A persistent Character appeared that the user never asked for. */
+  | "unauthorized-character-creation";
 
 export interface CompositionIssue {
   code: CompositionIssueCode;
