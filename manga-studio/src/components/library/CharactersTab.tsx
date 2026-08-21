@@ -19,6 +19,7 @@ import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
+import { repairAssetTransparency, type RepairProgress } from "@/assets/clientProcessing";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import {
   inspectReferenceImage,
@@ -111,6 +112,7 @@ function CharacterCard({ character }: { character: Character }) {
             </button>
           )}
           <PuppetStatusRow character={character} />
+          <TransparencyRepairRow character={character} />
           <div>
             <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Rendered states</p>
             <div className="flex flex-wrap gap-2">
@@ -542,6 +544,62 @@ function PuppetStatusRow({ character }: { character: Character }) {
       >
         {puppet ? "Recompile" : "Convert to Puppet"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Rebuild every render of this character with the current transparency
+ * pipeline.
+ *
+ * A pipeline fix only reaches images processed after it shipped — the
+ * derivative already in object storage keeps whatever bytes it was written
+ * with. Characters generated before edge decontamination existed therefore
+ * keep their coloured fringe until they are rebuilt from their originals, and
+ * without this there is no way to do that: the existing Retry only appears for
+ * assets that FAILED, and a contaminated asset is "ready".
+ */
+function TransparencyRepairRow({ character }: { character: Character }) {
+  const doc = useEditorStore((s) => s.doc)!;
+  const [progress, setProgress] = useState<RepairProgress | null>(null);
+  const [error, setError] = useState<string>();
+  const ids = Object.values(doc.assets)
+    .filter(
+      (asset) =>
+        asset.status !== "archived" &&
+        (asset.category === "character" || asset.category === "prop") &&
+        (asset.metadata?.characterId === character.id || character.assetIds.includes(asset.id)),
+    )
+    .map((asset) => asset.id);
+  if (ids.length === 0) return null;
+
+  const running = progress !== null && progress.done < progress.total;
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-zinc-500">
+          {running
+            ? `Rebuilding ${progress.done}/${progress.total}…`
+            : progress
+              ? `Rebuilt ${progress.total - progress.failed}/${progress.total}${progress.failed ? ` · ${progress.failed} failed` : ""}`
+              : "Edges look tinted?"}
+        </span>
+        <button
+          className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-violet-600 hover:text-violet-300 disabled:opacity-40"
+          disabled={running}
+          title="Re-runs background removal and edge decontamination on every render of this character. Originals are never modified."
+          onClick={() => {
+            setError(undefined);
+            setProgress({ done: 0, total: ids.length, failed: 0 });
+            void repairAssetTransparency(ids, setProgress).catch((cause) =>
+              setError(cause instanceof Error ? cause.message : "Repair failed"),
+            );
+          }}
+        >
+          {running ? "Fixing…" : `Fix transparency (${ids.length})`}
+        </button>
+      </div>
+      {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
     </div>
   );
 }

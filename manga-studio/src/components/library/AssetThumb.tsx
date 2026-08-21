@@ -28,10 +28,10 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
   const [menuOpen, setMenuOpen] = useState(false);
   const canRemoveBackground = requiresTransparency(asset.category);
   const needsRetry = canRemoveBackground && !assetSatisfiesTransparencyContract(asset);
-  const runRemoval = (strategy: "auto" | "image-edit" | "provider" | "local" = "auto") => {
+  const runRemoval = (options: { preserveOnFailure?: boolean } = {}) => {
     setBusy(true);
     setError(undefined);
-    void removeAssetBackground(asset.id, strategy)
+    void removeAssetBackground(asset.id, { strategy: "auto", ...options })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Background removal failed"))
       .finally(() => setBusy(false));
   };
@@ -97,7 +97,11 @@ export function AssetThumb({ asset, subtitle, onUse, onRename, onRegenerate, onA
           {onUse && <MenuItem label="Use in selected panel" onClick={onUse} />}
           {onRename && <MenuItem label="Rename" onClick={onRename} />}
           {onRegenerate && <MenuItem label="Regenerate and replace" onClick={onRegenerate} />}
-          {canRemoveBackground && <MenuItem label="Remove background" onClick={() => runRemoval()} />}
+          {canRemoveBackground && (
+            // Rebuilding a working asset must not be able to break it, so a
+            // failure here leaves the existing derivative in place.
+            <MenuItem label="Rebuild cutout (fix edges)" onClick={() => runRemoval({ preserveOnFailure: true })} />
+          )}
           {onArchive && <MenuItem label="Archive" onClick={onArchive} />}
           {onRestore && <MenuItem label="Restore" onClick={onRestore} />}
           {onDelete && <MenuItem label="Delete…" danger onClick={onDelete} />}
