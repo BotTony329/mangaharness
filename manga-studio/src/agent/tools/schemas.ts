@@ -482,7 +482,7 @@ export function validateStepScope(tool: ToolName, args: Record<string, unknown>,
 export const TOOL_DOCS = `
 Available tools (call only these, with exactly these argument shapes):
 
-- create_character {name, appearance?, personalityNotes?} — add a NEW character identity. PRIVILEGED: plan this only when the user explicitly asked for a new character ("create a character called Hana", "add a new teacher"). Never plan it because a name could not be found in the inventory — that is a resolution failure, not a creation request, and the runtime will reject it.
+- create_character {name, appearance?, personalityNotes?} — add a NEW character identity. You almost never need this: characters the user introduced are already being created before your steps run (see NEW CHARACTER lines in the context), and whether creation is allowed was decided by deterministic resolution, not by you. Never plan it because a name could not be found in the inventory.
 - generate_character_asset {characterName, characterId, kind: "reference"|"pose"|"expression", pose?, expression?, outfit?, view?, instruction?} — AI-generate a reusable full-state character asset. "reference" creates the canonical identity image.
 - generate_background {description, name?} — AI-generate a reusable background.
 - generate_prop {description, name?} — AI-generate a reusable prop.

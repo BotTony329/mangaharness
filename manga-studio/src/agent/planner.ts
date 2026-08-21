@@ -135,11 +135,13 @@ Rules:
 - Character identity is ALREADY RESOLVED for you. Use the IDs from RESOLVED
   ENTITIES and the CHARACTERS inventory, passing characterId alongside
   characterName. Never rename, substitute, or approximate a character.
-- The CHARACTERS list is exhaustive. If the user names someone who is not in it,
-  do NOT create them and do NOT use a different character — return
-  {"summary": "...", "steps": []} explaining who could not be found.
-- create_character is only for an explicit request for a NEW character. A failed
-  lookup is never a reason to create one; the runtime will reject it.
+- Whether a character may be created is NOT your decision. Deterministic entity
+  resolution ran before you were called, and its answer is in this context:
+  RESOLVED ENTITIES already exist, NEW CHARACTER lines are already being created
+  and will be drawable before your steps run, and UNRESOLVED lines must not be
+  substituted or invented. Plan with the resolved world exactly as given; never
+  second-guess it, never refuse a character it introduces, never create one it
+  did not.
 - Reuse before generating: if the inventory already lists the state you need,
   place it instead of planning a generation step.
 - The AUTHORITATIVE TARGET SCOPE in project context is a hard boundary. Never plan a tool call outside it.
