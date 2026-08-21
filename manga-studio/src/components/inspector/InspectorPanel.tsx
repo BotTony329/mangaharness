@@ -34,6 +34,7 @@ import { PoseEditControls } from "./PoseEditControls";
 import { PuppetControls } from "./PuppetControls";
 import { isPuppetInstance } from "@/domain/puppetOps";
 import { InstanceStageControls } from "./InstanceStageControls";
+import { ToneControls } from "./ToneControls";
 import type { ReorderDirection } from "@/domain/itemOps";
 import type { DomainCommand } from "@/domain/commands";
 import type {
@@ -188,9 +189,18 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
   return (
     <div className="space-y-4 p-3 text-xs">
       <SectionTitle>
-        {item.kind === "asset" ? (asset?.name ?? "Asset") : item.kind === "bubble" ? "Speech bubble" : "Effect"}
+        {item.kind === "asset"
+          ? (asset?.name ?? "Asset")
+          : item.kind === "bubble"
+            ? "Speech bubble"
+            : item.kind === "tone"
+              ? "Tone"
+              : "Effect"}
       </SectionTitle>
 
+      {item.kind === "tone" && doc && <ToneControls item={item} doc={doc} />}
+
+      {item.kind !== "tone" && <>
       <div className="flex border-b" style={{ borderColor: "var(--border-subtle)" }}>
         {(isCharacter ? CHARACTER_TABS : OBJECT_TABS).map((entry) => (
           <button
@@ -414,6 +424,9 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         </>
       )}
 
+      </>}
+
+      {/* Duplicate and Delete are common to every layer kind, tones included. */}
       <div className="flex gap-2 pt-1">
         <button
           className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"

@@ -19,6 +19,7 @@ import { PuppetCapabilityDialog } from "./dialogs/PuppetCapabilityDialog";
 import { PuppetCompilerDialog } from "./dialogs/PuppetCompilerDialog";
 import { InteractionDialog } from "./dialogs/InteractionDialog";
 import { AssetDetailEditor } from "./dialogs/AssetDetailEditor";
+import { ToneMaskDialog } from "./dialogs/ToneMaskDialog";
 import { AssetLibraryPanel } from "./library/AssetLibraryPanel";
 import { NewProjectDialog } from "./library/ProjectsPanel";
 import { PagesBar } from "./PagesBar";
@@ -176,6 +177,7 @@ export function Studio() {
       <PuppetCompilerDialog />
       <InteractionDialog />
       <AssetDetailEditor />
+      <ToneMaskDialog />
     </div>
   );
 }

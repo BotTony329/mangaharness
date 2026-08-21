@@ -8,6 +8,7 @@
  */
 
 import type { EffectParams } from "./effects";
+import type { ToneMask, ToneRef } from "./tones";
 import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
 import type { MangaPuppet, PuppetInstanceState } from "@/puppet/model";
 
@@ -29,8 +30,8 @@ export interface Point {
 }
 
 /** Open union so future categories don't require a schema rewrite. */
-export type AssetCategory = "character" | "background" | "prop" | "upload";
-export type AssetType = "character-visual" | "background" | "prop" | "reference" | "effect" | "upload";
+export type AssetCategory = "character" | "background" | "prop" | "tone" | "upload";
+export type AssetType = "character-visual" | "background" | "prop" | "tone" | "reference" | "effect" | "upload";
 export type AssetStatus = "ready" | "processing" | "failed" | "archived";
 
 // ─── Source assets (the library) ────────────────────────────────────────────
@@ -84,6 +85,14 @@ export interface AssetGenerationMetadata {
   stylePositivePrompt?: string;
   styleNegativePrompt?: string;
   styleReferenceAssetId?: ID;
+  /**
+   * Tone assets: what kind of overlay it is, and whether it repeats without a
+   * seam. `tileable` decides whether the Scale dial changes pattern size or
+   * just stretches one copy, so it travels with the asset rather than being
+   * re-guessed at every placement.
+   */
+  toneType?: "texture" | "atmosphere" | "decorative" | "pattern";
+  tileable?: boolean;
   generatedAt?: ISODate;
 }
 
@@ -595,7 +604,31 @@ export interface EffectItem extends PanelItemBase {
   languageAssetId?: ID;
 }
 
-export type PanelItem = AssetInstance | SpeechBubbleItem | EffectItem;
+/**
+ * A screentone laid over the panel — shading, mood, texture, pattern.
+ *
+ * A tone is a LAYER, never a change to what is underneath. It sits in the same
+ * item stack as characters and bubbles, so it reorders, hides, duplicates and
+ * undoes like everything else, and deleting it leaves the artwork untouched
+ * because the artwork was never modified in the first place.
+ */
+export interface ToneItem extends PanelItemBase {
+  kind: "tone";
+  tone: ToneRef;
+  /**
+   * Where the tone is allowed to appear, in normalized panel space. Absent
+   * means the whole item area — the common "atmosphere over the panel" case.
+   */
+  mask?: ToneMask;
+  /** Show the tone everywhere EXCEPT the mask. */
+  invert?: boolean;
+  /** Confine the tone to the panel's shape. On by default; nothing bleeds out. */
+  clipToPanel?: boolean;
+  /** Image tones only: pattern size when tiled, or fit scale when not. */
+  scale?: number;
+}
+
+export type PanelItem = AssetInstance | SpeechBubbleItem | EffectItem | ToneItem;
 
 // ─── Loose workspace objects ────────────────────────────────────────────────
 

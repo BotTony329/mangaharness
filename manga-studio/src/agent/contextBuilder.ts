@@ -7,6 +7,7 @@
 import { stateFromAsset, stateFromInstance } from "@/characters/state";
 import { isAssetReadyForComposition } from "@/assets/renderSource";
 import type { ID, ProjectDocument } from "@/domain/types";
+import { describeTone } from "@/domain/toneDescribe";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
 import { describeIntent, type SceneIntent } from "./sceneIntent";
@@ -154,6 +155,8 @@ export function buildAgentContext({ doc, currentPageId, selection, scope, ground
           lines.push(`  - ${asset?.category ?? "asset"}: ${asset?.name ?? "?"} (crop:${item.cropMode})${selected}`);
         } else if (item.kind === "bubble") {
           lines.push(`  - ${item.bubbleType} bubble: "${item.text.slice(0, 60)}"${selected}`);
+        } else if (item.kind === "tone") {
+          lines.push(`  - tone: ${describeTone(doc, item)}${item.mask ? " (masked)" : " (whole panel)"}${selected}`);
         } else {
           lines.push(`  - effect: ${item.effectKind}${selected}`);
         }

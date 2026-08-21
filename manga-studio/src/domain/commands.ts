@@ -6,6 +6,8 @@
 import { addAsset, addCharacter, addGenerationRecord, setAssetProcessedImage, setCharacterReference, type NewAssetInput } from "./libraryOps";
 import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAssetReferences, setAssetArchived, type DeleteAssetMode, type DeleteCharacterMode } from "./assetLifecycle";
 import { addBubble, addEffect, duplicateItem, moveItemToIndex, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
+import { addTone, updateTone, type TonePatch } from "./toneOps";
+import type { ProceduralToneParams, ToneMask } from "./tones";
 import { addPage, removePage, setPageLayout } from "./pageOps";
 import { renameProject } from "./projectOps";
 import { addRelationship, removeRelationship } from "./relationships";
@@ -136,6 +138,9 @@ export type DomainCommand =
       patch: { text?: string; bubbleType?: BubbleType; fontSize?: number; tail?: Point; style?: Partial<BubbleStyle> };
     }
   | { type: "add-effect"; panelId: ID; effectKind: EffectKind }
+  // ── Tones (non-destructive shading layers) ──
+  | { type: "add-tone"; panelId: ID; presetId?: string; params?: Partial<ProceduralToneParams>; assetId?: ID; tileable?: boolean; mask?: ToneMask }
+  | { type: "update-tone"; itemId: ID; patch: TonePatch }
   // ── Manga Language Library ──
   | { type: "add-language-asset"; input: NewLanguageAssetInput }
   | { type: "update-language-asset"; languageAssetId: ID; patch: { name?: string; tags?: string[]; category?: MangaLanguageCategory } }
@@ -321,6 +326,12 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
       const result = addEffect(doc, command.panelId, command.effectKind);
       return { doc: result.doc, createdId: result.itemId };
     }
+    case "add-tone": {
+      const result = addTone(doc, command);
+      return { doc: result.doc, createdId: result.itemId };
+    }
+    case "update-tone":
+      return { doc: updateTone(doc, command.itemId, command.patch) };
     case "add-language-asset": {
       const result = addLanguageAsset(doc, command.input);
       return { doc: result.doc, createdId: result.languageAssetId };

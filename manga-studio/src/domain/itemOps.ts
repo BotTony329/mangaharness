@@ -415,7 +415,7 @@ function requireItem(doc: ProjectDocument, itemId: ID): PanelItem {
   return item;
 }
 
-function insertItem(doc: ProjectDocument, item: PanelItem): void {
+export function insertItem(doc: ProjectDocument, item: PanelItem): void {
   doc.items[item.id] = item;
   const panel = doc.panels[item.panelId];
   const index = insertIndexForBand(doc, panel.itemIds, itemBand(doc, item));

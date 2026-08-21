@@ -12,7 +12,9 @@ export type GeneratedAssetType =
   | "background"
   | "prop"
   /** A manga-language visual: emotion mark, decoration, custom bubble shape. */
-  | "manga-effect";
+  | "manga-effect"
+  /** A screentone overlay: texture, atmosphere, decorative or repeating pattern. */
+  | "tone";
 
 export type GenerationTraceDetails = Record<string, string | number | boolean | undefined>;
 export type GenerationTrace = (stage: string, details?: GenerationTraceDetails) => void;

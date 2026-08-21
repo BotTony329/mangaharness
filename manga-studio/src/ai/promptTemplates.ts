@@ -37,6 +37,10 @@ export interface AssetPromptInput {
   aspect?: "portrait" | "landscape" | "square";
   /** Manga Language Library category, for manga-effect generation. */
   languageCategory?: string;
+  /** What kind of screentone, for tone generation. */
+  toneType?: "texture" | "atmosphere" | "decorative" | "pattern";
+  /** Tone must repeat edge to edge without a seam. */
+  tileable?: boolean;
   /** Provider-neutral project art direction. */
   style?: Pick<StyleProfile, "name" | "positivePrompt" | "visualProperties">;
 }
@@ -91,6 +95,9 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
         `Sequential-art prop illustration: ${input.description ?? "an object"}.`,
         isolationInstruction("object", foregroundAssetPolicy({ supportsNativeTransparency: input.supportsNativeTransparency })),
       );
+      break;
+    case "tone":
+      lines.push(toneDescription(input), toneIsolation(input));
       break;
   }
   lines.push(...(input.cameraContext ?? []));
@@ -167,8 +174,51 @@ function characterIsolationInstruction(input: AssetPromptInput | Omit<AssetPromp
 
 export function defaultAspect(assetType: GeneratedAssetType): "portrait" | "landscape" | "square" {
   if (assetType === "background") return "landscape";
-  if (assetType === "prop" || assetType === "manga-effect") return "square";
+  // A tone is laid over a panel and often tiled, so it is generated square —
+  // a portrait tile would repeat with visibly rectangular seams.
+  if (assetType === "prop" || assetType === "manga-effect" || assetType === "tone") return "square";
   return "portrait";
+}
+
+/**
+ * Screentone generation (§10).
+ *
+ * A tone is an OVERLAY, not a picture: it is asked for as manga screentone
+ * vocabulary — the terms an image model has actually seen attached to this kind
+ * of artwork — and explicitly told to contain no scene, no character and no
+ * frame, because anything representational stops working the moment it is laid
+ * over someone's face.
+ */
+function toneDescription(input: AssetPromptInput): string {
+  const type = input.toneType ?? "texture";
+  const subject =
+    type === "atmosphere"
+      ? "Manga screentone atmosphere overlay"
+      : type === "decorative"
+        ? "Manga decorative screentone overlay"
+        : type === "pattern"
+          ? "Seamless manga screentone pattern tile"
+          : "Manga screentone texture overlay";
+  const seamless = input.tileable
+    ? "Seamlessly tileable: the pattern must repeat edge to edge with no visible seam, and no element may be cut off at the border."
+    : "";
+  return [
+    `${subject}: ${input.description ?? "a screentone"}.`,
+    "Flat graphic overlay artwork only. No scene, no characters, no objects, no perspective, no horizon, no frame, no border, no text.",
+    seamless,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * A tone rides the SAME white-background policy as every other foreground
+ * asset, so the existing transparency extraction turns it into a usable
+ * overlay. There is deliberately no tone-specific extraction pipeline.
+ */
+function toneIsolation(input: AssetPromptInput): string {
+  const policy = foregroundAssetPolicy({ supportsNativeTransparency: input.supportsNativeTransparency });
+  return backgroundClause(policy, "pattern");
 }
 
 /**

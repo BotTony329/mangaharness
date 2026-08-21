@@ -43,7 +43,16 @@ const TYPE_LABEL: Record<GeneratorRequest["assetType"], string> = {
   background: "Background",
   prop: "Prop",
   "manga-effect": "Manga effect",
+  tone: "Tone",
 };
+
+/** What kind of screentone is being asked for (§9). */
+const TONE_TYPES: { id: "texture" | "atmosphere" | "decorative" | "pattern"; label: string; hint: string }[] = [
+  { id: "texture", label: "Texture", hint: "Rain, grain, fabric, rough ink" },
+  { id: "atmosphere", label: "Atmosphere", hint: "Gloom, dread, warmth, memory" },
+  { id: "decorative", label: "Decorative", hint: "Flowers, sparkles, romance" },
+  { id: "pattern", label: "Pattern", hint: "A motif that repeats without a seam" },
+];
 
 /**
  * Search tags for a generated effect, from what the creator actually typed.
@@ -71,6 +80,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const doc = useEditorStore((s) => s.doc);
   const [provider, setProvider] = useState<ProviderInfo | null>(null);
   const [description, setDescription] = useState(request.prefill?.description ?? "");
+  const [toneType, setToneType] = useState<"texture" | "atmosphere" | "decorative" | "pattern">("texture");
+  // Most useful tones repeat; a one-off decorative overlay is the exception.
+  const [tileable, setTileable] = useState(true);
   const [pose, setPose] = useState(request.prefill?.pose ?? "");
   const [expression, setExpression] = useState(request.prefill?.expression ?? "");
   const [phase, setPhase] = useState<"idle" | "generating" | "done">("idle");
@@ -100,6 +112,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const style = doc ? getStyleGenerationContext(doc) : undefined;
   const isCharacterType = request.assetType.startsWith("character");
   const isLanguageType = request.assetType === "manga-effect";
+  const isToneType = request.assetType === "tone";
   const languageCategory: MangaLanguageCategory = request.languageCategory ?? "decorations";
   const canUseReference = Boolean(provider?.capabilities?.referenceImage && referenceAsset);
 
@@ -119,10 +132,14 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         supportsNativeTransparency: Boolean(provider?.capabilities?.supportsTransparentBackground),
         monochrome: isMonochromeStyle(style?.profile),
         languageCategory,
+        toneType,
+        tileable,
       }),
     [
       request.assetType,
       languageCategory,
+      toneType,
+      tileable,
       description,
       sceneReferenceId,
       referenceUse,
@@ -138,7 +155,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   // Whether this result may become a library asset at all. Backgrounds always
   // pass; characters and props must carry a validated transparent derivative.
   const contract = validateCharacterTransparency({
-    category: isCharacterType ? "character" : isLanguageType ? "prop" : (request.assetType as AssetCategory),
+    category: isCharacterType ? "character" : isLanguageType || isToneType ? "prop" : (request.assetType as AssetCategory),
     processingStatus: result?.processingStatus,
     hasAlpha: result?.hasAlpha,
     processedImageUrl: result?.processedImageUrl,
@@ -251,6 +268,8 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         outfit: DEFAULT_CHARACTER_STATE.outfit,
         view: DEFAULT_CHARACTER_STATE.view,
         characterAssetRole: request.assetType === "character" ? "canonical" : "state",
+        toneType: isToneType ? toneType : undefined,
+        tileable: isToneType ? tileable : undefined,
         canonicalReferenceAssetId: request.assetType === "character" ? undefined : referenceId,
         referenceAssetIds: result.referenceUsed
           ? [isCharacterType ? referenceAsset?.id : undefined, style?.referenceAsset?.id].filter(
@@ -346,7 +365,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               onChange={setSceneReferenceId}
               use={referenceUse}
               onUseChange={setReferenceUse}
-              category={request.assetType === "background" ? "background" : "prop"}
+              category={request.assetType === "background" ? "background" : request.assetType === "tone" ? "tone" : "prop"}
               supported={Boolean(provider?.capabilities?.referenceImage)}
             />}
 
@@ -376,6 +395,39 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
               </div>
             )}
 
+            {isToneType && (
+              <div className="mb-3">
+                <p className="mb-1 text-xs text-zinc-400">Type</p>
+                <div className="grid grid-cols-2 gap-1">
+                  {TONE_TYPES.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      title={option.hint}
+                      className={`rounded-md border px-2 py-1.5 text-left text-[11px] ${
+                        toneType === option.id
+                          ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                          : "border-[var(--border-subtle)] text-zinc-400 hover:border-zinc-600"
+                      }`}
+                      onClick={() => setToneType(option.id)}
+                    >
+                      <span className="block">{option.label}</span>
+                      <span className="block text-[10px] text-zinc-500">{option.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-[11px] text-zinc-400">
+                  <input type="checkbox" checked={tileable} onChange={(event) => setTileable(event.target.checked)} />
+                  Repeats without a seam
+                </label>
+                <p className="mt-1 text-[10px] leading-4 text-zinc-500">
+                  {tileable
+                    ? "Scale will change the pattern size and the tone will repeat across the panel."
+                    : "The tone will be fitted to the area it covers rather than repeated."}
+                </p>
+              </div>
+            )}
+
             <label className="mb-1 block text-xs text-zinc-400">
               {isCharacterType ? "Extra instruction (optional)" : "Description"}
             </label>
@@ -390,7 +442,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                     ? "Japanese school bag, isolated object"
                     : isLanguageType
                       ? "extreme shocked manga symbol, black-and-white, rough ink style"
-                      : "Running toward camera while carrying a school bag"
+                      : isToneType
+                        ? "dark psychological manga hatching"
+                        : "Running toward camera while carrying a school bag"
               }
             />
 

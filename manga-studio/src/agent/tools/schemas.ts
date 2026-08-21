@@ -161,6 +161,34 @@ export const toolSchemas = {
     intensity: z.number().min(0).max(1).optional(),
   }),
 
+  /**
+   * Lay a screentone over a panel.
+   *
+   * The Agent chooses tone the way a creator does — by MOOD ("gloomy",
+   * "romantic") or by naming a pattern — and gets the same non-destructive
+   * layer the Tones shelf produces. It cannot bake tone into artwork, because
+   * there is no command that does that.
+   */
+  apply_tone: z.object({
+    panel: panelIndex,
+    /** A built-in pattern, e.g. "dot-30", "gloom", "cross-hatch". */
+    presetId: z.string().max(60).optional(),
+    /** A generated or uploaded tone already in the library. */
+    toneAssetName: z.string().max(80).optional(),
+    toneAssetId: z.string().max(64).optional(),
+    /** Mood words, when no specific tone was named. */
+    mood: z.string().max(120).optional(),
+    opacity: z.number().min(0.05).max(1).optional(),
+    /**
+     * Confine the tone to one character rather than the whole panel — "add
+     * screentone to her shirt". Resolved to that character's placed instance;
+     * when it cannot be resolved safely the tone covers the panel instead of
+     * guessing at a region.
+     */
+    maskToCharacterName: z.string().max(80).optional(),
+    maskToCharacterId: characterId,
+  }),
+
   // ── Virtual manga stage: the director's semantic vocabulary (§18) ──
   set_camera: z.object({
     panel: panelIndex,
@@ -368,6 +396,7 @@ const PANEL_TOOLS = new Set<ToolName>([
   "set_crop_mode",
   "add_speech_bubble",
   "add_effect",
+  "apply_tone",
   "remove_items",
   "set_camera",
   "set_perspective",

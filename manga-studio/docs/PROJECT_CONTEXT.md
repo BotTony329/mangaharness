@@ -171,6 +171,73 @@ subject, which is who the pronoun means.
 - A character already obscured BEFORE the run is a warning, not a fatal — the
   Agent is not blamed for a pile-up it did not create.
 
+## TONE SYSTEM
+
+**TONE IS A NON-DESTRUCTIVE LAYER.** A tone is never baked into a Character,
+Scene or Object. Hiding it returns the artwork exactly as it was, because the
+artwork was never modified — the tone is a separate item in the panel's stack.
+`domain/toneOps` touches `doc.items` and nothing else; if it ever needs to write
+to `doc.assets`, that guarantee has been broken upstream.
+
+### Tone is a reusable asset, from three sources
+
+| Source | What it is | Where it lives |
+| --- | --- | --- |
+| procedural | a PATTERN — density, frequency, angle | built-in presets; parameters stored on the layer |
+| generated | a texture or atmosphere no formula describes | an ordinary `tone` library asset |
+| uploaded | the creator's own screentone or sticker | an ordinary `tone` library asset |
+
+All three appear on one shelf, because a creator looking for gloom does not care
+which produced it.
+
+### Procedural tone preserves parameters
+
+A screentone is a pattern, not a picture. The document stores "26 repeats per
+100px at 45°, 30% coverage" and `render/tonePainter` draws it at OUTPUT
+resolution, so the dots stay round and separate at any export scale. Storing a
+bitmap instead produces the two classic failures — grey mush where the dots
+were, and moiré where the output grid beats against the dot grid. Verified: at
+2x export the edge count roughly triples rather than doubling, which only
+happens when the pattern is redrawn rather than upscaled.
+
+**Density is coverage.** "Dot 30%" draws dots sized so thirty percent of the
+area is ink; the preset names are arithmetic, not labels. Ink is BLACK — a grey
+wash at 30% opacity prints as mud and cannot be halftoned later.
+
+### Tone participates in normal layer ordering
+
+Tones sit above the artwork and below the lettering (band 3, with effects), so a
+tone shades the scene without greying out the dialogue. They reorder, hide,
+lock, duplicate, delete and undo through the same commands as every other item.
+
+### Masks reuse the existing selection infrastructure — no separate pipeline
+
+`components/dialogs/SelectionPainter` is the ONE selection surface, shared by
+local generative editing and tone masking. A tone mask stores normalized (0..1)
+SHAPES rather than a rasterized bitmap, for the same reason procedural tones
+store parameters: a stored bitmap can only ever be resampled, and normalized
+shapes survive the panel being resized and the page exported at 2x.
+
+Masked tones composite through an offscreen buffer at device resolution. A plain
+`clip()` cannot express "everywhere EXCEPT the mask" — inverting a path with the
+even-odd rule turns overlapping brush strokes into holes — so both directions
+use the one approach that is correct for both.
+
+### Consequences that are easy to get wrong
+
+- **The panel polygon clip is structural.** Items already render inside the
+  panel's clip path, so nothing can spill out, on screen or in the export.
+  "Clip to panel" therefore means the tone FILLS and follows the panel; the box
+  is grown to the panel's diagonal so rotation still covers every corner. Sizing
+  it exactly to the panel forces `rotation: 0` and leaves a dead slider.
+- **No dial is offered that cannot be honoured.** Image tones get scale,
+  rotation and repeat; procedural tones get density, frequency and angle.
+- **Uploads are never destructively processed.** Existing alpha is preserved; an
+  opaque tone is OFFERED the existing transparency repair, in the creator's
+  words, rather than having its background stripped automatically.
+- **The Agent uses the same commands as the human UI.** `apply_tone` dispatches
+  `add-tone`; there is no command that bakes tone into artwork for it to reach.
+
 ## GROUNDING IS NOT A CREATION GATE
 
 **A missing asset is a REQUIREMENT, not a failure. The Agent's job is to route

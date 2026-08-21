@@ -12,6 +12,7 @@ import { useUiStore } from "@/editor/uiStore";
 import { AssetThumb } from "./AssetThumb";
 import { CharactersTab } from "./CharactersTab";
 import { MangaFxTab } from "./MangaFxTab";
+import { TonesTab } from "./TonesTab";
 import { ProjectsPanel } from "./ProjectsPanel";
 import { uploadImageFile } from "./uploadAsset";
 import { AssetDeleteDialog } from "./LifecycleDialogs";
@@ -25,17 +26,18 @@ import { AssetDeleteDialog } from "./LifecycleDialogs";
  * sees is what the thing IS; underneath, Scenes map to the background asset
  * category (kept whole) and Objects to prop (extracted).
  */
-type LibraryTab = "characters" | "scenes" | "objects" | "mangafx" | "uploads";
+type LibraryTab = "characters" | "scenes" | "objects" | "mangafx" | "tones" | "uploads";
 
 const TABS: { id: LibraryTab; label: string }[] = [
   { id: "characters", label: "Characters" },
   { id: "scenes", label: "Scenes" },
   { id: "objects", label: "Objects" },
   { id: "mangafx", label: "Manga FX" },
+  { id: "tones", label: "Tones" },
   { id: "uploads", label: "Uploads" },
 ];
 
-const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters" | "mangafx">, AssetCategory> = {
+const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters" | "mangafx" | "tones">, AssetCategory> = {
   scenes: "background",
   objects: "prop",
   uploads: "upload",
@@ -82,6 +84,8 @@ export function AssetLibraryPanel() {
           <CharactersTab />
         ) : tab === "mangafx" ? (
           <MangaFxTab />
+        ) : tab === "tones" ? (
+          <TonesTab />
         ) : (
           <CategoryGrid category={TAB_CATEGORY[tab]} />
         )}

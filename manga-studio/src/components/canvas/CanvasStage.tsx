@@ -20,6 +20,7 @@ import type { AssetInstance, ID, Page, Point, ProjectDocument } from "@/domain/t
 import { useEditorStore } from "@/editor/store";
 import { SOCKET_DRAG_TYPE, decodeSocketDrag, resolveSocketAt } from "@/characters/sockets";
 import { LANGUAGE_DRAG_TYPE } from "@/language/library";
+import { applyToneToPanel, parseToneDragPayload, TONE_DRAG_TYPE } from "@/tones/apply";
 import { acceptableSockets, patchForSocketDrop, propsAfterDrop } from "@/characters/stateResolver";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { useUiStore } from "@/editor/uiStore";
@@ -472,6 +473,20 @@ export function CanvasStage() {
         }
         useEditorStore.getState().dispatch({ type: "set-puppet-expression", instanceId: host.id, expressionId });
         select({ itemId: host.id, panelId: host.panelId });
+        return;
+      }
+
+      /**
+       * A tone dropped on a panel covers that panel. There is no "where in the
+       * panel" question to answer — a screentone is atmosphere over the whole
+       * shot until the creator deliberately masks it down to a shirt.
+       */
+      const tonePayload = e.dataTransfer.getData(TONE_DRAG_TYPE);
+      if (tonePayload) {
+        const choice = parseToneDragPayload(tonePayload);
+        if (!choice || !doc || !page) return;
+        const panel = panelAtWorkspacePoint(pointerToWorkspace(e.clientX, e.clientY));
+        if (panel) applyToneToPanel(panel, choice);
         return;
       }
 

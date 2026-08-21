@@ -70,5 +70,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 function parseCategory(value: FormDataEntryValue | null): AssetCategory {
-  return value === "character" || value === "background" || value === "prop" ? value : "upload";
+  /**
+   * Tone is deliberately NOT in `requiresTransparency`: a screentone the
+   * creator uploads may already be a transparent PNG, and running background
+   * removal over an arbitrary pattern would eat the pattern. Existing alpha is
+   * preserved; an opaque one is offered the same repair workflow the character
+   * shelf uses, on request rather than automatically (§12).
+   */
+  return value === "character" || value === "background" || value === "prop" || value === "tone" ? value : "upload";
 }

@@ -47,6 +47,9 @@ export {
   Upload as UploadIcon,
   Search as SearchIcon,
   ArrowRight as ArrowRightIcon,
+  Grid2x2 as ToneIcon,
+  Brush as MaskIcon,
+  SquareDashed as SelectRegionIcon,
 } from "lucide-react";
 
 /** Toolbar and inline icon size. 16px reads cleanly on a 32px control. */

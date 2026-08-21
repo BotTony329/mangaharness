@@ -32,6 +32,9 @@ export function panelPxRect(doc: ProjectDocument, panelId: ID): Rect {
 export function itemBand(doc: ProjectDocument, item: PanelItem): number {
   if (item.kind === "bubble") return 4;
   if (item.kind === "effect") return 3;
+  // Tone shades the artwork, so it lands above characters and below the
+  // lettering — putting it over the bubbles would grey out the dialogue.
+  if (item.kind === "tone") return 3;
   const category = doc.assets[item.sourceAssetId]?.category;
   if (category === "background") return 0;
   if (category === "character") return 2;

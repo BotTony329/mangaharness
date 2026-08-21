@@ -11,7 +11,7 @@ import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
 import type { PuppetJoint } from "@/puppet/model";
 
 export interface GeneratorRequest {
-  assetType: "character" | "character-pose" | "character-expression" | "background" | "prop" | "manga-effect";
+  assetType: "character" | "character-pose" | "character-expression" | "background" | "prop" | "tone" | "manga-effect";
   characterId?: ID;
   /**
    * Manga Language Library category for a "manga-effect" generation. Accepting
@@ -55,6 +55,8 @@ export interface PuppetFaceHover {
 
 interface UiState {
   generator: GeneratorRequest | null;
+  /** Tone layer whose mask is open for editing, if any. */
+  toneMaskItemId: ID | null;
   /** Panel currently in shape-edit mode (double-click a panel to enter). */
   shapeEditPanelId: ID | null;
   /**
@@ -101,6 +103,8 @@ interface UiState {
   advancedMode: boolean;
   openGenerator(request: GeneratorRequest): void;
   closeGenerator(): void;
+  openToneMask(itemId: ID): void;
+  closeToneMask(): void;
   setShapeEditPanel(panelId: ID | null): void;
   beginPoseEdit(instanceId: ID, rig: PoseRigState): void;
   setPoseDraft(rig: PoseRigState): void;
@@ -127,6 +131,7 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   generator: null,
+  toneMaskItemId: null,
   shapeEditPanelId: null,
   poseEditInstanceId: null,
   poseDraft: null,
@@ -144,6 +149,8 @@ export const useUiStore = create<UiState>((set) => ({
   advancedMode: false,
   openGenerator: (request) => set({ generator: request }),
   closeGenerator: () => set({ generator: null }),
+  openToneMask: (itemId) => set({ toneMaskItemId: itemId }),
+  closeToneMask: () => set({ toneMaskItemId: null }),
   setShapeEditPanel: (panelId) => set({ shapeEditPanelId: panelId }),
   beginPoseEdit: (instanceId, rig) => set({ poseEditInstanceId: instanceId, poseDraft: rig }),
   setPoseDraft: (rig) => set({ poseDraft: rig }),

@@ -27,7 +27,9 @@
 import { resolvedBubbleStyle } from "@/domain/bubbleStyles";
 import { assetRenderUrl } from "@/assets/renderSource";
 import { characterIdOfInstance } from "@/characters/identity";
-import type { AssetInstance, ID, PanelItem, Point, ProjectDocument, SpeechBubbleItem } from "@/domain/types";
+import type { AssetInstance, ID, PanelItem, Point, ProjectDocument, SpeechBubbleItem, ToneItem } from "@/domain/types";
+import { toneLabel } from "@/domain/toneDescribe";
+import type { ToneMaskShape } from "@/domain/tones";
 import { resolvePartTransforms, resolveVisibleParts } from "@/puppet/transforms";
 
 /**
@@ -175,7 +177,31 @@ export function hitTestItem(
        * cycling, locking and the Layers panel exist.
        */
       return { hit: true, precision: "bounds" };
+    case "tone":
+      /**
+       * A masked tone is only clickable where it is actually drawn, so a tone
+       * on a shirt does not steal every click in the panel. An unmasked one
+       * covers its whole area, exactly like a full-panel effect.
+       */
+      if (!item.mask || item.mask.shapes.length === 0) return { hit: true, precision: "bounds" };
+      return toneMaskContains(item, local) ? { hit: true, precision: "alpha" } : MISS;
   }
+}
+
+/** Is this item-local point inside the tone's mask? */
+function toneMaskContains(item: ToneItem, local: Point): boolean {
+  const u = local.x / item.width;
+  const v = local.y / item.height;
+  const inside = (item.mask?.shapes ?? []).some((shape: ToneMaskShape) => {
+    if (shape.kind === "rect") {
+      return u >= shape.x && u <= shape.x + shape.width && v >= shape.y && v <= shape.y + shape.height;
+    }
+    for (let i = 0; i + 1 < shape.points.length; i += 2) {
+      if (Math.hypot(u - shape.points[i], v - shape.points[i + 1]) <= shape.radius) return true;
+    }
+    return false;
+  });
+  return item.invert ? !inside : inside;
 }
 
 function hitTestAsset(
@@ -280,6 +306,7 @@ function rotatePoint(point: Point, degrees: number): Point {
 export function itemKind(doc: ProjectDocument, item: PanelItem): string {
   if (item.kind === "bubble") return item.bubbleType === "sfx" ? "SFX" : "Speech Bubble";
   if (item.kind === "effect") return "Effect";
+  if (item.kind === "tone") return "Tone";
   if (item.puppet) return "Character (Puppet)";
   const asset = doc.assets[item.sourceAssetId];
   const characterId = characterIdOfInstance(doc, item);
@@ -306,6 +333,7 @@ export function itemLabel(doc: ProjectDocument, item: PanelItem): string {
     return text.length > 0 ? `“${truncate(text, 18)}”` : "Empty bubble";
   }
   if (item.kind === "effect") return effectLabel(item.effectKind);
+  if (item.kind === "tone") return toneLabel(doc, item);
 
   const asset = doc.assets[item.sourceAssetId];
   const characterId = characterIdOfInstance(doc, item);

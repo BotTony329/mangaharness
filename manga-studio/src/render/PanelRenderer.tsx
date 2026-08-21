@@ -8,6 +8,7 @@ import { AssetNode } from "./AssetNode";
 import { PuppetNode } from "./PuppetNode";
 import { BubbleNode } from "./BubbleNode";
 import { EffectNode } from "./EffectNode";
+import { ToneNode } from "./ToneNode";
 
 export interface PanelInteraction {
   selectedItemId?: ID;
@@ -149,6 +150,40 @@ function renderItem(
           onTailDragEnd={(x, y) => interaction.onTailMove?.(item.id, x, y)}
         />
       );
+    case "tone": {
+      /**
+       * "Clip to panel" means the tone COVERS the panel and follows it: resize
+       * the panel and the atmosphere still fills it. Turned off, the tone keeps
+       * its own box and can be moved and scaled like a sticker — and is still
+       * clipped by the panel polygon above, so it can never spill out.
+       */
+      const bounds = panelBoundsPx(doc, doc.panels[panelId]);
+      /**
+       * Filling the panel must not disable rotation.
+       *
+       * A box sized exactly to the panel reveals bare corners the moment it
+       * turns, so the naive fix is to pin rotation at zero — which leaves the
+       * creator a Rotation slider that does nothing. Instead the box is grown
+       * to the panel's DIAGONAL: it still covers the panel at every angle, and
+       * the panel polygon clip above trims the overhang.
+       */
+      const reach = Math.hypot(bounds.width, bounds.height);
+      const framed =
+        item.clipToPanel !== false
+          ? { ...item, cx: bounds.width / 2, cy: bounds.height / 2, width: reach, height: reach }
+          : item;
+      return (
+        <ToneNode
+          key={item.id}
+          item={framed}
+          imageUrl={item.tone.source === "asset" ? assetRenderUrl(doc.assets[item.tone.assetId]) : undefined}
+          interactive={interactive}
+          selected={interaction.selectedItemId === item.id}
+          onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
+          onDragEnd={(cx, cy) => interaction.onItemDragEnd?.(item.id, cx, cy)}
+        />
+      );
+    }
     case "effect":
       return (
         <EffectNode

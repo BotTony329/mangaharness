@@ -898,3 +898,38 @@ ordinary library character afterwards.
 An unmatched capitalized word is only a character when the sentence frames it as
 one, and quoted text is dialogue, never a reference. Without that, a fresh
 project would turn prose into characters.
+
+## D73 — Tone is a layer, and a pattern is not a picture
+
+Two decisions carry the tone system, and both are about refusing to flatten
+something that must stay editable.
+
+**A tone never touches the artwork.** It is a `ToneItem` in the panel's item
+stack, so it hides, reorders, duplicates, deletes and undoes like everything
+else, and `domain/tones.test.ts` asserts the artwork's bytes are identical
+before and after adding, editing, masking and deleting one. Baking tone into a
+character would also destroy that character for every other panel using it.
+
+**A procedural tone stores parameters, not pixels.** "Dot 30%" is 26 repeats per
+100px at 45° with 30% coverage, drawn by `render/tonePainter` at output
+resolution. A stored bitmap can only be resampled, and resampling a dot screen
+gives grey mush plus moiré — the exact failure screentone systems exist to
+avoid. The preset names are arithmetic: coverage is πr²/s², so a swatch measured
+in the browser reads 30.6% ink for Dot 30%. At 2x export the edge count triples
+rather than doubling, which only happens when the pattern is redrawn.
+
+Generated and uploaded tones ARE images — a rain texture is not describable as
+density and angle — so they keep a transform-and-tile path, and the inspector
+offers each kind only the dials it can honour.
+
+Masks store normalized SHAPES, not a rasterized selection, for the same reason,
+and reuse the extracted `SelectionPainter` rather than a second mask editor.
+Compositing goes through an offscreen buffer because `clip()` cannot express
+"everywhere except", and inverting with even-odd turns overlapping brush strokes
+into holes.
+
+One subtlety cost a real bug: sizing the tone box exactly to the panel means any
+rotation reveals bare corners, and pinning `rotation: 0` to avoid that leaves the
+creator a slider that does nothing. The box is grown to the panel's DIAGONAL
+instead — it covers at every angle, and the structural panel clip trims the
+overhang.

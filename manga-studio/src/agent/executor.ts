@@ -14,7 +14,6 @@ import { DEFAULT_CHARACTER_STATE, stateFromInstance } from "@/characters/state";
 import { applyCharacterStateToInstance, generateCharacterAssetForState } from "@/characters/stateRuntime";
 import type { DomainCommand, SemanticFraming } from "@/domain/commands";
 import { validateScopeIntegrity, type CompositionIssue } from "@/domain/compositionValidation";
-import { panelPxRect } from "@/domain/docHelpers";
 import type {
   AssetInstance,
   BubbleType,
@@ -40,6 +39,10 @@ import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 import { findUnreadyCharacterAsset, requireCharacter, requestedCharacterState, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
+import { characterIdOfInstance } from "@/characters/identity";
+import { tonePreset, type ToneMask } from "@/domain/tones";
+import { toneForMood } from "@/tones/mood";
+import { panelPxRect } from "@/domain/docHelpers";
 import { hasExactState } from "./planValidation";
 import { normalizeReference } from "./grounding";
 import { bestLanguageAsset } from "@/language/library";
@@ -110,6 +113,12 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
       return `Add ${args.bubbleType} to panel ${args.panel}`;
     case "add_effect":
       return `Add ${args.effectKind} to panel ${args.panel}`;
+    case "apply_tone": {
+      const named = args.toneAssetName ?? (args.presetId ? (tonePreset(String(args.presetId))?.name ?? args.presetId) : undefined);
+      const tone = named ?? toneForMood(args.mood as string | undefined)?.name ?? "tone";
+      const where = args.maskToCharacterName ? ` over ${args.maskToCharacterName}` : "";
+      return `Apply ${tone} to panel ${args.panel}${where}`;
+    }
     case "remove_items":
       return `Clear ${args.kind ?? "items"} from panel ${args.panel}`;
     case "set_camera": {
@@ -314,6 +323,8 @@ async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunSco
       return doAddBubble(args);
     case "add_effect":
       return doAddEffect(args);
+    case "apply_tone":
+      return doApplyTone(args);
     case "set_camera":
       return doSetCamera(args);
     case "set_perspective":
@@ -850,6 +861,94 @@ function doAddBubble(args: {
 function doAddEffect(args: { panel: number; effectKind: EffectKind }): void {
   const panelId = panelIdByNumber(args.panel);
   dispatch({ type: "add-effect", panelId, effectKind: args.effectKind });
+}
+
+/**
+ * Lay a tone over a panel (§16).
+ *
+ * Goes through the SAME `add-tone` command the Tones shelf dispatches, so an
+ * Agent-applied tone is an ordinary tone layer the creator can edit, reorder,
+ * hide and delete. There is no Agent-only tone path, and nothing here can bake
+ * tone into artwork because no such command exists.
+ */
+function doApplyTone(args: {
+  panel: number;
+  presetId?: string;
+  toneAssetName?: string;
+  toneAssetId?: string;
+  mood?: string;
+  opacity?: number;
+  maskToCharacterName?: string;
+  maskToCharacterId?: string;
+}): void {
+  const doc = currentDoc();
+  const panelId = panelIdByNumber(args.panel);
+
+  const assetId = args.toneAssetId
+    ? args.toneAssetId
+    : args.toneAssetName
+      ? Object.values(doc.assets).find(
+          (asset) => asset.category === "tone" && asset.name.toLowerCase() === args.toneAssetName!.toLowerCase(),
+        )?.id
+      : undefined;
+
+  let presetId = args.presetId && tonePreset(args.presetId) ? args.presetId : undefined;
+  if (!assetId && !presetId) {
+    const fromMood = toneForMood(args.mood ?? args.presetId ?? args.toneAssetName);
+    if (!fromMood) {
+      throw new Error(
+        `No tone matches "${args.mood ?? args.presetId ?? args.toneAssetName ?? "that"}". Name a tone from the Tones shelf, or describe the mood.`,
+      );
+    }
+    presetId = fromMood.id;
+  }
+
+  /**
+   * "Add screentone to her shirt."
+   *
+   * A shirt is not a region this can resolve — it is inside the character's
+   * artwork, and guessing at it would put tone on a face. What CAN be resolved
+   * safely is where that character stands, so the tone is confined to them and
+   * the creator refines it with the mask editor. Covering the whole panel when
+   * a specific character was named would be the wrong answer quietly.
+   */
+  const mask = args.maskToCharacterName || args.maskToCharacterId ? maskOverCharacter(doc, panelId, args) : undefined;
+
+  const created = dispatch({ type: "add-tone", panelId, presetId, assetId, mask });
+  if (created.createdId && args.opacity !== undefined) {
+    dispatch({ type: "update-tone", itemId: created.createdId, patch: { opacity: args.opacity } });
+  }
+}
+
+/** The rectangle a named character occupies in this panel, normalized. */
+function maskOverCharacter(
+  doc: ProjectDocument,
+  panelId: ID,
+  args: { maskToCharacterName?: string; maskToCharacterId?: string },
+): ToneMask | undefined {
+  const character = requireCharacterOrNull(doc, {
+    characterId: args.maskToCharacterId,
+    characterName: args.maskToCharacterName,
+  });
+  if (!character) return undefined;
+  const instance = doc.panels[panelId]?.itemIds
+    .map((id) => doc.items[id])
+    .find((item) => item?.kind === "asset" && characterIdOfInstance(doc, item) === character.id);
+  if (!instance) return undefined;
+
+  const rect = panelPxRect(doc, panelId);
+  if (rect.width <= 0 || rect.height <= 0) return undefined;
+  return {
+    shapes: [
+      {
+        kind: "rect",
+        x: Math.max(0, (instance.cx - instance.width / 2) / rect.width),
+        y: Math.max(0, (instance.cy - instance.height / 2) / rect.height),
+        width: Math.min(1, instance.width / rect.width),
+        height: Math.min(1, instance.height / rect.height),
+      },
+    ],
+  };
 }
 
 function doRemoveItems(args: { panel: number; kind?: "asset" | "bubble" | "effect" }): void {
