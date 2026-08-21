@@ -12,7 +12,9 @@ import { buildAgentContext } from "@/agent/contextBuilder";
 import { countGenerations, describeStep, executePlan, type RunGuards, type StepProgress } from "@/agent/executor";
 import { groundPrompt, type GroundingReport } from "@/agent/grounding";
 import { validateGroundedPlan } from "@/agent/planValidation";
-import { resolveAgentScope, type AgentScopePreference } from "@/agent/scope";
+import { resolveAgentScope, scopeForSubject, type AgentScopePreference } from "@/agent/scope";
+import { resolveSubject, type SubjectResolution } from "@/agent/subject";
+import { deriveSceneIntent, describeIntent, type SceneIntent } from "@/agent/sceneIntent";
 import type { AgentPlan } from "@/agent/tools/schemas";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -66,6 +68,9 @@ export function AgentPanel() {
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [grounding, setGrounding] = useState<GroundingReport | null>(null);
+  const [subject, setSubject] = useState<SubjectResolution | null>(null);
+  const [intent, setIntent] = useState<SceneIntent | null>(null);
+  const [runScope, setRunScope] = useState<{ label: string; demotionReason?: string } | null>(null);
   const [guards, setGuards] = useState<RunGuards | null>(null);
   const [assetTrace, setAssetTrace] = useState<string[]>([]);
   const [skillsUsed, setSkillsUsed] = useState<string[]>([]);
@@ -107,7 +112,7 @@ export function AgentPanel() {
       window.setTimeout(() => setStatusLine("This is taking longer than usual…"), 18_000),
     ];
     try {
-      const scope = resolveAgentScope({
+      let scope = resolveAgentScope({
         doc: state.doc,
         currentPageId: state.currentPageId,
         selection: state.selection,
@@ -127,6 +132,8 @@ export function AgentPanel() {
         sceneCharacterIds: panelCharacterIds(state.doc, scope.panelId),
       });
       setGrounding(report);
+      setIntent(null);
+      setSubject(null);
 
       // A reference we could not ground stops the run here — before the model
       // is paid for, before anything is generated, before anything is mutated.
@@ -136,12 +143,36 @@ export function AgentPanel() {
         return;
       }
 
+      /**
+       * Subject, then scope, then intent — in that order.
+       *
+       * Grounding says WHO. Only then can scope decide whether the creator's
+       * selection is a target or merely the panel they are looking at, and only
+       * then can the semantic plan be built. Doing scope first is what let a
+       * selected lamp overrule a named character.
+       */
+      const resolvedSubject = resolveSubject({ doc: state.doc, grounding: report });
+      setSubject(resolvedSubject);
+      scope = scopeForSubject(scope, resolvedSubject, state.doc);
+      setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
+
+      const sceneIntent = deriveSceneIntent({
+        doc: state.doc,
+        prompt: requestPrompt,
+        grounding: report,
+        subject: resolvedSubject,
+        scope,
+      });
+      setIntent(sceneIntent);
+      setActivity((current) => [...current, "Scene intent"]);
+
       const context = buildAgentContext({
         doc: state.doc,
         currentPageId: state.currentPageId,
         selection: state.selection,
         scope,
         grounding: report,
+        intent: sceneIntent,
       });
       const response = await fetch("/api/agent", {
         method: "POST",
@@ -371,6 +402,44 @@ export function AgentPanel() {
         </div>
       )}
 
+      {/*
+        Why the run did what it did.
+        
+        A planning failure used to print one sentence about an internal type
+        check. The creator could not see who the Agent thought the subject was,
+        whether their selection had been treated as a target, or what sequence
+        it understood — so there was nothing to correct. All four are now on
+        screen before execution starts.
+      */}
+      {(subject || intent) && (
+        <div className="rounded-md bg-[var(--bg-elevated)] p-2" aria-label="Agent plan">
+          <p className="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Plan</p>
+          {subject && (
+            <dl className="space-y-0.5 text-[10px]">
+              <Row label="Subject" value={subject.explanation} />
+              {runScope && <Row label="Scope" value={runScope.label} />}
+              <Row
+                label="Selection used as subject"
+                value={subject.usedSelection ? "Yes" : "No — an explicitly named entity has precedence"}
+              />
+              {runScope?.demotionReason && <Row label="Selection note" value={runScope.demotionReason} />}
+            </dl>
+          )}
+          {intent && intent.beats.length > 0 && doc && (
+            <div className="mt-1.5">
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Sequence{intent.sequential ? ` · ${intent.panelsRequested} panels` : " · one panel"}
+              </p>
+              <ul className="mt-0.5 space-y-0.5 text-[10px] text-[var(--text-secondary)]">
+                {describeIntent(intent, doc).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {assetTrace.length > 0 && (
         <div className="rounded border border-amber-900/60 bg-amber-950/20 p-2" aria-label="Rejected steps">
           <p className="mb-1 text-[10px] uppercase tracking-wider text-amber-500">Rejected before execution</p>
@@ -493,6 +562,15 @@ function selectedCharacterId(doc: ProjectDocument, itemId?: ID): ID | undefined 
   if (item?.kind !== "asset") return undefined;
   const instance = item as AssetInstance;
   return instance.characterState?.characterId ?? doc.assets[instance.sourceAssetId]?.metadata?.characterId;
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-1.5">
+      <dt className="shrink-0 text-[var(--text-muted)]">{label}:</dt>
+      <dd className="min-w-0 text-[var(--text-secondary)]">{value}</dd>
+    </div>
+  );
 }
 
 function panelCharacterIds(doc: ProjectDocument, panelId?: ID): ID[] {

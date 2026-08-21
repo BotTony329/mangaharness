@@ -22,15 +22,12 @@
 
 import { useState } from "react";
 import { puppetForInstance } from "@/domain/puppetOps";
-import {
-  INTERACTION_LABELS,
-  evaluateInteractionCapability,
-  midpointAnchor,
-} from "@/domain/interactions";
+import { executeInteraction } from "@/domain/interactionService";
+import { INTERACTION_LABELS, evaluateInteractionCapability } from "@/domain/interactions";
+import { GenerateIcon, SpinnerIcon } from "../ui/icons";
 import { stateFromInstance } from "@/characters/state";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { useUiStore } from "@/editor/uiStore";
 
 /** The interactions offered as one-click actions, in order of usefulness. */
 const QUICK: InteractionType[] = ["look_at", "hold_hands", "hug", "walk_together", "high_five"];
@@ -39,10 +36,10 @@ const MORE: InteractionType[] = ["beside", "face_to_face", "hand_object", "lean_
 export function InteractionControls({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((s) => s.doc)!;
   const selection = useEditorStore((s) => s.selection);
-  const dispatch = useEditorStore((s) => s.dispatch);
-  const openInteraction = useUiStore((s) => s.openInteraction);
   const [showMore, setShowMore] = useState(false);
   const [pending, setPending] = useState<InteractionType | null>(null);
+  const [busy, setBusy] = useState<InteractionType | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const subject = characterOf(doc, item);
   if (!subject) return null;
@@ -60,85 +57,98 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     .filter((candidate): candidate is AssetInstance => candidate?.kind === "asset");
   const preselected = alsoSelected.map((candidate) => characterOf(doc, candidate)).filter(Boolean) as ID[];
 
-  const start = (type: InteractionType, partnerCharacterId?: ID) => {
+  const start = async (type: InteractionType, partnerCharacterId?: ID) => {
     const partnerId = partnerCharacterId ?? preselected[0];
     if (!partnerId) {
       setPending(type);
       return;
     }
     setPending(null);
-    const partnerItem =
-      alsoSelected.find((candidate) => characterOf(doc, candidate) === partnerId) ??
-      partners.find((entry) => entry.characterId === partnerId)?.item;
-
-    const capability = evaluateInteractionCapability({
-      type,
-      participantIds: [subject, partnerId],
-      puppets: [puppetForInstance(doc, item), partnerItem ? puppetForInstance(doc, partnerItem) : undefined],
-    });
-
-    const created = dispatch({
-      type: "create-interaction",
-      input: {
+    setBusy(type);
+    setError(null);
+    try {
+      /**
+       * ONE execution path.
+       *
+       * This surface used to create the interaction itself — its own capability
+       * check, its own dispatch, its own anchor — while the Agent went through
+       * `interactionService`. Two implementations of "what a hug is" drift, and
+       * the creator gets a different result depending on how they asked.
+       * Everything now goes through the service.
+       */
+      const outcome = await executeInteraction({
         panelId: item.panelId,
         participantIds: [subject, partnerId],
         type,
-        roles: { subject, target: partnerId },
-        renderMode: capability.supportedLocally ? "synchronized" : "composite",
-        status: capability.supportedLocally ? "active" : "planned",
-      },
-    });
-
-    /**
-     * A locally supported contact interaction gets its shared anchor straight
-     * away — that shared point IS the interaction, and creating it later would
-     * leave a window where the record exists but means nothing.
-     */
-    if (capability.mode === "LOCAL_PUPPET" && partnerItem && created.createdId && needsAnchor(type)) {
-      dispatch({
-        type: "set-interaction-anchor",
-        interactionId: created.createdId,
-        anchor: midpointAnchor(item, partnerItem, { [subject]: "rightHand", [partnerId]: "leftHand" }),
       });
-    }
-
-    // Anything generative goes to the review dialog rather than silently
-    // replacing the actors that are already on the page.
-    if (!capability.supportedLocally && created.createdId) {
-      openInteraction({ interactionId: created.createdId });
+      if (outcome.placedItemId) {
+        useEditorStore.getState().select({ itemId: outcome.placedItemId, panelId: item.panelId });
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The interaction could not be created");
+    } finally {
+      setBusy(null);
     }
   };
 
+  /**
+   * Instant or Generate, decided by the SAME evaluator the service uses.
+   *
+   * A creator must be able to see the cost before clicking. "Instant" means the
+   * harness rearranges artwork it already has; "Generate" means new pixels and
+   * a real provider call.
+   */
   const button = (type: InteractionType) => {
     const partnerId = preselected[0] ?? partners[0]?.characterId;
+    const partnerItem =
+      alsoSelected.find((candidate) => characterOf(doc, candidate) === partnerId) ??
+      partners.find((entry) => entry.characterId === partnerId)?.item;
     const capability = partnerId
       ? evaluateInteractionCapability({
           type,
           participantIds: [subject, partnerId],
-          puppets: [puppetForInstance(doc, item), undefined],
+          puppets: [puppetForInstance(doc, item), partnerItem ? puppetForInstance(doc, partnerItem) : undefined],
         })
       : null;
     const instant = capability?.supportedLocally ?? false;
+    const running = busy === type;
     return (
       <button
         key={type}
-        className="flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
-        onClick={() => start(type)}
-        title={instant ? "Instant — no generation" : "Needs AI generation"}
+        disabled={busy !== null}
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors disabled:opacity-40"
+        style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+        onClick={() => void start(type)}
+        title={
+          instant
+            ? `${INTERACTION_LABELS[type]} — instant, no generation`
+            : `${INTERACTION_LABELS[type]} — ${capability?.reason ?? "needs one AI generation"}`
+        }
       >
         {INTERACTION_LABELS[type]}
-        <span className={instant ? "text-[8px] text-emerald-400" : "text-[8px] text-amber-400"}>
-          {instant ? "Instant" : "Generate"}
-        </span>
+        {running ? (
+          <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" style={{ color: "var(--accent-text)" }} />
+        ) : instant ? (
+          <span className="text-[8px]" style={{ color: "var(--success)" }}>
+            Instant
+          </span>
+        ) : (
+          <span className="flex items-center gap-0.5 text-[8px]" style={{ color: "var(--accent-text)" }}>
+            <GenerateIcon size={8} strokeWidth={2.5} />
+            Generate
+          </span>
+        )}
       </button>
     );
   };
 
   if (partners.length === 0 && preselected.length === 0) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
-        <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Interactions</p>
-        <p className="text-[10px] leading-4 text-zinc-600">
+      <div className="rounded-lg p-2.5" style={{ background: "var(--bg-elevated)" }}>
+        <p className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+          Interactions
+        </p>
+        <p className="text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
           Place another character in this panel, then pick an action here — or shift-click both on canvas.
         </p>
       </div>
@@ -156,6 +166,11 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         )}
       </div>
 
+      {preselected.length > 0 && (
+        <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+          Pick an action for {doc.characters[subject]?.name} and {doc.characters[preselected[0]]?.name}.
+        </p>
+      )}
       <div className="flex flex-wrap gap-1">{QUICK.map(button)}</div>
       {showMore && <div className="mt-1 flex flex-wrap gap-1">{MORE.map(button)}</div>}
       <button
@@ -165,16 +180,25 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         {showMore ? "Less" : "More…"}
       </button>
 
+      {error && (
+        <p className="mt-1.5 rounded-md p-1.5 text-[10px]" style={{ background: "var(--danger-soft)", color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+
       {/* Partner picker, only when the creator has not already selected one. */}
       {pending && (
-        <div className="mt-2 rounded border border-zinc-700 bg-zinc-900 p-2">
-          <p className="mb-1 text-[10px] text-zinc-400">{INTERACTION_LABELS[pending]} with…</p>
+        <div className="mt-2 rounded-md p-2" style={{ background: "var(--bg-app)" }}>
+          <p className="mb-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+            {INTERACTION_LABELS[pending]} with…
+          </p>
           <div className="flex flex-wrap gap-1">
             {partners.map((partner) => (
               <button
                 key={partner.item.id}
-                className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-[var(--accent)]"
-                onClick={() => start(pending, partner.characterId)}
+                className="rounded-md px-2 py-1 text-[10px] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent-text)]"
+                style={{ background: "var(--bg-elevated)", color: "var(--text-primary)" }}
+                onClick={() => void start(pending, partner.characterId)}
               >
                 {doc.characters[partner.characterId]?.name}
               </button>
@@ -189,10 +213,6 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   );
 }
 
-/** Contact interactions are realised by a shared anchor; the rest are placement. */
-function needsAnchor(type: InteractionType): boolean {
-  return type === "hold_hands" || type === "high_five" || type === "hand_object";
-}
 
 function characterOf(doc: ProjectDocument, item: AssetInstance): ID | undefined {
   return stateFromInstance(doc, item)?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId;

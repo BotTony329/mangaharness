@@ -10,6 +10,43 @@ execution evidence. `COMPLETE` requires a cited path from intent to persistence.
 
 ---
 
+## Reachability matrix
+
+**A single COMPLETE is banned.** A capability can be finished in the domain,
+reachable by the Agent, and still be invisible to a creator — which is exactly
+how Relationships and Interactions came to be reported as done while nobody
+could find them. Every user-facing capability is scored on five independent
+axes.
+
+| Capability | Domain | Agent | UI reachable | Real execution | Browser verified |
+|---|---|---|---|---|---|
+| Relationship — create | COMPLETE | COMPLETE (grounding) | COMPLETE | N/A (no generation) | COMPLETE |
+| Relationship — list / reciprocal | COMPLETE | COMPLETE | COMPLETE | N/A | COMPLETE |
+| Relationship — edit type | COMPLETE | N/A | COMPLETE | N/A | PARTIAL — control present, re-type not clicked through |
+| Relationship — delete | COMPLETE | N/A | COMPLETE | N/A | COMPLETE |
+| Relationship → Agent grounding ("her close friend") | COMPLETE | COMPLETE | COMPLETE | N/A | COMPLETE — resolves with the edge, refuses without it |
+| Interaction — single-character entry | COMPLETE | COMPLETE | COMPLETE | see below | COMPLETE |
+| Interaction — multi-select entry | COMPLETE | COMPLETE | COMPLETE | see below | COMPLETE |
+| Interaction — Instant vs Generate labels | COMPLETE | N/A | COMPLETE | N/A | COMPLETE |
+| Interaction — local (Walk Together, Beside) | COMPLETE | COMPLETE | COMPLETE | COMPLETE | PARTIAL — labelled Instant, not clicked through |
+| Interaction — joint render (Hug) | COMPLETE | COMPLETE | COMPLETE | IMPLEMENTED | PARTIAL — reaches `POST /api/generate`, 503 (no provider) |
+| Interaction — provider round trip | — | — | — | IMPLEMENTED | **UNVERIFIED** — no provider in this environment |
+| Subject vs scope precedence | COMPLETE | COMPLETE | COMPLETE (run log) | N/A | COMPLETE |
+| Temporal decomposition ("then") | COMPLETE | COMPLETE | COMPLETE (run log) | PARTIAL — plan requests N panels; the planner is told, not forced | COMPLETE |
+| Camera intent ("to the camera") | COMPLETE | PARTIAL — carried as a constraint to the planner | COMPLETE (run log) | PARTIAL | COMPLETE |
+| Dialogue planning ("shouting Yuri's name") | COMPLETE | COMPLETE | COMPLETE (run log) | COMPLETE — editor-native bubble | COMPLETE |
+
+### What "browser verified" means here
+
+This environment has **no AI provider**. `POST /api/agent` and
+`POST /api/generate` cannot reach a model. For the Agent runs above, the LLM
+call was stubbed in the page and **everything downstream ran for real**:
+grounding, subject resolution, scope, intent derivation, plan validation,
+capability routing, execution, post-validation and rollback. The stub is stated
+wherever it applies; nothing about the model's own output is claimed.
+
+---
+
 ## P0 — Agent ↔ image generation execution
 
 The previous reports were partly wrong in both directions. Correcting the record.

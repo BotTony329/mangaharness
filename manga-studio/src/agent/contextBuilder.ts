@@ -9,6 +9,7 @@ import { isAssetReadyForComposition } from "@/assets/renderSource";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { resolveAgentScope, scopeInstruction, type AgentRunScope } from "./scope";
+import { describeIntent, type SceneIntent } from "./sceneIntent";
 import { groundingContext, type GroundingReport } from "./grounding";
 import { CATEGORY_LABELS, LANGUAGE_CATEGORIES, languageLibrary } from "@/language/library";
 
@@ -22,15 +23,49 @@ export interface AgentContextInput {
   scope?: AgentRunScope;
   /** Deterministic entity grounding, resolved before the planner is called. */
   grounding?: GroundingReport;
+  /** The semantic plan, derived before the planner and binding on it. */
+  intent?: SceneIntent;
 }
 
-export function buildAgentContext({ doc, currentPageId, selection, scope, grounding }: AgentContextInput): string {
+export function buildAgentContext({ doc, currentPageId, selection, scope, grounding, intent }: AgentContextInput): string {
   const runScope = scope ?? resolveAgentScope({ doc, currentPageId, selection, prompt: "" });
   // §11: the agent is always told which project it is operating in, and every
   // list below is read from THIS document — so grounding can never resolve a
   // character that belongs to a project the creator is not in.
   const lines: string[] = [`PROJECT: ${doc.project.name}`, `PROJECT ID: ${doc.project.id}`];
   lines.push(scopeInstruction(runScope));
+
+  /**
+   * The semantic plan goes to the model as a CONSTRAINT, not a suggestion.
+   *
+   * The subject and the beats were decided deterministically from the user's
+   * own words; handing the planner the answer stops it re-deciding who the
+   * request is about, and stops "then" being flattened into one panel.
+   */
+  if (intent) {
+    lines.push("", "SCENE INTENT (authoritative — do not re-interpret):");
+    for (const participant of intent.participants) {
+      lines.push(`- ${participant.role.toUpperCase()}: ${doc.characters[participant.characterId]?.name ?? participant.characterId} (ID: ${participant.characterId})`);
+    }
+    for (const line of describeIntent(intent, doc)) lines.push(`- BEAT ${line}`);
+    if (intent.sequential) {
+      lines.push(
+        `- These ${intent.beats.length} beats are SEQUENTIAL. In manga, time passes between panels: plan them across ${intent.panelsRequested} panels in reading order, not stacked into one.`,
+      );
+    }
+    const dialogue = intent.beats.filter((beat) => beat.type === "dialogue" && beat.text);
+    for (const beat of dialogue) {
+      lines.push(
+        `- Dialogue is EDITOR-NATIVE: add a ${beat.delivery === "shout" ? "shout" : beat.delivery === "whisper" ? "whisper" : "speech"} bubble with text "${beat.text}". Never ask an image model to draw readable text.`,
+      );
+    }
+    const movement = intent.beats.find((beat) => beat.type === "movement" && beat.direction === "toward_camera");
+    if (movement) {
+      lines.push(
+        "- Movement toward the camera is CAMERA INTENT: express it with the stage and camera tools (nearer depth, tighter shot in the later beat), not by arbitrarily scaling the artwork.",
+      );
+    }
+  }
   const activeStyle = getActiveStyleProfile(doc);
   lines.push(
     `PROJECT ART STYLE: ${activeStyle.name} (${activeStyle.family})`,

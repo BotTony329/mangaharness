@@ -382,11 +382,50 @@ const PANEL_TOOLS = new Set<ToolName>([
   "create_interaction",
 ]);
 
+/**
+ * Tools that restage a whole panel rather than operating on one thing in it.
+ *
+ * Selecting a character says "this is what I am working on"; it does not
+ * license re-cutting the panel, re-aiming the camera, or clearing its contents.
+ * This is a statement about the SIZE of an edit, not about the type of the
+ * selected object — scope must never ask what kind of thing is selected.
+ */
+const PANEL_LEVEL_TOOLS = new Set<ToolName>([
+  "set_page_layout",
+  "reshape_panel",
+  "set_camera",
+  "set_perspective",
+  "remove_items",
+  "reuse_scene_background",
+  "set_focal_character",
+]);
+
 /** Pure guard used both while validating model output and immediately before execution. */
 export function validateStepScope(tool: ToolName, args: Record<string, unknown>, scope: AgentRunScope): string | null {
+  /**
+   * A selected-object scope narrows WHERE, not WHAT.
+   *
+   * It used to reject every tool except `set_character_slot`, on the assumption
+   * that the selected object was always the subject — so a request naming
+   * another character had all of its steps rejected and the run silently did
+   * nothing. Scope resolution now widens this to the panel whenever the subject
+   * is somebody else (see `scopeForSubject`), and what survives here is the
+   * honest rule: stay inside the selected object's panel.
+   *
+   * No check here knows what an object IS. Whether a request needs a character,
+   * a prop or a panel is the planner's question, not the blast radius's.
+   */
   if (scope.kind === "selected-object") {
-    if (tool === "set_character_slot" && (args.panel === undefined || args.panel === scope.panelNumber)) return null;
-    return `Scope violation: ${scope.label} permits only semantic changes to the selected character object`;
+    if (PANEL_LEVEL_TOOLS.has(tool)) {
+      return `Scope violation: ${scope.label} covers one object — ${tool.replace(/_/g, " ")} restages the whole panel`;
+    }
+    if (tool === "place_asset" && args.target === "workspace") {
+      return `Scope violation: ${scope.label} cannot place assets outside the panel`;
+    }
+    if (PANEL_TOOLS.has(tool) && args.panel !== undefined && args.panel !== scope.panelNumber) {
+      return `Scope violation: ${scope.label} allows only panel ${scope.panelNumber}`;
+    }
+    return null;
   }
   if (scope.kind === "selected-panel") {
     if (tool === "set_page_layout") return `Scope violation: ${scope.label} cannot change the page layout`;

@@ -53,7 +53,7 @@ import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
-import { executionClass } from "./capabilityRouter";
+import { couldGenerate } from "./capabilityRouter";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
 
@@ -219,11 +219,16 @@ export async function executePlan(
         const message = error instanceof Error ? error.message : "Step failed";
         onProgress(i, "failed", message);
         /**
-         * A failed GENERATION step means the artwork the rest of the plan was
-         * going to place does not exist. Continuing would compose around a
-         * hole; stop and restore.
+         * A failed step that was meant to put artwork on the page means the
+         * rest of the plan composes around a hole.
+         *
+         * The test covers anything that COULD have generated, not only the
+         * always-generative tools: `place_character` escalates to generation
+         * when no cached state matches, and a failed one used to be shrugged
+         * off — the browser run left a shout bubble in the panel with nobody
+         * there to shout it. Stop and restore instead.
          */
-        if (executionClass(plan.steps[i].tool) === "AI_GENERATION") {
+        if (couldGenerate(plan.steps[i].tool)) {
           abortReason = message;
           break;
         }
@@ -710,27 +715,54 @@ function findTargetInstance(
   scope?: AgentRunScope,
 ): AssetInstance {
   const state = useEditorStore.getState();
-  const characterByName =
-    args.characterId ?? args.characterName
-      ? requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId })
-      : null;
+  const named = args.characterId !== undefined || args.characterName !== undefined;
+  const characterByName = named
+    ? requireCharacter(doc, args, { selectedCharacterId: activeGuards.selectedCharacterId })
+    : null;
 
-  if (scope?.kind === "selected-object" && scope.itemId) {
+  /**
+   * Precedence: an explicitly grounded character outranks the selection.
+   *
+   * This block used to run FIRST and unconditionally, so a selected lamp became
+   * the target of "make Cute Girl run" and the step died on "the scoped object
+   * is not a character asset". Selection is evidence about which panel the
+   * creator is working in; it is not a claim about who they mean.
+   *
+   * The selected object is consulted only when the step named nobody.
+   */
+  if (!named && scope?.kind === "selected-object" && scope.itemId) {
     const item = doc.items[scope.itemId];
-    if (item?.kind !== "asset") throw new Error("The scoped object is not a character asset");
-    const characterId = doc.assets[item.sourceAssetId]?.metadata?.characterId;
-    if (!characterId || (characterByName && characterByName.id !== characterId)) {
-      throw new Error("The scoped object does not match the requested character");
+    /**
+     * A non-character selection is not an error here. It simply carries no
+     * character, so resolution falls through to the panel search below and
+     * fails with a message about what was actually missing.
+     */
+    if (item?.kind === "asset") {
+      const characterId = item.characterState?.characterId ?? doc.assets[item.sourceAssetId]?.metadata?.characterId;
+      if (characterId) return item;
     }
-    return item;
   }
 
   const candidates: AssetInstance[] = [];
-  if (args.panel !== undefined) {
-    const panel = doc.panels[panelIdByNumber(args.panel)];
-    for (const id of panel.itemIds) {
+  const collect = (panelId: ID | undefined) => {
+    for (const id of (panelId && doc.panels[panelId]?.itemIds) || []) {
       const item = doc.items[id];
       if (item?.kind === "asset") candidates.push(item);
+    }
+  };
+
+  if (args.panel !== undefined) {
+    collect(panelIdByNumber(args.panel));
+  } else if (characterByName) {
+    /**
+     * A named character with no panel given: look in the panel the creator is
+     * working in first, then across the scoped page. Falling back to "whatever
+     * is selected" is what let an unrelated object answer for a named subject.
+     */
+    collect(scope?.panelId);
+    if (candidates.length === 0) {
+      const page = scope ? doc.pages[scope.pageId] : undefined;
+      for (const panelId of page?.panelIds ?? []) collect(panelId);
     }
   } else if (state.selection.itemId) {
     const item = doc.items[state.selection.itemId];
@@ -745,9 +777,11 @@ function findTargetInstance(
   const target = matching[matching.length - 1];
   if (!target) {
     throw new Error(
-      args.panel !== undefined
-        ? `No character instance found in panel ${args.panel}`
-        : "No character instance is selected — select one or specify a panel",
+      characterByName
+        ? `${characterByName.name} is not placed in ${args.panel !== undefined ? `panel ${args.panel}` : "this scope"} yet — place them first`
+        : args.panel !== undefined
+          ? `No character instance found in panel ${args.panel}`
+          : "No character instance is selected — select one or specify a panel",
     );
   }
   return target;

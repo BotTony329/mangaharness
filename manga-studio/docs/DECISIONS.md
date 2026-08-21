@@ -654,3 +654,74 @@ is how purple stopped meaning anything.
 
 Focus rings are the one ring always drawn. Flattening removes borders that
 carried no information; it must not remove the only signal a keyboard user has.
+
+## D62 — Scope is where, subject is who
+
+Two sites treated the creator's selection as the authoritative subject:
+`validateStepScope` permitted nothing but `set_character_slot` under a
+selected-object scope, and `findTargetInstance` resolved the selected object
+first and then asserted it was a character. With a lamp selected, "let Cute girl
+run to the camera and then shouting Yuri's name" grounded Cute Girl and Yuri
+correctly and then died — every step rejected as a scope violation, or
+"The scoped object is not a character asset".
+
+The two questions are now answered by two modules. `subject.ts` answers WHO,
+with the precedence explicit name > relationship > pronoun > selection > none.
+`scope.ts` answers WHERE and **never asks what kind of object is selected** —
+that assumption is what made a lamp, a bubble or an effect fatal to a request
+that had nothing to do with them.
+
+A selection still narrows the blast radius when the request is about the
+selected thing or about no character at all. When the request names somebody
+else, `scopeForSubject` widens the scope by exactly one step, object → panel,
+and records why. Widening straight to the page would hand a request about one
+character permission to rewrite everything around it.
+
+`selected-object` scope still forbids PANEL-LEVEL tools — camera, perspective,
+layout, reshape, clearing. That rule survives because it is about the SIZE of an
+edit, not about the type of the selected object.
+
+## D63 — A semantic plan sits between the sentence and the tools
+
+Going straight from LLM text to editor commands made three things impossible:
+explaining a failure, honouring "then", and keeping camera intent alive.
+
+`sceneIntent.ts` derives participants and ordered beats deterministically from
+the prompt before the planner is called. It is handed to the model as a
+constraint — so the model cannot re-decide who the request is about — and shown
+to the creator as Subject / Scope / Selection-used / Sequence.
+
+Three consequences that are decisions, not details:
+
+- **"Then" means panel progression.** In manga time passes between panels, so
+  sequential beats request N panels rather than being stacked into one drawing
+  of somebody running and shouting simultaneously.
+- **"To the camera" is camera intent**, not `pose = running`. It reaches the
+  stage and camera tools as depth and framing, never as an arbitrary scale bump.
+- **Dialogue is editor-native.** "Shouting Yuri's name" resolves to speaker,
+  referenced character and the text "Yuri!", then a shout bubble. Image models
+  cannot spell, and text baked into pixels stops being editable or translatable.
+
+Reading order also became load-bearing: grounded entities are sorted by where
+they appear in the prompt, because "Cute Girl … shouts Yuri's name" is about
+Cute Girl. They used to come out in character-creation order, which made the
+subject depend on project history rather than on the sentence.
+
+## D64 — Relationship is not Interaction, and both must be findable
+
+A RELATIONSHIP is a persistent project fact (Yuri ↔ Mori = Close Friend) that
+generates nothing. An INTERACTION is a scene action in one panel that may cost a
+generation. The domain always separated them; the UI exposed neither, so a
+capability that worked was reported as done and could not be found.
+
+Relationships now live in the Inspector under a selected character's **Details**
+tab — not behind Advanced, because "who is this person to that person" is
+authoring, not configuration. Interactions live under **Interactions**, and when
+two actors are selected they are promoted to a banner above everything about
+either character individually.
+
+Every interaction path — the single-character picker, the pair banner, and the
+Agent's `create_interaction` — goes through `domain/interactionService`. The
+Inspector previously ran its own capability check, dispatch and anchor logic;
+two implementations of "what a hug is" drift until the result depends on how the
+creator asked.

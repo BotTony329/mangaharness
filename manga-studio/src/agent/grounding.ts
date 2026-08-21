@@ -143,21 +143,34 @@ export function resolveCharacterReference(input: CharacterReferenceInput): Chara
   const byId = projectCharacters.find((character) => character.id === raw);
   if (byId) return resolved(byId, 1, "id");
 
+  /**
+   * A character with no usable name cannot be matched by name, and must not be
+   * allowed to take grounding down with it.
+   *
+   * One malformed record used to throw inside this filter, which meant the
+   * Understanding step failed for EVERY prompt in the project — a data problem
+   * presenting as a total Agent outage. Nameless characters are simply not
+   * name-matchable; they remain reachable by id and by selection.
+   */
+  const named = projectCharacters.filter(
+    (character) => typeof character.name === "string" && character.name.trim().length > 0,
+  );
+
   // 1. Exact name, byte for byte.
-  const exact = projectCharacters.filter((character) => character.name.trim() === raw);
+  const exact = named.filter((character) => character.name.trim() === raw);
   if (exact.length === 1) return resolved(exact[0], 1, "exact-name");
   if (exact.length > 1) return duplicateNames(raw, exact, "exact-name");
 
   const query = normalizeReference(raw);
 
   // 2. Normalized name: case, spacing, punctuation and diacritics folded.
-  const normalized = projectCharacters.filter((character) => normalizeReference(character.name) === query);
+  const normalized = named.filter((character) => normalizeReference(character.name) === query);
   if (normalized.length === 1) return resolved(normalized[0], 0.98, "normalized-name");
   if (normalized.length > 1) return duplicateNames(raw, normalized, "normalized-name");
 
   // 3. Explicitly stored aliases — structured project data, never inference.
   const aliased = projectCharacters.filter((character) =>
-    (character.aliases ?? []).some((alias) => normalizeReference(alias) === query),
+    (character.aliases ?? []).some((alias) => typeof alias === "string" && normalizeReference(alias) === query),
   );
   if (aliased.length === 1) return resolved(aliased[0], 0.95, "alias");
   if (aliased.length > 1) return duplicateNames(raw, aliased, "alias");
@@ -201,7 +214,7 @@ export function resolveCharacterReference(input: CharacterReferenceInput): Chara
   // 5. Safe close match: whole-token containment in either direction, accepted
   //    ONLY when exactly one character matches. "Yuri" finds "Yuri Tanaka";
   //    "Yuri-chan" finds "Yuri". Two matches is ambiguous, never first-wins.
-  const tokenMatches = projectCharacters.filter((character) => tokenContained(queryTokens, tokens(character.name)));
+  const tokenMatches = named.filter((character) => tokenContained(queryTokens, tokens(character.name)));
   if (tokenMatches.length === 1) return resolved(tokenMatches[0], 0.8, "unique-token");
   if (tokenMatches.length > 1) {
     return {
@@ -223,10 +236,10 @@ export function resolveCharacterReference(input: CharacterReferenceInput): Chara
    *    as AMBIGUOUS with the suspicion attached, so the UI can offer it.
    */
   const compact = compactKey(raw);
-  const compactMatches = projectCharacters.filter(
+  const compactMatches = named.filter(
     (character) =>
       compactKey(character.name) === compact ||
-      (character.aliases ?? []).some((alias) => compactKey(alias) === compact),
+      (character.aliases ?? []).some((alias) => typeof alias === "string" && compactKey(alias) === compact),
   );
   if (compactMatches.length > 0) {
     return {
@@ -367,6 +380,15 @@ export interface GroundedEntity {
   name?: string;
   matchType?: CharacterMatchType;
   confidence?: number;
+  /**
+   * Where this reference appeared in the prompt.
+   *
+   * Reading order decides who the SUBJECT is: "Cute Girl … shouts Yuri's name"
+   * is about Cute Girl. Entities used to come out in whichever order the
+   * characters happened to be created in, which made the subject depend on
+   * project history rather than on the sentence.
+   */
+  promptIndex?: number;
   candidates?: CharacterCandidate[];
   reason?: string;
 }
@@ -467,6 +489,7 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
   // "Mio" does not match inside "Miori".
   for (const character of projectCharacters) {
     for (const surface of [character.name, ...(character.aliases ?? [])]) {
+      if (typeof surface !== "string" || surface.trim().length === 0) continue;
       const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(surface)}(?![\\p{L}\\p{N}])`, "iu");
       const hit = pattern.exec(input.prompt);
       if (!hit) continue;
@@ -479,18 +502,28 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
         recentCharacterId: undefined,
         sceneCharacterIds,
       });
-      entities.push(toEntity(hit[0], resolution));
+      entities.push({ ...toEntity(hit[0], resolution), promptIndex: hit.index });
     }
   }
+
+  /**
+   * Reading order, not creation order.
+   *
+   * Whoever the sentence mentions first is the subject; sorting here is what
+   * makes "let Cute Girl run … shouting Yuri's name" a request about Cute Girl
+   * regardless of which character the project happened to store first.
+   */
+  entities.sort((a, b) => (a.promptIndex ?? Number.MAX_SAFE_INTEGER) - (b.promptIndex ?? Number.MAX_SAFE_INTEGER));
 
   // Names the user wrote that resolve to nothing. Unless creation was
   // explicitly requested for them, these block the run.
   const authorizedNames = new Set(creation.requestedNames.map(normalizeReference));
   for (const surface of unmatchedProperNouns(input.prompt, matchedSurfaces)) {
+    const at = input.prompt.indexOf(surface);
     const resolution = resolveCharacterReference({ query: surface, projectCharacters });
     if (resolution.status === "resolved") {
       if (!entities.some((entity) => entity.characterId === resolution.characterId)) {
-        entities.push(toEntity(surface, resolution));
+        entities.push({ ...toEntity(surface, resolution), promptIndex: at >= 0 ? at : undefined });
       }
       continue;
     }
@@ -526,13 +559,34 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
       });
       // Only report a phrase the graph had an opinion about; an unrelated
       // "the room" must not become a blocking unresolved entity.
-      if (resolution.status === "resolved" || resolution.status === "ambiguous") {
-        entities.push(toEntity(phrase, resolution));
-      } else if (relationshipTypeFromPhrase(phrase)) {
-        entities.push(toEntity(phrase, resolution));
+      const at = input.prompt.toLowerCase().indexOf(phrase.toLowerCase());
+      if (resolution.status === "resolved" || resolution.status === "ambiguous" || relationshipTypeFromPhrase(phrase)) {
+        entities.push({ ...toEntity(phrase, resolution), promptIndex: at >= 0 ? at : undefined });
+        /**
+         * Longest match wins.
+         *
+         * A project may contain a character literally called "friend", and
+         * "her close friend" contains that word. Both matched, so the request
+         * appeared to be about two people — the relationship partner AND an
+         * unrelated character who happens to share a noun with the phrase.
+         * A name swallowed by a longer relationship phrase at the same position
+         * is part of that phrase, not a separate reference.
+         */
+        if (at >= 0) {
+          const end = at + phrase.length;
+          for (let i = entities.length - 2; i >= 0; i -= 1) {
+            const other = entities[i];
+            if (other.matchType === "relationship") continue;
+            const start = other.promptIndex;
+            if (start === undefined) continue;
+            if (start >= at && start + other.surface.length <= end) entities.splice(i, 1);
+          }
+        }
       }
     }
   }
+
+  entities.sort((a, b) => (a.promptIndex ?? Number.MAX_SAFE_INTEGER) - (b.promptIndex ?? Number.MAX_SAFE_INTEGER));
 
   const blocking = entities
     .filter((entity) => entity.status !== "resolved")

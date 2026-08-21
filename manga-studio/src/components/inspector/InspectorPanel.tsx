@@ -16,6 +16,7 @@ import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
 import { LayersPanel } from "./LayersPanel";
+import { RelationshipEditor } from "./RelationshipEditor";
 import { InteractionControls } from "./InteractionControls";
 import { useUiStore } from "@/editor/uiStore";
 import {
@@ -68,6 +69,13 @@ export function InspectorPanel() {
   if (item) {
     return (
       <>
+        {/*
+          Two actors selected is an unambiguous statement of intent, so the
+          actions for the PAIR come first — above the tabs, above everything
+          about either of them individually. Burying it under one character's
+          state controls is what made interactions undiscoverable.
+        */}
+        <MultiSelectInteractions item={item} />
         <ItemInspector item={item} asset={item.kind === "asset" ? doc.assets[item.sourceAssetId] : undefined} />
         {/* The layer list follows the selection's own panel, so the stack the
             creator is working in is always the one on screen. */}
@@ -111,11 +119,54 @@ export function InspectorPanel() {
  */
 type ItemTab = "look" | "position" | "scene";
 
-const ITEM_TABS: { id: ItemTab; label: string }[] = [
+/**
+ * A character gets the creator's vocabulary: what they look like right now,
+ * what they are doing with someone else, and who they are in the story.
+ * Everything else is a picture in a box, and "Look / Position" says it.
+ */
+const CHARACTER_TABS: { id: ItemTab; label: string }[] = [
+  { id: "look", label: "State" },
+  { id: "scene", label: "Interactions" },
+  { id: "position", label: "Details" },
+];
+
+const OBJECT_TABS: { id: ItemTab; label: string }[] = [
   { id: "look", label: "Look" },
   { id: "position", label: "Position" },
-  { id: "scene", label: "Scene" },
 ];
+
+/**
+ * The pair banner. Renders only when two character actors are selected, and
+ * routes into exactly the same `InteractionControls` the single-selection path
+ * uses — one surface, two ways in.
+ */
+function MultiSelectInteractions({ item }: { item: PanelItem }) {
+  const doc = useEditorStore((state) => state.doc);
+  const selection = useEditorStore((state) => state.selection);
+  if (!doc || item.kind !== "asset") return null;
+
+  const partnerItem = (selection.alsoItemIds ?? [])
+    .map((id) => doc.items[id])
+    .find((candidate): candidate is AssetInstance => candidate?.kind === "asset");
+  if (!partnerItem) return null;
+
+  const nameOf = (candidate: AssetInstance) => {
+    const owner = candidate.characterState?.characterId ?? doc.assets[candidate.sourceAssetId]?.metadata?.characterId;
+    return owner ? doc.characters[owner]?.name : undefined;
+  };
+  const a = nameOf(item);
+  const b = nameOf(partnerItem);
+  if (!a || !b) return null;
+
+  return (
+    <div className="border-b p-3" style={{ borderColor: "var(--border-subtle)" }}>
+      <p className="mb-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+        {a} + {b}
+      </p>
+      <InteractionControls item={item} />
+    </div>
+  );
+}
 
 function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }) {
   const dispatch = (command: DomainCommand) => useEditorStore.getState().dispatch(command);
@@ -125,6 +176,11 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
   const id = item.id;
   const isCharacter = item.kind === "asset" && Boolean(asset?.metadata?.characterId);
   const isPuppet = Boolean(doc && item.kind === "asset" && isPuppetInstance(doc, item.id));
+  // Subscribed, not read from getState(): this must re-render when the creator
+  // shift-clicks a second actor.
+  const pairSelected = useEditorStore((state) => (state.selection.alsoItemIds ?? []).length > 0);
+  const characterId = item.kind === "asset" ? asset?.metadata?.characterId : undefined;
+  const character = characterId && doc ? doc.characters[characterId] : undefined;
 
   return (
     <div className="space-y-4 p-3 text-xs">
@@ -132,8 +188,8 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
         {item.kind === "asset" ? (asset?.name ?? "Asset") : item.kind === "bubble" ? "Speech bubble" : "Effect"}
       </SectionTitle>
 
-      <div className="flex border-b border-zinc-800">
-        {ITEM_TABS.map((entry) => (
+      <div className="flex border-b" style={{ borderColor: "var(--border-subtle)" }}>
+        {(isCharacter ? CHARACTER_TABS : OBJECT_TABS).map((entry) => (
           <button
             key={entry.id}
             className={`flex-1 px-2 py-1.5 text-[11px] ${
@@ -245,6 +301,10 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
 
       {tab === "position" && (
         <>
+      {/* Relationships are a creator-facing semantic feature, not a developer
+          detail: they belong on screen beside the character, not behind an
+          Advanced switch. */}
+      {isCharacter && character && <RelationshipEditor character={character} />}
       <div>
         <Label>Opacity {Math.round(item.opacity * 100)}%</Label>
         <input
@@ -337,8 +397,10 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
             <>
               {/* Interactions sit with the actor, because that is where a
                   creator is when they decide two characters should do
-                  something together. */}
-              <InteractionControls item={item} />
+                  something together. With a PAIR selected the banner above
+                  already offers them, and showing the same buttons twice makes
+                  the creator wonder whether they do different things. */}
+              {!pairSelected && <InteractionControls item={item} />}
               {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
             </>
           ) : (

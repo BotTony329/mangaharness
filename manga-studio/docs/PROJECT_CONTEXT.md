@@ -46,6 +46,33 @@ It is explicitly *not* "prompt → finished page", and *not* "change a character
 regenerate the whole character". The creator directs the scene; the harness picks
 the implementation.
 
+## Permanent Agent rules
+
+**Scope defines where the Agent may operate. Grounding defines what entities the
+user means. Selection is contextual evidence, not authority. An explicitly
+grounded entity must not be overridden by an unrelated selected object.**
+
+**Natural-language manga instructions are scene intents, not direct editor
+commands. Temporal and multi-actor requests must be semantically decomposed
+before tool execution.**
+
+Concretely:
+
+- `agent/subject.ts` resolves WHO, with the precedence
+  explicit name > relationship > pronoun-from-context > selection > none.
+  "None" is a valid answer: "make this panel more dramatic" has no character
+  subject and must not be given one.
+- `agent/scope.ts` resolves WHERE and **never asks what kind of object is
+  selected**. A page holds panels, characters, scenes, objects, bubbles, effects
+  and composite renders; which of those a request needs is the planner's
+  question. `scopeForSubject` widens a selection-locked scope to its panel when
+  the request names somebody else.
+- `agent/sceneIntent.ts` produces the semantic plan — participants and ordered
+  beats — BEFORE the planner is called, deterministically from the prompt. It is
+  passed to the model as a constraint and shown to the creator in the run log.
+- Dialogue is editor-native. An image model is never asked to render readable
+  text.
+
 ## Current Architecture
 
 - **Next.js 15 App Router + React 19 + TypeScript strict + Zustand + Konva.**
@@ -217,6 +244,22 @@ IndexedDB per project, autosave, forward-only migrations, no fabricated data on
 migration.
 
 ## Last Completed Work
+
+**Agent subject/scope repair + Relationship & Interaction reachability.**
+
+- Reproduced the reported failure in the browser: grounding resolved Cute Girl
+  and Yuri correctly, then a selected lamp overruled them. Two sites encoded
+  "selection is authority" — `validateStepScope` rejected every step, and
+  `findTargetInstance` demanded the selected object be a character. Both fixed;
+  see D62.
+- `subject.ts`, `sceneIntent.ts` and `scopeForSubject` added. The Agent panel now
+  prints Subject / Scope / Selection-used-as-subject / Sequence before executing.
+- Grounded entities are ordered by READING order; a name swallowed by a longer
+  relationship phrase is no longer a separate reference.
+- Relationships are reachable from the Inspector (character → Details) with
+  create, edit, delete; Interactions from character → Interactions and from a
+  high-priority banner when two actors are selected. Both go through
+  `interactionService` — the Inspector's second execution path is gone.
 
 **Kumanga brand + flat UI pass.** Product renamed from "Manga Studio"; the
 approved bear mark reconstructed as vector and wired through favicon, manifest,
