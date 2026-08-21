@@ -549,7 +549,16 @@ warns that existing panels change).
 pan drag (zoom only, image is centred); the whole edit path has never run
 against a live image-edit provider.
 
-### Camera / Stage — **COMPLETE (frozen)**
+### Camera / Stage — **COMPLETE (frozen; creator-language UX)**
+Panel select → Inspector top "CAMERA / STAGE": Presets (Dialogue / Close
+Emotion / Hero Entrance / Intimidating / Action Impact / Establishing Shot —
+combos of existing controls, no stored preset state) → Shot (Close-up/Medium/
+Full/Wide glyph buttons) → Angle (High/Eye Level/Low) → Lens (Dramatic=wide /
+Natural=normal / Flat=tele) → Focus on [character] → per-character Distance
+from Camera slider. Perspective Guides fold (eye level / VP editing /
+perspective strength / Tilt=roll); Advanced fold (pitch/yaw/roll/fov/horizonY).
+Pure UX adapter over the frozen camera core (`PanelStageControls.tsx`);
+browser acceptance `scripts/smoke-camera-ux.mjs` 11/11 PASS.
 `src/domain/camera.ts`, `src/domain/staging.ts`, `src/domain/stageOps.ts`,
 `src/components/canvas/PerspectiveOverlay.tsx`, `PanelRollGroup.tsx`,
 `src/components/inspector/PanelStageControls.tsx` (panel-level) +
