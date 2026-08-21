@@ -154,7 +154,10 @@ function CategorySection({
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/webp,image/jpeg,image/svg+xml"
+              // SVG is deliberately absent: the upload path measures dimensions
+              // with createImageBitmap, which does not decode SVG, so offering
+              // it would be an affordance that always fails.
+              accept="image/png,image/webp,image/jpeg"
               multiple
               hidden
               onChange={(event) => onFiles(event.target.files)}
