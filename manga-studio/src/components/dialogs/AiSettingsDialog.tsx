@@ -10,6 +10,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUiStore } from "@/editor/uiStore";
 import {
+  fetchProviderStatus,
+  type ProviderStatusSnapshot,
+} from "@/services/generation";
+import type { ProviderSummary } from "@/server/providerSession";
+import {
   CloseIcon,
   DoneIcon,
   HiddenIcon,
@@ -25,22 +30,6 @@ import {
   emptyCustomForm,
   type CustomFormState,
 } from "./CustomProviderForm";
-
-interface ProviderSummary {
-  configured: boolean;
-  source?: "session" | "deployment";
-  providerType?: string;
-  name?: string;
-  baseUrl?: string;
-  model?: string;
-  custom?: Record<string, unknown>;
-}
-
-interface StatusResponse {
-  agent: ProviderSummary;
-  image: ProviderSummary & { capabilities?: Record<string, boolean> };
-  background: ProviderSummary;
-}
 
 /**
  * Protocol-first: these are API STANDARDS, not a vendor list. Any provider
@@ -68,11 +57,10 @@ const BACKGROUND_PROTOCOLS = [
 export function AiSettingsDialog() {
   const open = useUiStore((s) => s.settingsOpen);
   const close = useUiStore((s) => s.closeSettings);
-  const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [status, setStatus] = useState<ProviderStatusSnapshot | null>(null);
 
   const refresh = useCallback(() => {
-    fetch("/api/provider/status")
-      .then((r) => r.json())
+    fetchProviderStatus()
       .then(setStatus)
       .catch(() => setStatus(null));
   }, []);

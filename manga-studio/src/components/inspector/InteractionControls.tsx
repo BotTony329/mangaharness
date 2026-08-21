@@ -22,7 +22,7 @@
 
 import { useState } from "react";
 import { puppetForInstance } from "@/domain/puppetOps";
-import { executeInteraction } from "@/domain/interactionService";
+import { executeInteraction } from "@/services/interaction";
 import { resolveIdentityReferences, type IdentityReference } from "@/characters/identityReference";
 import { IdentityReferenceRepair } from "./IdentityReferenceRepair";
 import { INTERACTION_LABELS, evaluateInteractionCapability } from "@/domain/interactions";

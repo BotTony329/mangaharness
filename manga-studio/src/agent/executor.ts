@@ -4,12 +4,15 @@
  * Client-side plan executor. Every step runs through the same domain
  * commands the manual UI uses, inside one history transaction — a whole
  * agent run is a single undo step, and the agent has no write path of its
- * own. Failed steps are reported and skipped; the run continues so one bad
- * step doesn't waste the generations that succeeded.
+ * own. What a failed step MEANS is policy (`stepPolicy.ts`): noncritical
+ * steps are skipped and named, `create_interaction` has an explicit
+ * approximate-composition fallback, anything else aborts and rolls the page
+ * back — while paid-for library assets survive and are named in the summary.
  */
 
-import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
-import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
+import { createCharacter } from "@/services/characters";
+import { generateSceneryAsset } from "@/services/scenery";
+import { generateMangaEffectImage, registerMangaEffectAsset } from "@/services/language";
 import { DEFAULT_CHARACTER_STATE, stateFromInstance } from "@/characters/state";
 import { applyCharacterStateToInstance, generateCharacterAssetForState } from "@/characters/stateRuntime";
 import type { DomainCommand, SemanticFraming } from "@/domain/commands";
@@ -36,8 +39,7 @@ import type {
   ShotType,
 } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
-import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
+import { isAssetReadyForComposition } from "@/assets/renderSource";
 import { findUnreadyCharacterAsset, requireCharacter, requestedCharacterState, resolveCharacterAsset, resolveLibraryAsset } from "./resolver";
 import { characterIdOfInstance } from "@/characters/identity";
 import { tonePreset, type ToneMask } from "@/domain/tones";
@@ -46,7 +48,7 @@ import { panelPxRect } from "@/domain/docHelpers";
 import { hasExactState } from "./planValidation";
 import { normalizeReference } from "./grounding";
 import { bestLanguageAsset } from "@/language/library";
-import { executeInteraction } from "@/domain/interactionService";
+import { executeInteraction } from "@/services/interaction";
 import { charactersInAsset } from "@/domain/interactions";
 import { poseIntentFromDescriptors } from "@/characters/poseRig";
 import { isPuppetInstance, puppetForInstance } from "@/domain/puppetOps";
@@ -91,6 +93,13 @@ export interface ExecutionSummary {
   fallbacks: FallbackUse[];
   /** Noncritical steps that failed and were skipped. */
   skippedSteps: StepFailure[];
+  /**
+   * Names of library assets generated during a run whose page changes were
+   * rolled back. The images cost real money and survive on purpose
+   * (preserveRunArtifacts) — the run result must say so, never "nothing
+   * changed" while the library quietly grew.
+   */
+  preservedAssets: string[];
 }
 
 export function describeStep(step: AgentPlan["steps"][number]): string {
@@ -318,6 +327,11 @@ export async function executePlan(
   const unresolvedWarnings = validationIssues.filter(
     (issue) => !issue.corrected && issue.severity !== "info",
   ).length;
+  const preservedAssets = rolledBack
+    ? Object.values(currentDoc().assets)
+        .filter((asset) => !before.assets[asset.id])
+        .map((asset) => asset.name)
+    : [];
   return {
     completed,
     failed,
@@ -326,6 +340,7 @@ export async function executePlan(
     abortReason,
     fallbacks,
     skippedSteps,
+    preservedAssets,
     status: runStatusOf({ rolledBack, fallbacks, skippedSteps, unresolvedWarnings }),
   };
 }
@@ -487,13 +502,13 @@ function doCreateCharacter(args: { name: string; appearance?: string; personalit
   if (authorized.length > 0 && !authorized.includes(normalizeReference(args.name))) {
     throw new Error(`Creation was authorized for ${authorized.join(", ")}, not "${args.name}".`);
   }
-  const created = dispatch({
-    type: "create-character",
-    name: args.name,
-    appearance: args.appearance ?? args.description,
-    personalityNotes: args.personalityNotes,
-  });
-  if (created.createdId) createdCharacterIds.push(created.createdId);
+  createdCharacterIds.push(
+    createCharacter({
+      name: args.name,
+      appearance: args.appearance ?? args.description,
+      personalityNotes: args.personalityNotes,
+    }),
+  );
 }
 
 /** Resolution that reports "no unambiguous match" rather than throwing. */
@@ -542,31 +557,7 @@ async function doGenerateScenery(
   args: { description: string; name?: string },
   category: "background" | "prop",
 ): Promise<void> {
-  const doc = currentDoc();
-  const style = getStyleGenerationContext(doc);
-  const prompt = buildAssetPrompt({
-    assetType: category,
-    description: args.description,
-    style: style.profile,
-    monochrome: isMonochromeStyle(style.profile),
-  });
-  const result = await callGenerateApi({
-    assetType: category,
-    prompt,
-    negativePrompt: style.profile.negativePrompt,
-    size: defaultAspect(category),
-    expectMonochrome: isMonochromeStyle(style.profile),
-    referenceUrls: style.referenceAsset ? [assetRenderUrl(style.referenceAsset)!] : undefined,
-  });
-  const assetId = await storeGeneratedAsset({
-    result,
-    assetType: category,
-    category,
-    name: args.name ?? args.description.slice(0, 40),
-    prompt,
-    metadata: styleMetadata(style),
-  });
-  stageOnWorkspace(assetId);
+  stageOnWorkspace(await generateSceneryAsset({ category, description: args.description, name: args.name }));
 }
 
 /**
@@ -1171,51 +1162,19 @@ async function doGenerateMangaEffect(args: {
     throw new Error(`"${existing.name}" already covers that — reuse it with place_manga_effect instead of generating.`);
   }
 
-  const style = getStyleGenerationContext(doc);
-  const prompt = buildAssetPrompt({
-    assetType: "manga-effect",
-    description: args.description,
-    languageCategory: args.category,
-    style: style.profile,
-    // Project style governs generated language too, so a monochrome project
-    // cannot acquire a full-colour sparkle (§16).
-    monochrome: isMonochromeStyle(style.profile),
-  });
-  const result = await callGenerateApi({
-    assetType: "manga-effect",
-    prompt,
-    negativePrompt: style.profile.negativePrompt,
-    size: "square",
-    expectMonochrome: isMonochromeStyle(style.profile),
-    referenceUrls: style.referenceAsset ? [assetRenderUrl(style.referenceAsset)!] : undefined,
-  });
-  const name = args.name ?? args.description.slice(0, 40);
-  const assetId = await storeGeneratedAsset({
+  const { result, prompt } = await generateMangaEffectImage(doc, args.description, args.category);
+  const { languageAssetId, name } = await registerMangaEffectAsset({
     result,
-    assetType: "manga-effect",
-    category: "prop",
-    name,
     prompt,
-    metadata: styleMetadata(style),
+    description: args.description,
+    category: args.category,
+    name: args.name,
   });
-  const created = dispatch({
-    type: "add-language-asset",
-    input: {
-      category: args.category,
-      name,
-      source: "ai-generated",
-      format: "visual",
-      assetId,
-      tags: [args.category, ...args.description.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)].slice(0, 12),
-      generationMetadata: { prompt, styleProfileId: style.profile.id, createdAt: new Date().toISOString() },
-    },
-  });
-  if (!created.createdId) throw new Error("Generated effect could not be registered in the library");
   lastLanguageAction = `Generated "${name}" and added it to the library`;
 
   if (args.panel === undefined) return;
   doc = currentDoc();
-  placeLanguageAssetOnTarget(doc, panelIdByNumber(args.panel), created.createdId, args);
+  placeLanguageAssetOnTarget(doc, panelIdByNumber(args.panel), languageAssetId, args);
 }
 
 function placeLanguageAssetOnTarget(

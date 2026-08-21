@@ -14,7 +14,7 @@
  * The result is labelled as what it is — "friend + 豆包 · Hug" — rather than
  * pretending the combined image is still one of them.
  *
- * The drawing itself belongs to `domain/interactionService`, which the Agent
+ * The drawing itself belongs to `services/interaction`, which the Agent
  * also calls. This file is preview and confirmation only: two pipelines would
  * drift until a hug meant different things depending on how it was asked for.
  */
@@ -22,7 +22,7 @@
 import { useState } from "react";
 import { assetRenderUrl } from "@/assets/renderSource";
 import { INTERACTION_LABELS } from "@/domain/interactions";
-import { placeInteractionRender, renderInteraction } from "@/domain/interactionService";
+import { placeInteractionRender, renderInteraction } from "@/services/interaction";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";

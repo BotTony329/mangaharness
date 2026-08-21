@@ -174,6 +174,35 @@ describe("CASE 3 — a required identity generation fails", () => {
   });
 });
 
+describe("CASE 5 — rollback keeps paid-for library assets, and says so", () => {
+  it("is FAILED, page untouched, preservedAssets names the survivor", async () => {
+    const { panelIds } = openProject();
+    stubNetwork(false); // generation succeeds…
+    withReadyCharacter("Yuri");
+    const before = useEditorStore.getState().doc!;
+
+    const { plan } = validatePlan({
+      summary: "Generate a lamp, then an impossible pose",
+      steps: [
+        { tool: "generate_prop", args: { description: "a brass desk lamp", name: "Brass lamp" } },
+        // …but this required step needs a state that cannot generate (network
+        // fine, yet the pose is unrequested) — force failure via a scope-free
+        // required step: place a character that does not exist.
+        { tool: "place_character", args: { panel: 1, characterName: "Ghost Nobody" } },
+      ],
+    });
+    const summary = await executePlan(plan!, () => {});
+
+    expect(summary.status).toBe("failed");
+    expect(summary.rolledBack).toBe(true);
+    const after = useEditorStore.getState().doc!;
+    expect(after.panels[panelIds[0]].itemIds).toHaveLength(before.panels[panelIds[0]].itemIds.length);
+    // The paid-for prop survived the rollback and the summary SAYS so.
+    expect(summary.preservedAssets).toContain("Brass lamp");
+    expect(after.assets).not.toEqual(before.assets);
+  });
+});
+
 describe("CASE 4 — decoration fails on an otherwise complete scene", () => {
   it("is PARTIALLY_COMPLETED: the scene survives, the failure is named", async () => {
     const { panelIds } = openProject();

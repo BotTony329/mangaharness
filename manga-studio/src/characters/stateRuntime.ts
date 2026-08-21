@@ -1,6 +1,6 @@
 "use client";
 
-import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
+import { generateImage, registerGeneratedAsset, imageProviderCapabilities } from "@/services/generation";
 import { buildAssetPrompt, buildCharacterStatePrompt } from "@/ai/promptTemplates";
 import type { Character, CharacterState, ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -24,28 +24,12 @@ export interface CharacterGenerationProgress {
   state: CharacterState;
 }
 
-interface ImageProviderCapabilities {
-  referenceImage: boolean;
-  nativeTransparency: boolean;
-}
-
 /**
  * Capabilities decide how the prompt asks for an isolated subject. Defaulting
  * `nativeTransparency` to false is the safe direction: it asks for a keyable
  * flat colour field, which every provider can render, instead of asking an
  * opaque model for alpha it cannot produce.
  */
-async function imageProviderCapabilities(): Promise<ImageProviderCapabilities> {
-  try {
-    const status = await fetch("/api/provider/status").then((response) => response.json());
-    return {
-      referenceImage: Boolean(status?.capabilities?.referenceImage),
-      nativeTransparency: Boolean(status?.capabilities?.supportsTransparentBackground),
-    };
-  } catch {
-    return { referenceImage: false, nativeTransparency: false };
-  }
-}
 
 export async function generateCharacterAssetForState(input: {
   characterId: ID;
@@ -118,7 +102,7 @@ export async function generateCharacterAssetForState(input: {
           monochrome: isMonochromeStyle(style.profile),
         });
 
-  const result = await callGenerateApi({
+  const result = await generateImage({
     assetType,
     prompt,
     negativePrompt: style.profile.negativePrompt,
@@ -126,7 +110,7 @@ export async function generateCharacterAssetForState(input: {
     expectMonochrome: isMonochromeStyle(style.profile),
     referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
   });
-  return storeGeneratedAsset({
+  return registerGeneratedAsset({
     result,
     assetType,
     category: "character",

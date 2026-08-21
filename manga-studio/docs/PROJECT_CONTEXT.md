@@ -4,6 +4,15 @@
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
 
+> **2026-08-22 Editor Core decoupling (phase 1):** `src/services/` is now the
+> single application-service layer — generation, characters, scenery,
+> manga-language and interaction all enter through it from BOTH the UI and the
+> Agent. The executor no longer touches the generation HTTP client or prompt
+> assembly directly; ad-hoc provider-status fetches are gone; run summaries
+> name preserved assets after a rollback. Architecture boundaries are enforced
+> by `src/services/architecture.test.ts`. Full before/after graphs:
+> `docs/EDITOR_CORE_DECOUPLING.md`. 872 tests / 73 files green.
+>
 > **2026-08-22 P0 product closure:** three fixes landed — (1) AI Settings is
 > protocol-first (API standard dropdown, provider name is a free label, Custom
 > JSON folds out Advanced API mapping); (2) background removal is an optional
@@ -655,7 +664,7 @@ the item-by-item classification.
 - **Validation has severity.** `IssueSeverity` = info / warning / fatal; any
   fatal aborts. The panel says what was restored instead of "Done with 1 warning".
 - **`create_interaction`** reaches the Agent, through the same
-  `domain/interactionService` the Inspector uses — capability check, cache reuse,
+  `services/interaction` the Inspector uses — capability check, cache reuse,
   one joint render carrying BOTH identity references, provenance, placement.
 - **Execution classes.** `agent/capabilityRouter.ts` answers whether a tool can
   spend a generation; an unclassified tool is treated as generative.

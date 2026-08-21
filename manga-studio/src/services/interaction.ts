@@ -19,7 +19,7 @@
  * sprites. A hug that cannot be generated fails loudly instead.
  */
 
-import { callGenerateApi, storeGeneratedAsset } from "@/ai/clientGeneration";
+import { generateImage, registerGeneratedAsset } from "@/services/generation";
 import { buildAssetPrompt } from "@/ai/promptTemplates";
 import { assetRenderUrl } from "@/assets/renderSource";
 import { resolveCharacterIdentityReference, resolveIdentityReferences } from "@/characters/identityReference";
@@ -27,7 +27,7 @@ import { stateFromInstance } from "@/characters/state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { puppetForInstance } from "./puppetOps";
+import { puppetForInstance } from "@/domain/puppetOps";
 import {
   INTERACTION_LABELS,
   buildMultiCharacterRequest,
@@ -36,7 +36,7 @@ import {
   interactionCacheKey,
   midpointAnchor,
   type InteractionCapabilityResult,
-} from "./interactions";
+} from "@/domain/interactions";
 
 export interface InteractionRequest {
   panelId: ID;
@@ -286,7 +286,7 @@ export async function renderInteraction(
     ...expressionConstraints,
   ].join(" ");
 
-  const result = await callGenerateApi({
+  const result = await generateImage({
     assetType: "character",
     prompt,
     negativePrompt: style.profile.negativePrompt,
@@ -296,7 +296,7 @@ export async function renderInteraction(
   });
 
   const names = participantIds.map((id) => doc().characters[id]?.name ?? id);
-  const assetId = await storeGeneratedAsset({
+  const assetId = await registerGeneratedAsset({
     result,
     assetType: "character",
     category: "character",

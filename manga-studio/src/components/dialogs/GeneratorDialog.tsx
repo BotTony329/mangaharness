@@ -8,12 +8,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  callGenerateApi,
+  generateImage,
   GenerationApiError,
   recordFailedGeneration,
-  storeGeneratedAsset,
+  registerGeneratedAsset,
+  fetchProviderStatus,
   type GenerateApiResult,
-} from "@/ai/clientGeneration";
+} from "@/services/generation";
+import { registerMangaEffectAsset } from "@/services/language";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
 import { referenceOptions } from "@/characters/stateResolver";
@@ -54,20 +56,6 @@ const TONE_TYPES: { id: "texture" | "atmosphere" | "decorative" | "pattern"; lab
   { id: "pattern", label: "Pattern", hint: "A motif that repeats without a seam" },
 ];
 
-/**
- * Search tags for a generated effect, from what the creator actually typed.
- * The category is always included so a "shock" search finds it even when the
- * description used different words.
- */
-function tagsFromDescription(description: string, category: MangaLanguageCategory): string[] {
-  const stop = new Set(["a", "an", "the", "with", "and", "of", "for", "in", "on", "style", "manga"]);
-  const words = description
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter((word) => word.length > 2 && !stop.has(word));
-  return [...new Set([category, ...words])].slice(0, 12);
-}
 
 export function GeneratorDialog() {
   const request = useUiStore((s) => s.generator);
@@ -100,8 +88,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const [referenceUse, setReferenceUse] = useState<"layout" | "style" | "loose">("style");
 
   useEffect(() => {
-    fetch("/api/provider/status")
-      .then((r) => r.json())
+    fetchProviderStatus()
       .then(setProvider)
       .catch(() => setProvider({ configured: false }));
   }, []);
@@ -194,7 +181,7 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
             (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
           )
         : [];
-      const output = await callGenerateApi({
+      const output = await generateImage({
         assetType: request.assetType,
         prompt,
         negativePrompt: style?.profile.negativePrompt,
@@ -224,36 +211,18 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
      * an anonymous "prop" nobody could search for.
      */
     if (isLanguageType) {
-      const assetId = await storeGeneratedAsset({
+      await registerMangaEffectAsset({
         result,
-        assetType: "manga-effect",
-        category: "prop",
-        name: description.slice(0, 40) || "Manga effect",
         prompt,
-        metadata: style ? styleMetadata(style) : undefined,
-      });
-      useEditorStore.getState().dispatch({
-        type: "add-language-asset",
-        input: {
-          category: languageCategory,
-          name: description.slice(0, 40) || "Manga effect",
-          source: "ai-generated",
-          format: "visual",
-          assetId,
-          tags: tagsFromDescription(description, languageCategory),
-          generationMetadata: {
-            prompt,
-            styleProfileId: style?.profile.id,
-            createdAt: new Date().toISOString(),
-          },
-        },
+        description,
+        category: languageCategory,
       });
       onClose();
       return;
     }
 
     const category: AssetCategory = isCharacterType ? "character" : (request.assetType as AssetCategory);
-    const assetId = await storeGeneratedAsset({
+    const assetId = await registerGeneratedAsset({
       result,
       assetType: request.assetType,
       category,

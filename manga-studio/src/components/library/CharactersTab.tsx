@@ -7,12 +7,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  DEFAULT_CHARACTER_STATE,
   characterReferenceId,
   findExactCharacterAsset,
   stateFromAsset,
 } from "@/characters/state";
-import { generateCharacterAssetForState, starterPackStates } from "@/characters/stateRuntime";
+import { starterPackStates } from "@/characters/stateRuntime";
+import { attachCanonicalReferenceFile, createCharacter, generateCanonicalReference, generateCharacterState } from "@/services/characters";
+import { fetchProviderStatus } from "@/services/generation";
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
@@ -30,7 +31,6 @@ import {
 } from "../ui/icons";
 import { AssetThumb } from "./AssetThumb";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
-import { uploadImageFile } from "./uploadAsset";
 import { repairAssetTransparency, type RepairProgress } from "@/assets/clientProcessing";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import {
@@ -239,8 +239,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/provider/status")
-      .then((response) => response.json())
+    fetchProviderStatus()
       .then(setProviderStatus)
       .catch(() => setProviderStatus({ configured: false }));
   }, []);
@@ -288,28 +287,12 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
     }
     setIsBusy(true);
     setError(null);
-    const created = useEditorStore.getState().dispatch({
-      type: "create-character",
-      name: name.trim(),
-      appearance: appearance.trim() || undefined,
-      personalityNotes: personalityNotes.trim() || undefined,
-    });
-    const characterId = created.createdId;
-    if (!characterId) throw new Error("Character creation failed");
+    const characterId = createCharacter({ name, appearance, personalityNotes });
     const referenceFile = reference?.file;
     if (referenceFile) {
       try {
-        const assetId = await uploadImageFile(referenceFile, "character", {
-          name: `${name} reference`,
-          metadata: {
-            characterId,
-            ...DEFAULT_CHARACTER_STATE,
-            characterAssetRole: "canonical",
-          },
-        });
-        useEditorStore.getState().dispatch({ type: "set-character-reference", characterId, assetId });
+        await attachCanonicalReferenceFile(characterId, referenceFile, name);
       } catch (e) {
-        useEditorStore.getState().dispatch({ type: "delete-character", characterId, mode: "delete-all" });
         setError(e instanceof Error ? e.message : "Reference upload failed");
         setIsBusy(false);
         return;
@@ -360,8 +343,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
 
     const offset = 1;
     if (!hasUploadedReference) {
-      const canonicalState = { characterId, ...DEFAULT_CHARACTER_STATE };
-      const continued = await run(0, () => generateCharacterAssetForState({ characterId, state: canonicalState, role: "canonical" }));
+      const continued = await run(0, () => generateCanonicalReference(characterId));
       if (!continued) return;
     }
     if (selectedMode === "reference") return;
@@ -377,7 +359,7 @@ function CreateCharacterDialog({ onClose }: { onClose: () => void }) {
         setPackItems((items) => items.map((item, i) => i === index + offset ? { ...item, status: "done" } : item));
         continue;
       }
-      await run(index + offset, () => generateCharacterAssetForState({ characterId, state, role: "state" }));
+      await run(index + offset, () => generateCharacterState(characterId, state));
     }
   };
 

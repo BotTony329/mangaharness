@@ -6,17 +6,16 @@
  * This is the arrow the Agent was missing: it identified what a request needed
  * and then stopped, because the library did not already contain it. Everything
  * here goes through the SAME services the manual UI uses — `create-character`
- * is the command behind "+ New Character", and `generateCharacterAssetForState`
- * is the function behind the starter pack — so a character the Agent makes is
+ * is the service behind "+ New Character", and `generateCharacterState`
+ * is the call behind the starter pack — so a character the Agent makes is
  * indistinguishable from one the creator made, and is reusable afterwards.
  *
  * There is deliberately no Agent-only generation pipeline. A second path would
  * drift, and the creator would end up with two kinds of character.
  */
 
-import { generateCharacterAssetForState } from "@/characters/stateRuntime";
 import { resolveCharacterIdentityReference } from "@/characters/identityReference";
-import { DEFAULT_CHARACTER_STATE } from "@/characters/state";
+import { createCharacter, generateCanonicalReference, generateCharacterState } from "@/services/characters";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import type { AssetRequirement } from "./assetRequirements";
@@ -72,22 +71,15 @@ export async function fulfilRequirements(requirements: AssetRequirement[]): Prom
          * canonical-identity generation the starter pack runs. The character
          * appears in the library exactly as a hand-made one does.
          */
-        const created = useEditorStore.getState().dispatch({
-          type: "create-character",
+        const characterId = createCharacter({
           name: requirement.fulfilment.proposedName,
           appearance: requirement.fulfilment.description,
         });
-        const characterId = created.createdId;
-        if (!characterId) throw new Error(`${requirement.fulfilment.proposedName} could not be created`);
         result.characterIds[requirement.semanticId] = characterId;
         result.created.push({ characterId, name: requirement.fulfilment.proposedName });
 
         try {
-          await generateCharacterAssetForState({
-            characterId,
-            state: { characterId, ...DEFAULT_CHARACTER_STATE },
-            role: "canonical",
-          });
+          await generateCanonicalReference(characterId);
           result.generated += 1;
         } catch (cause) {
           throw new RequirementFailure(requirement, cause);
@@ -98,11 +90,7 @@ export async function fulfilRequirements(requirements: AssetRequirement[]): Prom
       case "generate-state": {
         const { characterId } = requirement.fulfilment;
         try {
-          await generateCharacterAssetForState({
-            characterId,
-            state: { characterId, ...DEFAULT_CHARACTER_STATE, ...(requirement.state ?? {}) },
-            role: "state",
-          });
+          await generateCharacterState(characterId, requirement.state ?? {});
           result.generated += 1;
         } catch (cause) {
           throw new RequirementFailure(requirement, cause);
@@ -116,8 +104,10 @@ export async function fulfilRequirements(requirements: AssetRequirement[]): Prom
          * exists now, so the requirement is resolved against what was just
          * made rather than against the document as it was when planning ran.
          */
-        const characterId = result.characterIds[requirement.semanticId] ?? requirement.semanticId;
-        if (!doc().characters[characterId]) {
+        // Temporary semantic ids end at this boundary: if the create step did
+        // not run, there is no real id — fail, never guess one.
+        const characterId = result.characterIds[requirement.semanticId];
+        if (!characterId || !doc().characters[characterId]) {
           throw new RequirementFailure(requirement, new Error("the character it belongs to was not created"));
         }
         const identity = resolveCharacterIdentityReference(doc(), characterId);
@@ -125,11 +115,7 @@ export async function fulfilRequirements(requirements: AssetRequirement[]): Prom
           throw new RequirementFailure(requirement, new Error(identity.reason ?? "there is no reference image to draw from"));
         }
         try {
-          await generateCharacterAssetForState({
-            characterId,
-            state: { characterId, ...DEFAULT_CHARACTER_STATE, ...(requirement.state ?? {}) },
-            role: "state",
-          });
+          await generateCharacterState(characterId, requirement.state ?? {});
           result.generated += 1;
         } catch (cause) {
           throw new RequirementFailure(requirement, cause);

@@ -558,7 +558,7 @@ only meant to add to.
 
 ## D56 — One interaction service, two callers
 
-`domain/interactionService.ts` owns capability evaluation, cache reuse, the joint
+`services/interaction.ts` owns capability evaluation, cache reuse, the joint
 render and placement. The Inspector calls `renderInteraction` then
 `placeInteractionRender` so it can preview first; the Agent calls
 `executeInteraction`, which does both. Two pipelines would drift until a hug
@@ -721,7 +721,7 @@ two actors are selected they are promoted to a banner above everything about
 either character individually.
 
 Every interaction path — the single-character picker, the pair banner, and the
-Agent's `create_interaction` — goes through `domain/interactionService`. The
+Agent's `create_interaction` — goes through `services/interaction`. The
 Inspector previously ran its own capability check, dispatch and anchor logic;
 two implementations of "what a hug is" drift until the result depends on how the
 creator asked.

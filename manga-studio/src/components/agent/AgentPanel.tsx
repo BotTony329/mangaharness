@@ -24,6 +24,7 @@ import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { characterIdOfInstance } from "@/characters/identity";
 import { useUiStore } from "@/editor/uiStore";
+import { fetchProviderStatus } from "@/services/generation";
 import {
   AlertIcon,
   CheckIcon,
@@ -95,8 +96,7 @@ export function AgentPanel() {
   // Re-check when settings close so connecting a model enables Run instantly.
   useEffect(() => {
     if (settingsOpen) return;
-    fetch("/api/provider/status")
-      .then((r) => r.json())
+    fetchProviderStatus()
       .then((s) => setAgentConfigured(Boolean(s?.agent?.configured)))
       .catch(() => setAgentConfigured(false));
   }, [settingsOpen]);
@@ -618,7 +618,18 @@ export function AgentPanel() {
       )}
       {error && (
         <div className="rounded border border-red-900 bg-red-950/50 p-3 text-red-200">
-          <p className="font-medium">{runSummary?.status === "failed" ? "Run failed — nothing was changed" : "Agent planning failed"}</p>
+          <p className="font-medium">
+            {runSummary?.status === "failed"
+              ? runSummary.preservedAssets.length > 0
+                ? "Run failed — page changes were rolled back"
+                : "Run failed — nothing was changed"
+              : "Agent planning failed"}
+          </p>
+          {runSummary?.status === "failed" && runSummary.preservedAssets.length > 0 && (
+            <p className="mt-1 text-[11px] text-amber-300">
+              Kept in the library for reuse: {runSummary.preservedAssets.join(", ")}
+            </p>
+          )}
           <p className="mt-1 text-[11px] text-red-300">{error}</p>
           {errorDetails && (
             <details className="mt-2 text-[10px] text-zinc-400">
