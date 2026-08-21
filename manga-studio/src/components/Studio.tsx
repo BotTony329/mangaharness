@@ -8,6 +8,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/editor/store";
+import { describeIdentityResolution } from "@/characters/identityReference";
 import { useProjectsStore } from "@/editor/projectsStore";
 import { useUiStore } from "@/editor/uiStore";
 import { indexedDbPersistence } from "@/storage/projectStore";
@@ -45,6 +46,12 @@ export function Studio() {
       const w = window as unknown as Record<string, unknown>;
       w.__editorStore = useEditorStore;
       w.__uiStore = useUiStore;
+      /**
+       * Identity audit hook. Development only — it exists so a reported
+       * "cannot draw them together" can be inspected rather than guessed at.
+       */
+      w.__identityAudit = (characterId: string) =>
+        describeIdentityResolution(useEditorStore.getState().doc!, characterId);
     }
   }, []);
 

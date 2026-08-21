@@ -828,3 +828,30 @@ close-up DOES mean "this is about the panel". `scopeForPanels` now widens a
 selection-locked scope by one step when the plan carries camera, perspective or
 focus intent, and records why — the same precedence rule already applied to a
 named character and to a named panel, arriving through a third axis.
+
+## D71 — Capability failures are repaired where they happen
+
+"Every participant needs a usable identity reference before a joint render."
+named nobody, explained nothing and offered no way out. Reproduced: the
+character's canonical POINTER was set — so the old check passed — but the asset
+it named had no finished cut-out, so the render URL resolved to nothing and the
+error fell out of a length comparison.
+
+Two different faults were tangled in one message. A pointer can be MISSING (an
+old or transparency-repaired document lost the forward link) or PRESENT BUT
+UNUSABLE (it names an image whose cut-out failed). The first is a data fault and
+is now repaired silently — asking a creator to understand a metadata link is not
+a product. The second is a real absence, and gets a card that names the
+character and offers Choose Existing, Upload Reference and Generate Reference,
+all attached to the EXISTING character.
+
+`characters/identityReference.ts` is the one resolver, shared by the Agent, the
+interaction UI and generation. Its ladder is canonical → legacy pointer → best
+usable image in the character's library → best usable image tagged with them
+anywhere. **Identity prefers a canonical or front/neutral image over whatever
+pose is currently placed**: handing a model a mid-jump, laughing, back-view
+anchor reproduces the pose and loses the face.
+
+Choose Existing re-runs the existing transparency pipeline when the picked image
+is not yet usable. Pointing at a broken image and declaring the problem solved
+would be a button that changes nothing.

@@ -171,6 +171,22 @@ subject, which is who the pronoun means.
 - A character already obscured BEFORE the run is a warning, not a fatal — the
   Agent is not blamed for a pile-up it did not create.
 
+## CAPABILITY RECOVERY RULE
+
+**A creator-facing capability is not complete if its failure state only explains
+why the operation cannot run. Every recoverable capability failure must identify
+the affected entity and provide an in-context path to repair it.**
+
+Concretely, a failure message must name WHO or WHAT is affected in the
+creator's own vocabulary, and the repair must be reachable from the place the
+creator hit the wall — not from documentation, not from another screen, and
+never by editing internal state. Terms like characterId, assetId, metadata link
+and resolver never appear in creator-facing copy.
+
+A data fault that the harness can fix on its own is not a decision to hand the
+creator. `resolveCharacterIdentityReference` repairs a broken pointer silently;
+only a genuinely absent capability produces a card.
+
 ## Permanent Agent rules
 
 **Scope defines where the Agent may operate. Grounding defines what entities the

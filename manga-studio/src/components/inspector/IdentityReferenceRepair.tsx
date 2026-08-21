@@ -25,7 +25,8 @@
 
 import { useRef, useState } from "react";
 import { assetPreviewUrl } from "@/assets/renderSource";
-import { characterAssets, type IdentityReference } from "@/characters/identityReference";
+import { characterAssets, isUsableIdentityAsset, type IdentityReference } from "@/characters/identityReference";
+import { repairAssetTransparency } from "@/assets/clientProcessing";
 import { uploadImageFile } from "../library/uploadAsset";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -94,9 +95,33 @@ function ParticipantRepair({
    */
   const existing = characterAssets(doc, reference.characterId);
 
-  const choose = (assetId: ID) => {
+  const choose = async (assetId: ID) => {
     dispatch({ type: "set-character-reference", characterId: reference.characterId, assetId });
     setChoosing(false);
+
+    /**
+     * A picture whose cut-out failed is still the right picture — it just is
+     * not usable YET. Pointing at it and declaring the problem solved would be
+     * a button that changes nothing, so the existing transparency pipeline is
+     * re-run on it here. That is the same repair the character card offers; it
+     * is reached from the place the creator actually hit the wall.
+     */
+    if (!isUsableIdentityAsset(useEditorStore.getState().doc?.assets[assetId])) {
+      setBusy("repair");
+      setError(null);
+      try {
+        const result = await repairAssetTransparency([assetId]);
+        if (result.failed > 0) {
+          setError("That image still has no usable cut-out. Try uploading or generating a reference instead.");
+          return;
+        }
+      } catch {
+        setError("That image could not be prepared. Try uploading or generating a reference instead.");
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
     onResolved?.();
   };
 
@@ -148,7 +173,7 @@ function ParticipantRepair({
           disabled={busy !== null}
           onClick={() => fileInput.current?.click()}
         >
-          {busy === "upload" ? (
+          {busy === "upload" || busy === "repair" ? (
             <SpinnerIcon size={11} strokeWidth={2} className="animate-spin" />
           ) : (
             <UploadIcon size={11} strokeWidth={ICON_STROKE} />
@@ -185,10 +210,10 @@ function ParticipantRepair({
           {existing.map((asset) => (
             <button
               key={asset.id}
-              className="h-16 w-16 overflow-hidden rounded border transition-colors hover:border-[var(--accent)]"
-              style={{ borderColor: "var(--border-subtle)" }}
-              title={asset.name}
-              onClick={() => choose(asset.id)}
+              className="relative h-16 w-16 overflow-hidden rounded border transition-colors hover:border-[var(--accent)]"
+              style={{ borderColor: isUsableIdentityAsset(asset) ? "var(--border-subtle)" : "var(--warning)" }}
+              title={isUsableIdentityAsset(asset) ? asset.name : `${asset.name} — needs its cut-out finishing, which this will do`}
+              onClick={() => void choose(asset.id)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={assetPreviewUrl(asset)} alt={asset.name} className="h-full w-full object-contain" />

@@ -184,3 +184,66 @@ export function resolveIdentityReferences(doc: ProjectDocument, characterIds: ID
 export function missingIdentityReferences(references: IdentityReference[]): IdentityReference[] {
   return references.filter((reference) => reference.status === "missing");
 }
+
+/**
+ * Every fact the resolver used, for one character.
+ *
+ * Exists so a failure can be AUDITED rather than guessed at: when a creator
+ * reports a dead end, this prints exactly which link was present, which asset
+ * it named, and why that asset was or was not usable.
+ */
+export interface IdentityDiagnostic {
+  characterId: ID;
+  characterName: string;
+  canonicalAssetId?: ID;
+  legacyReferenceAssetId?: ID;
+  characterAssetIds: ID[];
+  /** Assets tagged with this character that the forward links do not mention. */
+  taggedButUnlinked: ID[];
+  usableAssetIds: ID[];
+  unusableAssetIds: { assetId: ID; name: string; why: string }[];
+  resolvedAssetId?: ID;
+  resolvedFrom: IdentityReferenceSource;
+  usable: boolean;
+  needsRepair: boolean;
+  failureReason?: string;
+}
+
+/** Why this asset cannot be sent as a reference, in one line. */
+function unusableReason(asset: SourceAsset): string {
+  if (asset.status === "archived") return "archived";
+  if (asset.processingStatus === "failed") return "background removal failed";
+  if (asset.processingStatus === "processing") return "still processing";
+  if (!asset.processedImageUrl) return "no finished cut-out";
+  if (asset.hasAlpha === false) return "cut-out has no transparency";
+  return "does not satisfy the transparency contract";
+}
+
+export function describeIdentityResolution(doc: ProjectDocument, characterId: ID): IdentityDiagnostic {
+  const character = doc.characters[characterId];
+  const resolved = resolveCharacterIdentityReference(doc, characterId);
+  const all = characterAssets(doc, characterId);
+  const linked = new Set([
+    character?.canonicalReferenceAssetId,
+    character?.referenceAssetId,
+    ...(character?.assetIds ?? []),
+  ]);
+
+  return {
+    characterId,
+    characterName: resolved.characterName,
+    canonicalAssetId: character?.canonicalReferenceAssetId,
+    legacyReferenceAssetId: character?.referenceAssetId,
+    characterAssetIds: [...(character?.assetIds ?? [])],
+    taggedButUnlinked: all.filter((asset) => !linked.has(asset.id)).map((asset) => asset.id),
+    usableAssetIds: all.filter(isUsableIdentityAsset).map((asset) => asset.id),
+    unusableAssetIds: all
+      .filter((asset) => !isUsableIdentityAsset(asset))
+      .map((asset) => ({ assetId: asset.id, name: asset.name, why: unusableReason(asset) })),
+    resolvedAssetId: resolved.assetId,
+    resolvedFrom: resolved.source,
+    usable: resolved.status === "resolved",
+    needsRepair: resolved.needsRepair,
+    failureReason: resolved.reason,
+  };
+}
