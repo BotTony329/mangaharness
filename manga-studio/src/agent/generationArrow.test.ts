@@ -257,3 +257,40 @@ describe("what the planner is told", () => {
     expect(context).toContain("do not create one");
   });
 });
+
+/**
+ * Where the boundary actually was.
+ *
+ * Backgrounds, props and effects were never gated — the model calls the
+ * generate tool and the runtime obliges. Only entities with IDENTITY went
+ * through name resolution, and that is where resolution was doubling as an
+ * authorization gate. This test pins the non-character half so a future
+ * tightening of validation cannot quietly re-introduce the same failure for
+ * scenery.
+ */
+describe("generation that was never gated stays ungated", () => {
+  it("accepts background, prop and effect generation in an empty project", () => {
+    openProject();
+    const doc = useEditorStore.getState().doc!;
+    const prompt = "A rainy street at night with a red umbrella and speed lines";
+    const grounding = groundPrompt({ doc, prompt });
+    const { plan } = validatePlan({
+      summary: "scene",
+      steps: [
+        { tool: "generate_background", args: { description: "a rainy street at night", panel: 1 } },
+        { tool: "generate_prop", args: { description: "a red umbrella", panel: 1 } },
+        { tool: "generate_manga_effect", args: { description: "speed lines", panel: 1 } },
+      ],
+    });
+    const result = validateGroundedPlan({ plan: plan!, doc, grounding, panelCount: 2 });
+    expect(result.rejected).toHaveLength(0);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("does not turn scenery words into characters", () => {
+    openProject();
+    const { subject, requirements } = understand("A rainy street at night with a red umbrella");
+    expect(subject.newCharacters).toHaveLength(0);
+    expect(requirements.requirements.some((r) => r.fulfilment.how === "create-entity")).toBe(false);
+  });
+});
