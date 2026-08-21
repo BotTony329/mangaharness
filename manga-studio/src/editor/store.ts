@@ -18,6 +18,14 @@ export interface Selection {
   panelId?: ID;
   /** A loose asset on the workspace (outside any page). */
   workspaceItemId?: ID;
+  /**
+   * Additional selected items, for actions that need two actors — an
+   * interaction needs both participants.
+   *
+   * `itemId` remains the PRIMARY selection so every existing single-selection
+   * surface keeps working unchanged; this is strictly additive.
+   */
+  alsoItemIds?: ID[];
 }
 
 /** Mutations are doc → doc pure functions (see src/domain/*Ops.ts). */

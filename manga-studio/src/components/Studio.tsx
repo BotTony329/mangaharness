@@ -16,6 +16,7 @@ import { ArtStyleDialog } from "./dialogs/ArtStyleDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { PuppetCapabilityDialog } from "./dialogs/PuppetCapabilityDialog";
 import { PuppetCompilerDialog } from "./dialogs/PuppetCompilerDialog";
+import { InteractionDialog } from "./dialogs/InteractionDialog";
 import { AssetLibraryPanel } from "./library/AssetLibraryPanel";
 import { NewProjectDialog } from "./library/ProjectsPanel";
 import { PagesBar } from "./PagesBar";
@@ -147,6 +148,7 @@ export function Studio() {
       <ArtStyleDialog />
       <PuppetCapabilityDialog />
       <PuppetCompilerDialog />
+      <InteractionDialog />
     </div>
   );
 }

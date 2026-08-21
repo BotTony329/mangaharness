@@ -16,19 +16,28 @@ import { ProjectsPanel } from "./ProjectsPanel";
 import { uploadImageFile } from "./uploadAsset";
 import { AssetDeleteDialog } from "./LifecycleDialogs";
 
-type LibraryTab = "characters" | "backgrounds" | "props" | "mangafx" | "uploads";
+/**
+ * Creator-facing categories.
+ *
+ * "Backgrounds" was too narrow — a classroom, a street and a train station are
+ * SCENES. And a lamp or a notebook is an OBJECT, not a background: it is a
+ * reusable cutout that belongs on top of a scene. The distinction the creator
+ * sees is what the thing IS; underneath, Scenes map to the background asset
+ * category (kept whole) and Objects to prop (extracted).
+ */
+type LibraryTab = "characters" | "scenes" | "objects" | "mangafx" | "uploads";
 
 const TABS: { id: LibraryTab; label: string }[] = [
   { id: "characters", label: "Characters" },
-  { id: "backgrounds", label: "Backgrounds" },
-  { id: "props", label: "Props" },
+  { id: "scenes", label: "Scenes" },
+  { id: "objects", label: "Objects" },
   { id: "mangafx", label: "Manga FX" },
   { id: "uploads", label: "Uploads" },
 ];
 
 const TAB_CATEGORY: Record<Exclude<LibraryTab, "characters" | "mangafx">, AssetCategory> = {
-  backgrounds: "background",
-  props: "prop",
+  scenes: "background",
+  objects: "prop",
   uploads: "upload",
 };
 
@@ -124,7 +133,7 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
             className="flex-1 rounded border border-indigo-600 bg-indigo-600/20 py-1.5 text-xs text-indigo-300 hover:bg-indigo-600/40"
             onClick={() => openGenerator({ assetType: generatorType })}
           >
-            + Generate
+            {category === "background" ? "+ Generate Scene" : category === "prop" ? "+ Generate Object" : "+ Generate"}
           </button>
         )}
         <input
@@ -138,11 +147,26 @@ function CategoryGrid({ category }: { category: AssetCategory }) {
       </div>
       {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
       {assets.length === 0 ? (
-        <p className="mt-8 text-center text-xs text-zinc-600">
-          Nothing here yet.
-          <br />
-          Upload {generatorType ? "or generate " : ""}assets, then drag them into panels.
-        </p>
+        <div className="mt-6 rounded border border-zinc-800 bg-zinc-950 p-3 text-center text-[11px] leading-5 text-zinc-500">
+          {category === "background" ? (
+            <>
+              <p className="text-zinc-400">No scenes yet.</p>
+              <p className="mt-1 text-zinc-600">
+                Generate an environment — a classroom, a cyberpunk street, a bedroom — and drop it into a panel.
+              </p>
+            </>
+          ) : category === "prop" ? (
+            <>
+              <p className="text-zinc-400">No objects yet.</p>
+              <p className="mt-1 text-zinc-600">
+                Generate reusable items such as lamps, books, phones, bags and furniture. Objects are cut out, so
+                they sit on top of a scene.
+              </p>
+            </>
+          ) : (
+            <p className="text-zinc-600">Nothing here yet. Upload files to reuse them across panels.</p>
+          )}
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {assets.map((asset) => (

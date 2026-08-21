@@ -80,6 +80,8 @@ interface UiState {
   puppetHandlesInstanceId: ID | null;
   /** Compiler wizard target character, or null when closed. */
   compilerCharacterId: ID | null;
+  /** Interaction awaiting coordinated generation and review, or null. */
+  interactionRequest: { interactionId: ID } | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
@@ -107,6 +109,8 @@ interface UiState {
   setPuppetHandlesInstance(instanceId: ID | null): void;
   openCompiler(characterId: ID): void;
   closeCompiler(): void;
+  openInteraction(request: { interactionId: ID }): void;
+  closeInteraction(): void;
   openSettings(): void;
   closeSettings(): void;
   openArtStyle(): void;
@@ -126,6 +130,7 @@ export const useUiStore = create<UiState>((set) => ({
   puppetCapabilityPrompt: null,
   puppetHandlesInstanceId: null,
   compilerCharacterId: null,
+  interactionRequest: null,
   settingsOpen: false,
   artStyleOpen: false,
   advancedMode: false,
@@ -145,6 +150,8 @@ export const useUiStore = create<UiState>((set) => ({
   setPuppetHandlesInstance: (instanceId) => set({ puppetHandlesInstanceId: instanceId }),
   openCompiler: (characterId) => set({ compilerCharacterId: characterId }),
   closeCompiler: () => set({ compilerCharacterId: null }),
+  openInteraction: (request) => set({ interactionRequest: request }),
+  closeInteraction: () => set({ interactionRequest: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   setAdvancedMode: (enabled) => set({ advancedMode: enabled }),

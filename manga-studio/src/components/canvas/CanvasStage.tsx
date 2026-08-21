@@ -343,7 +343,7 @@ export function CanvasStage() {
    * an overlapped layer is reachable without pixel-perfect aim.
    */
   const selectAtPointer = useCallback(
-    (clientX: number, clientY: number, cycle: boolean): boolean => {
+    (clientX: number, clientY: number, cycle: boolean, extend = false): boolean => {
       const target = pointerToPanel(clientX, clientY);
       if (!target || !doc) return false;
       const stack = hitStack(doc, target.panelId, target.point, { alpha: sampleAssetAlpha });
@@ -366,6 +366,21 @@ export function CanvasStage() {
         : stack[0];
       if (!chosen) return false;
       lastClick.current = { x: clientX, y: clientY, panelId: target.panelId, at: Date.now() };
+
+      /**
+       * Shift extends the selection, which is what makes two-actor actions —
+       * "select both, then Hug" — the fastest path.
+       */
+      if (extend) {
+        const current = useEditorStore.getState().selection;
+        if (current.itemId && current.itemId !== chosen.itemId) {
+          const also = new Set(current.alsoItemIds ?? []);
+          if (also.has(chosen.itemId)) also.delete(chosen.itemId);
+          else also.add(chosen.itemId);
+          select({ itemId: current.itemId, panelId: target.panelId, alsoItemIds: [...also] });
+          return true;
+        }
+      }
       select({ itemId: chosen.itemId, panelId: target.panelId });
       return true;
     },
@@ -530,7 +545,7 @@ export function CanvasStage() {
           const native = e.evt as MouseEvent;
           setLayerMenu(null);
           if (!spaceHeld && native.button === 0) {
-            const handled = selectAtPointer(native.clientX, native.clientY, native.altKey);
+            const handled = selectAtPointer(native.clientX, native.clientY, native.altKey, native.shiftKey);
             if (!handled) {
               select({});
               setShapeEditPanel(null);

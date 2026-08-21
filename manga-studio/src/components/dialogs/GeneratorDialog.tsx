@@ -6,7 +6,7 @@
  * the creator accepts it. Generation never touches the canvas directly.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   callGenerateApi,
   GenerationApiError,
@@ -26,7 +26,8 @@ import {
 } from "@/assets/characterAssetContract";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore, type GeneratorRequest } from "@/editor/uiStore";
-import { assetRenderUrl } from "@/assets/renderSource";
+import { assetPreviewUrl, assetRenderUrl } from "@/assets/renderSource";
+import { uploadImageFile } from "@/components/library/uploadAsset";
 import { CATEGORY_LABELS, LANGUAGE_CATEGORIES } from "@/language/library";
 
 interface ProviderInfo {
@@ -78,6 +79,13 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
   const [result, setResult] = useState<GenerateApiResult | null>(null);
   /** Empty = Auto (resolver's pick). Otherwise an explicit reference asset id. */
   const [referenceChoice, setReferenceChoice] = useState<string>("");
+  /**
+   * Scene and Object generation accept a reference too — an uploaded photo or
+   * an asset already in the library. Previously only characters could send one,
+   * so "generate a lamp like this one" had nowhere to put the lamp.
+   */
+  const [sceneReferenceId, setSceneReferenceId] = useState<string>("");
+  const [referenceUse, setReferenceUse] = useState<"layout" | "style" | "loose">("style");
 
   useEffect(() => {
     fetch("/api/provider/status")
@@ -99,7 +107,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
     () =>
       buildAssetPrompt({
         assetType: request.assetType,
-        description: description || undefined,
+        description: [description || undefined, referenceIntent(Boolean(sceneReferenceId), referenceUse)]
+          .filter(Boolean)
+          .join(" ") || undefined,
         characterName: character?.name,
         characterDescription: character ? characterIdentityDescription(character) : undefined,
         pose: pose || undefined,
@@ -114,6 +124,8 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
       request.assetType,
       languageCategory,
       description,
+      sceneReferenceId,
+      referenceUse,
       character,
       pose,
       expression,
@@ -159,8 +171,9 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
       const chosenAsset =
         isCharacterType && activeReference?.assetId ? doc?.assets[activeReference.assetId] : undefined;
       const identityAsset = chosenAsset ?? (isCharacterType ? referenceAsset : undefined);
+      const sceneReference = !isCharacterType && sceneReferenceId ? doc?.assets[sceneReferenceId] : undefined;
       const referenceAssets = provider?.capabilities?.referenceImage
-        ? [identityAsset, style?.referenceAsset].filter(
+        ? [identityAsset, sceneReference, style?.referenceAsset].filter(
             (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
           )
         : [];
@@ -327,6 +340,15 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
                 </p>
               </div>
             )}
+
+            {!isCharacterType && <ReferencePicker
+              value={sceneReferenceId}
+              onChange={setSceneReferenceId}
+              use={referenceUse}
+              onUseChange={setReferenceUse}
+              category={request.assetType === "background" ? "background" : "prop"}
+              supported={Boolean(provider?.capabilities?.referenceImage)}
+            />}
 
             {isLanguageType && (
               <div className="mb-3">
@@ -525,4 +547,138 @@ function Field({
       />
     </div>
   );
+}
+
+/**
+ * One reference picker, shared by Scene, Object and Manga FX generation.
+ *
+ * Upload a new image or reuse one already in the library, and say what the
+ * reference is FOR. The intent matters: "match this room's layout" and "match
+ * this drawing's style" are different requests, and collapsing them makes the
+ * provider guess.
+ *
+ * Characters keep their own reference selector, which is built from the state
+ * graph and answers a different question — which existing render anchors this
+ * identity.
+ */
+function ReferencePicker({
+  value,
+  onChange,
+  use,
+  onUseChange,
+  category,
+  supported,
+}: {
+  value: string;
+  onChange: (assetId: string) => void;
+  use: "layout" | "style" | "loose";
+  onUseChange: (use: "layout" | "style" | "loose") => void;
+  category: AssetCategory;
+  supported: boolean;
+}) {
+  const doc = useEditorStore((s) => s.doc);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!doc) return null;
+  // Any image already in the project is a candidate reference.
+  const candidates = Object.values(doc.assets).filter((asset) => asset.status !== "archived");
+  const selected = value ? doc.assets[value] : undefined;
+
+  if (!supported) {
+    return (
+      <p className="mb-3 rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-4 text-zinc-500">
+        The connected image model does not accept reference images, so this generation uses the description only.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mb-3">
+      <label className="mb-1 block text-xs text-zinc-400">
+        Reference image <span className="text-zinc-600">(optional)</span>
+      </label>
+      <div className="flex gap-2">
+        <select
+          aria-label="Reference image"
+          className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">None</option>
+          {candidates.map((asset) => (
+            <option key={asset.id} value={asset.id}>
+              {asset.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="shrink-0 rounded border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+          disabled={busy}
+          onClick={() => fileInput.current?.click()}
+        >
+          {busy ? "Uploading…" : "Upload"}
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          hidden
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setBusy(true);
+            setError(null);
+            try {
+              // Uploaded as a plain upload: a reference is source material, not
+              // a cut-out layer, so it must not go through foreground extraction.
+              const assetId = await uploadImageFile(file, "upload");
+              onChange(assetId);
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : "Upload failed");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      </div>
+
+      {selected && (
+        <div className="mt-1.5 flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={assetPreviewUrl(selected)}
+            alt={selected.name}
+            className="h-12 w-12 rounded border border-zinc-700 object-cover"
+          />
+          <select
+            aria-label="Use reference for"
+            className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px]"
+            value={use}
+            onChange={(event) => onUseChange(event.target.value as "layout" | "style" | "loose")}
+          >
+            {category === "background" && <option value="layout">Match the layout and architecture</option>}
+            <option value="style">Match the art style</option>
+            <option value="loose">Loose inspiration</option>
+          </select>
+        </div>
+      )}
+      {error && <p className="mt-1 text-[11px] text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+/** Say what the reference is for, so the provider does not have to guess. */
+function referenceIntent(hasReference: boolean, use: "layout" | "style" | "loose"): string {
+  if (!hasReference) return "";
+  switch (use) {
+    case "layout":
+      return "Use the supplied reference image for the layout, architecture and spatial arrangement; keep its composition and structure.";
+    case "style":
+      return "Use the supplied reference image as an art-style reference: match its rendering, line quality and palette.";
+    case "loose":
+      return "Use the supplied reference image as loose inspiration only; do not copy it directly.";
+  }
 }

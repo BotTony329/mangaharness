@@ -16,6 +16,8 @@ import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
 import { LayersPanel } from "./LayersPanel";
+import { InteractionControls } from "./InteractionControls";
+import { useUiStore } from "@/editor/uiStore";
 import { PoseEditControls } from "./PoseEditControls";
 import { PuppetControls } from "./PuppetControls";
 import { isPuppetInstance } from "@/domain/puppetOps";
@@ -34,6 +36,7 @@ import type {
   SpeechBubbleItem,
 } from "@/domain/types";
 import { resolvedBubbleStyle } from "@/domain/bubbleStyles";
+import { findExactCharacterAsset } from "@/characters/state";
 import { searchLanguageAssets } from "@/language/library";
 import { useEditorStore } from "@/editor/store";
 import { useState } from "react";
@@ -289,6 +292,9 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
   // A puppet character edits locally; a legacy flat one keeps the older
   // skeleton-plus-regeneration path (§21).
   const isPuppet = Boolean(doc && isPuppetInstance(doc, item.id));
+  // The skeleton pose editor authors a request that ends in regeneration; it is
+  // an Advanced tool, not the normal way to move a character.
+  const advanced = useUiStore((state) => state.advancedMode);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>();
   const [error, setError] = useState<string>();
@@ -387,13 +393,20 @@ function CharacterStateControls({ item }: { item: AssetInstance }) {
                 characterId={character.id}
                 values={availableCharacterStateValues(doc, character, key)}
                 active={current[key]}
+                busy={busy}
+                // The same path the dropdown takes, so click and select can
+                // never diverge.
+                onPick={(value) => void change({ [key]: value })}
               />
             )}
           </div>
         ))}
       </div>
       <InstanceStageControls item={item} />
-      {isPuppet ? <PuppetControls item={item} /> : <PoseEditControls item={item} />}
+      {/* Interactions sit with the actor, because that is where a creator is
+          when they decide two characters should do something together. */}
+      <InteractionControls item={item} />
+      {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
       {status && <p className="mt-2 text-[10px] text-indigo-300">{status}</p>}
       {error && <p className="mt-2 text-[10px] text-red-300">{error}</p>}
       {review && (
@@ -450,37 +463,75 @@ function Hint({ children }: { children: React.ReactNode }) {
  * decides whether the drop landed on a socket that accepts it, and the state
  * resolver decides how the change is realised — nothing here places an image.
  */
+/**
+ * Semantic state cards. CLICK is primary; drag is the power-user shortcut.
+ *
+ * These used to be non-interactive `<span draggable>` elements whose only
+ * affordance was a "Drag onto the character's face" tooltip. Clicking — the
+ * thing every creator tries first — did nothing at all. The rule now holds
+ * everywhere: click applies to the SELECTED actor, drag targets a DIFFERENT
+ * actor on canvas.
+ *
+ * Each card also says whether applying it is instant or costs a generation,
+ * because that is the one implementation detail a creator genuinely needs.
+ */
 function StateCardRow({
   dimension,
   characterId,
   values,
   active,
+  onPick,
+  busy,
 }: {
   dimension: "expression" | "pose" | "outfit";
   characterId: string;
   values: string[];
   active: string;
+  onPick: (value: string) => void;
+  busy?: boolean;
 }) {
-  const socket = dimension === "expression" ? "face" : dimension === "pose" ? "body" : "character";
+  const doc = useEditorStore((s) => s.doc);
+  const selection = useEditorStore((s) => s.selection);
+  const character = doc?.characters[characterId];
+  const current = doc && selection.itemId ? stateFromInstance(doc, doc.items[selection.itemId] as AssetInstance) : null;
+
+  /** Would this pick reuse an existing render, or need a new one? */
+  const isInstant = (value: string): boolean => {
+    if (!doc || !character || !current) return false;
+    return Boolean(findExactCharacterAsset(doc, character, { ...current, [dimension]: value }));
+  };
+
   return (
-    <div className="mt-1 flex flex-wrap gap-1" title={`Drag onto the character's ${socket}`}>
-      {values.slice(0, 8).map((value) => (
-        <span
-          key={value}
-          draggable
-          onDragStart={(event) => {
-            event.dataTransfer.setData(SOCKET_DRAG_TYPE, encodeSocketDrag({ dimension, value, characterId }));
-            event.dataTransfer.effectAllowed = "copy";
-          }}
-          className={`cursor-grab rounded-full border px-2 py-0.5 text-[10px] ${
-            value === active
-              ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
-              : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-indigo-600 hover:text-indigo-300"
-          }`}
-        >
-          {title(value)}
-        </span>
-      ))}
+    <div className="mt-1 flex flex-wrap gap-1">
+      {values.slice(0, 10).map((value) => {
+        const instant = value === active || isInstant(value);
+        return (
+          <button
+            key={value}
+            type="button"
+            disabled={busy}
+            draggable={!busy}
+            onDragStart={(event) => {
+              event.dataTransfer.setData(SOCKET_DRAG_TYPE, encodeSocketDrag({ dimension, value, characterId }));
+              event.dataTransfer.effectAllowed = "copy";
+            }}
+            onClick={() => onPick(value)}
+            title={
+              value === active
+                ? "Current"
+                : `${instant ? "Instant — reuses an existing render" : "Needs a new render"} · click to apply, or drag onto another character`
+            }
+            className={`cursor-pointer rounded-full border px-2 py-0.5 text-[10px] disabled:opacity-40 ${
+              value === active
+                ? "border-indigo-500 bg-indigo-600/30 text-indigo-200"
+                : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-indigo-600 hover:text-indigo-300"
+            }`}
+          >
+            {title(value)}
+            {value !== active && !instant && <span className="ml-1 text-[8px] text-amber-400/80">✦</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

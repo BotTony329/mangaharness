@@ -444,3 +444,43 @@ The magenta decontamination code stays as legacy repair. It is no longer part of
 ## D49 — Rigging becomes an implementation capability, not a workflow
 
 Convert to Puppet, the compiler wizard and raw joint sliders now live behind Advanced. The machinery is unchanged and still powers every free local edit; what changed is that a creator never has to segment body parts or confirm sixteen rectangles to move an arm. The user directs the scene; the harness picks the implementation.
+
+## D50 — Click applies to the selection; drag targets another actor
+
+The semantic state cards were `<span draggable>` with **no click handler at all**
+and a tooltip reading "Drag onto the character's face". Clicking — the first
+thing every creator tries — did nothing.
+
+The rule is now uniform across expressions, poses, outfits, props and manga FX:
+**click applies to the current selection, drag targets a different actor on
+canvas.** Drag survives as the power-user shortcut for multi-actor panels; it is
+never required for the ordinary one-character case.
+
+Each card also states whether applying it is instant or costs a render, because
+that is the one implementation fact a creator genuinely needs. `LOCAL_PUPPET`
+and `JOINT_GENERATION` stay internal words: the UI says "Instant" or "Generate".
+
+## D51 — Scene, Object and Prop are three creator-facing ideas
+
+"Backgrounds" was too narrow and "Props" meant two different things.
+
+- **SCENE** — a rectangular environment (classroom, street, bedroom). Keeps its
+  whole image and is **never** sent through foreground extraction.
+- **OBJECT** — a reusable isolated item (lamp, notebook, bag). Generated on pure
+  white and cut out.
+- **PROP** — an Object *in use* by a character. The same asset, a different
+  relationship; not a duplicate asset.
+
+Underneath, Scenes map to the `background` category and Objects to `prop`, so no
+schema change was needed — the rename is creator-facing vocabulary over an
+existing distinction that the pipeline already enforced.
+
+## D52 — Relationships live with the character; interactions live with the scene
+
+Persistent relationships are edited on the character card in the left library,
+because they are project facts that improve Agent grounding. Interactions are
+created from the right Inspector beside the selected actor, because that is
+where a creator is standing when they decide two characters should do something.
+
+**Relationship metadata is not a prerequisite for an interaction.** Two actors
+the creator has already selected on canvas need no recorded friendship to hug.
