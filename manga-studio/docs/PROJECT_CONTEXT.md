@@ -46,6 +46,29 @@ It is explicitly *not* "prompt → finished page", and *not* "change a character
 regenerate the whole character". The creator directs the scene; the harness picks
 the implementation.
 
+## Permanent UI rules
+
+**LEFT is what exists. RIGHT is what the selected thing means and does.**
+Character thumbnails, rendered states and asset shelves live in the library on
+the left. Relationships, interactions and state editing live in the Inspector on
+the right. A control that only exists inside the asset library is not
+product-reachable for a creator working on the canvas.
+
+When ONE character is selected the Inspector shows **State · Interactions ·
+Details**, near the top, with no Advanced flag and no scrolling. When TWO
+character actors are selected a **pair banner** appears above the tabs.
+
+**Character identity is resolved through `characters/identity.ts`, never by
+reading one link.** An asset can be tied to a character three ways — the
+instance's `characterState`, the asset's `metadata.characterId`, and the
+character's own `assetIds` / canonical reference. Anything that asks only one of
+them will eventually render a real character as an anonymous picture, which is
+exactly how the Inspector lost its tabs in production.
+
+**Verify on production, not on localhost.** `mangaharness.vercel.app` is the
+product. Confirm the deployed commit SHA matches HEAD before claiming a UI
+behaviour works.
+
 ## Permanent Agent rules
 
 **Scope defines where the Agent may operate. Grounding defines what entities the
@@ -244,6 +267,20 @@ IndexedDB per project, autosave, forward-only migrations, no fabricated data on
 migration.
 
 ## Last Completed Work
+
+**Character identity resolver + production-verified interaction UI.**
+
+- Reported from production: a character selected on the canvas showed no State /
+  Interactions / Details tabs. The Inspector read `asset.metadata.characterId`
+  alone; that document carried the identity on the reverse link only. See D65.
+- `characters/identity.ts` resolves through all three links and is used by the
+  Inspector, InteractionControls, the pair banner, `stateFromInstance`,
+  `slotSwitch`, `hitStack`, `CanvasStage` and the Agent panel.
+  `replaceAssetReferences` no longer creates the broken state.
+- Shift-click did nothing when both characters were placed with Fit; it now
+  takes the next unselected hit-stack entry, and the Layers list accepts
+  shift-click as a path that cannot degrade. See D66.
+- Verified on the deployed site at commit `a04b49f`, not on localhost.
 
 **Agent subject/scope repair + Relationship & Interaction reachability.**
 
