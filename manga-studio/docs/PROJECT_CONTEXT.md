@@ -4,10 +4,10 @@
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
 
-> **2026-08-21 intake:** new lead agent audited the repo at `764350a` — baseline
-> green (851 tests, typecheck/lint/build clean). Findings and the confirmed P0
-> order live in `docs/TAKEOVER_AUDIT.md`. Top open gap: apposition/alias
-> co-resolution ("his rival, the bad character Roachman") is not implemented.
+> **2026-08-22 P0 debt closure:** scene-local apposition co-resolution landed
+> (`agent/coreference.ts`, commit `b02eff1`) and the planner's creation policy
+> is unified (commit `be0e92f`). 862 tests / 71 files green; deployed to
+> production. See "Co-reference" below and `docs/TAKEOVER_AUDIT.md`.
 
 ## Product Identity
 
@@ -287,6 +287,27 @@ There is deliberately no Agent-only generation path.
   it as one** — a person descriptor, or an action only a character performs.
   Quoted text is dialogue and never a reference.
 
+### Co-reference: apposition is ONE participant
+
+"his rival, the bad character Roachman" and "her sister, Mori" name ONE person
+twice. `agent/coreference.ts` binds them structurally — a pointing phrase
+(`classifyReference` → "pointing") adjacent to a name-carrying phrase across a
+comma or dash — with no per-relationship-word logic. The pointing half folds
+into the canonical entity as a `sceneLocalAliases` entry plus an optional
+`sceneRelation` (e.g. rival of the established subject). **Scene-local means
+never persisted**: the relationship graph is not written by a sentence of plot.
+If the graph already answers the phrase with a DIFFERENT character, project
+data wins and nothing merges. A bare pointing reference ("Yuri hugs her
+sister", no name attached) still blocks. A capitalised word after a place
+preposition ("in Melbourne") is a location, not a character.
+
+**Creation policy has exactly one source of truth: deterministic entity
+resolution.** The planner never decides whether a character may be created;
+its system prompt and TOOL_DOCS say the resolved world is authoritative.
+
+Golden cases: `agent/coreference.test.ts` (A–F from the takeover brief, plus
+the relationship-graph-wins safety case).
+
 ## CAPABILITY RECOVERY RULE
 
 **A creator-facing capability is not complete if its failure state only explains
@@ -505,6 +526,12 @@ migration.
 
 ## Last Completed Work
 
+**P0 debt closure — apposition co-resolution + unified creation policy.** See
+"Co-reference" above. `b02eff1` + `be0e92f`, deployed to production
+(`mangaharness.vercel.app`). Remaining true blocker: live provider round-trips
+still require the user's browser BYOK session; nothing in this environment can
+exercise them.
+
 **Temporal planning and camera intent closed; MVP frozen.**
 
 - `agent/sequencePlan.ts` is the enforced structure: every beat carries its
@@ -575,7 +602,7 @@ the item-by-item classification.
 - **Ground plane + depth handle** on canvas, **Inspector tabs**
   (Look / Position / Scene), **one `+ Generate`** entry point.
 
-**Tests:** 749 passing / 60 files. Typecheck, lint and production build clean.
+**Tests:** 862 passing / 71 files. Typecheck, lint and production build clean.
 
 ## Known Bugs / UX Problems
 
