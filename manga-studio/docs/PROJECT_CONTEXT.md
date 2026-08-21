@@ -4,10 +4,20 @@
 > disagrees with the code, the code wins — correct this file before implementing.
 > Update it at the END of every meaningful task, before reporting.
 
+> **2026-08-22 P0 product closure:** three fixes landed — (1) AI Settings is
+> protocol-first (API standard dropdown, provider name is a free label, Custom
+> JSON folds out Advanced API mapping); (2) background removal is an optional
+> fallback behind "Configure fallback (optional)" — the primary path is the
+> built-in white-background extractor, always on; (3) Agent runs report
+> COMPLETED / PARTIALLY_COMPLETED / FAILED via `agent/stepPolicy.ts`, with
+> explicit "Approximate composition" fallback for failed interactions — the
+> "Done with X failed steps" summary is gone. 866 tests / 72 files green;
+> deployed to production.
+>
 > **2026-08-22 P0 debt closure:** scene-local apposition co-resolution landed
 > (`agent/coreference.ts`, commit `b02eff1`) and the planner's creation policy
-> is unified (commit `be0e92f`). 862 tests / 71 files green; deployed to
-> production. See "Co-reference" below and `docs/TAKEOVER_AUDIT.md`.
+> is unified (commit `be0e92f`). See "Co-reference" below and
+> `docs/TAKEOVER_AUDIT.md`.
 
 ## Product Identity
 
@@ -354,6 +364,30 @@ Concretely:
 - Dialogue is editor-native. An image model is never asked to render readable
   text.
 
+### Run status and step policy
+
+**A run never reports "Done with X failed steps".** `agent/stepPolicy.ts` is
+the single authority:
+
+- Every step has an explicit criticality by tool — not inferred from strings.
+  `create_interaction` is required-with-fallback; decorative tools
+  (`add_effect`, `apply_tone`, `place_manga_effect`, `generate_manga_effect`)
+  are noncritical; everything else is required.
+- `ExecutionSummary.status` is COMPLETED (all steps ok), PARTIALLY_COMPLETED
+  (noncritical steps skipped, or a fallback was used), or FAILED (a required
+  step failed — the page is rolled back). `ScopeViolationError` always aborts
+  and rolls back, no exceptions.
+- When `create_interaction` fails, the executor tries **Approximate
+  composition**: both participants are placed into the panel from their
+  existing resolved assets (`resolveOrGenerateState` with
+  `generateIfMissing: false`) — never a silent skip, always listed under
+  `summary.fallbacks`. If no existing asset exists, the run fails and rolls
+  back.
+- The Agent panel renders the plan (what was asked) separately from the
+  execution outcome (what happened), with a Partially-completed card listing
+  fallbacks / skipped steps / warnings plus Retry and Revert-this-run (undo)
+  actions. Golden cases: `agent/runStatus.test.ts` CASE 1–4.
+
 ## Current Architecture
 
 - **Next.js 15 App Router + React 19 + TypeScript strict + Zustand + Konva.**
@@ -506,12 +540,28 @@ overlay. No perspective corner-pin for scene assets.
 
 ### Agent — **working**
 `src/agent/*`. Deterministic grounding before planning, plan validation binding
-names to IDs, runtime creation guard, post-condition validation.
-*Limitation:* no interaction tool; no camera-mode tools beyond existing ones.
+names to IDs, runtime creation guard, post-condition validation. Run status
+and per-step criticality follow `agent/stepPolicy.ts` (see "Run status and
+step policy"). `create_interaction` exists, with Approximate-composition
+fallback.
+*Limitation:* no camera-mode tools beyond existing ones.
 
 ### Generation providers — **working**
 `src/ai/*`. BYOK, reference images where the provider supports them, one shared
 Generator dialog with a shared Reference Picker for Scene/Object/FX.
+
+**AI Settings UX (protocol-first).** The dialog asks "which API standard does
+your provider speak" (OpenAI-compatible / Anthropic Messages / Gemini Native /
+Custom JSON), not "which vendor". Provider Name is a free-text label; Simple
+Setup is the only default path — there is no Custom/Preset tab split. Choosing
+Custom JSON folds out Advanced API mapping (`CustomProviderForm`).
+
+**Background removal is a fallback, not a third provider.** Primary path:
+assets are generated on pure white and cut out by the built-in extractor —
+always on, nothing to configure (`postProcessor.ts` defaults to
+`builtInBackgroundRemovalProvider`). A removal API is consulted only when the
+built-in path fails, and only if the creator connected one under "Configure
+fallback (optional)" in AI Settings.
 
 ### Transparency pipeline — **working**
 `src/assets/*`. Pure-white policy → white-background validation → connectivity
@@ -525,6 +575,20 @@ IndexedDB per project, autosave, forward-only migrations, no fabricated data on
 migration.
 
 ## Last Completed Work
+
+**P0 product closure — settings UX, background-removal policy, run status.**
+
+- AI Settings is protocol-first: API standard dropdown + free-text provider
+  name; Custom JSON folds out Advanced API mapping; no Custom/Preset tabs.
+- Background removal demoted to optional fallback; primary built-in extraction
+  needs no configuration (runtime already defaulted to it — UI was the lie).
+- Agent run status semantics: COMPLETED / PARTIALLY_COMPLETED / FAILED from
+  `agent/stepPolicy.ts`; explicit "Approximate composition" fallback for failed
+  interactions; "Done with X failed steps" eliminated. Golden tests CASE 1–4 in
+  `agent/runStatus.test.ts`; browser smoke (`scripts/smoke-settings.mjs`)
+  verified the new settings UI with zero console errors.
+- 866 tests / 72 files, lint, typecheck, build all green; deployed to
+  production (`mangaharness.vercel.app`).
 
 **P0 debt closure — apposition co-resolution + unified creation policy.** See
 "Co-reference" above. `b02eff1` + `be0e92f`, deployed to production
