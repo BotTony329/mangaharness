@@ -358,3 +358,21 @@ Black hair recovers to `[12,12,16] @ α=191`; the purple prop recovers to `[150,
 **Guardrails.** A pixel whose residual from the matte→foreground line exceeds a threshold is left alone, because it is independent artwork rather than a blend. Alpha is never raised above what segmentation concluded, so decontamination cannot resurrect background. Below 15% coverage the division is unstable, so the local foreground colour is used directly. Rejected outright: raising the removal threshold, eroding the silhouette, keying magenta indiscriminately, global desaturation, and prompt changes — none of those recover a foreground colour, and most destroy real artwork.
 
 This matters beyond one image: puppet-native generation composites many independently extracted parts, so every part would have carried its own fringe.
+
+## D44 — One HitStack, consumed by every selection surface
+
+Overlapping panel content was effectively unreachable. Selection was Konva's own picking: each node wired `onMouseDown={onSelect}` and whichever node the hit graph reported first won.
+
+**Three concrete defects fell out of that.** An image node's hit region is its full rectangle, so a character cutout's transparent corners captured clicks across a large slab of the panel. `locked` only disabled `draggable`, never `listening`, so a locked background still intercepted every click it covered. And there was no route to the second item under the pointer — no cycling, no menu, no layer list.
+
+**`hitStack()` is now the single resolver**, pure and free of Konva and the DOM. Order is `panel.itemIds` and nothing else: last drawn is topmost is selected first. There is deliberately no category ranking, so a prop deliberately placed above a character is what a click on that prop selects.
+
+**Selection moved from the nodes to the stage.** Nodes no longer pick for themselves; the stage resolves the pointer through the HitStack and selects. Dragging is gated on selection (`draggable = selected && !locked`), which is what makes cycling safe — without it, cycling to a lower layer would leave the top layer draggable and a drag would move the wrong thing.
+
+**Alpha-aware hit testing** samples a downsampled per-URL alpha mask, built lazily from the already-cached image element. A mask that has not decoded yet returns null and the test falls back to bounds, because refusing to select something the creator can see is worse than a slightly generous hit region. Bubbles test against their ellipse rather than their box, so a balloon's empty corners stop swallowing the art behind them.
+
+**A puppet stays one actor.** Its parts are hit-tested individually — clicking between an arm and the torso is correctly a miss — but the hit resolves to the *instance*. Internal part ids never enter the stack, so the Layers panel lists actors rather than eyelids.
+
+**The Layers panel is a projection**, not a second tree: `panelLayers()` is the same function without a point filter, so list order is render order by construction. Locked rows stay fully interactive there, because that is the surface that unlocks them — refusing to select a locked layer in the list would strand it.
+
+**Effects hit-test by bounds.** They are procedurally drawn line work with no texture to sample, so a full-panel screentone does capture clicks across the panel. That is z-order behaving correctly rather than a bug, and cycling, locking and the Layers panel are the remedy.

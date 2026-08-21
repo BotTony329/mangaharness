@@ -11,8 +11,7 @@ import { EffectNode } from "./EffectNode";
 
 export interface PanelInteraction {
   selectedItemId?: ID;
-  onSelectPanel?: (panelId: ID) => void;
-  onSelectItem?: (itemId: ID, panelId: ID) => void;
+  /** Selection is resolved at the stage via the HitStack, not per node. */
   onItemDragMove?: (itemId: ID, cx: number, cy: number) => void;
   onItemDragEnd?: (itemId: ID, cx?: number, cy?: number) => void;
   onEditBubble?: (itemId: ID) => void;
@@ -49,8 +48,6 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
           closed
           fill="#ffffff"
           listening={interactive}
-          onMouseDown={() => interaction.onSelectPanel?.(panel.id)}
-          onTap={() => interaction.onSelectPanel?.(panel.id)}
           onDblClick={() => interaction.onPanelDoubleClick?.(panel.id)}
           onDblTap={() => interaction.onPanelDoubleClick?.(panel.id)}
         />
@@ -110,7 +107,7 @@ function renderItem(
             item={item}
             puppet={puppet}
             interactive={interactive}
-            onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
+            selected={interaction.selectedItemId === item.id}
             onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
             onDragEnd={() => interaction.onItemDragEnd?.(item.id)}
           />
@@ -122,7 +119,7 @@ function renderItem(
           item={item}
           storageUrl={assetRenderUrl(doc.assets[item.sourceAssetId])}
           interactive={interactive}
-          onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
+          selected={interaction.selectedItemId === item.id}
           onDragMove={(cx, cy) => interaction.onItemDragMove?.(item.id, cx, cy)}
           onDragEnd={() => interaction.onItemDragEnd?.(item.id)}
         />
@@ -135,7 +132,6 @@ function renderItem(
           item={item}
           interactive={interactive}
           selected={interaction.selectedItemId === item.id}
-          onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
           onDragEnd={(cx, cy) => interaction.onItemDragEnd?.(item.id, cx, cy)}
           onDoubleClick={() => interaction.onEditBubble?.(item.id)}
           onTailDragEnd={(x, y) => interaction.onTailMove?.(item.id, x, y)}
@@ -147,7 +143,7 @@ function renderItem(
           key={item.id}
           item={item}
           interactive={interactive}
-          onSelect={() => interaction.onSelectItem?.(item.id, panelId)}
+          selected={interaction.selectedItemId === item.id}
           onDragEnd={(cx, cy) => interaction.onItemDragEnd?.(item.id, cx, cy)}
         />
       );

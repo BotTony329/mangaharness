@@ -8,7 +8,7 @@ import type { EffectItem } from "@/domain/types";
 interface EffectNodeProps {
   item: EffectItem;
   interactive: boolean;
-  onSelect?: () => void;
+  selected?: boolean;
   onDragEnd?: (cx: number, cy: number) => void;
 }
 
@@ -16,7 +16,7 @@ interface EffectNodeProps {
  * Parameterized vector effects drawn procedurally (resolution-independent —
  * they stay crisp at 2x export scale, unlike stretched bitmaps).
  */
-export function EffectNode({ item, interactive, onSelect, onDragEnd }: EffectNodeProps) {
+export function EffectNode({ item, interactive, selected, onDragEnd }: EffectNodeProps) {
   return (
     <Group
       id={`item-${item.id}`}
@@ -29,10 +29,8 @@ export function EffectNode({ item, interactive, onSelect, onDragEnd }: EffectNod
       rotation={item.rotation}
       opacity={item.opacity}
       visible={item.visible !== false}
-      draggable={interactive && !item.locked}
-      listening={interactive}
-      onMouseDown={onSelect}
-      onTap={onSelect}
+      draggable={interactive && !item.locked && Boolean(selected)}
+      listening={interactive && !item.locked}
       onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => onDragEnd?.(e.target.x(), e.target.y())}
     >
       <Shape

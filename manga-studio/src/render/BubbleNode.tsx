@@ -11,7 +11,6 @@ import { useImageElement } from "./useImageElement";
 interface BubbleNodeProps {
   item: SpeechBubbleItem;
   interactive: boolean;
-  onSelect?: () => void;
   onDragEnd?: (cx: number, cy: number) => void;
   onDoubleClick?: () => void;
   onTailDragEnd?: (x: number, y: number) => void;
@@ -27,7 +26,7 @@ interface BubbleNodeProps {
  * text layer on top, which is why an uploaded bubble shape stays editable
  * instead of baking words into an image (§8).
  */
-export function BubbleNode({ item, interactive, onSelect, onDragEnd, onDoubleClick, onTailDragEnd, selected }: BubbleNodeProps) {
+export function BubbleNode({ item, interactive, onDragEnd, onDoubleClick, onTailDragEnd, selected }: BubbleNodeProps) {
   const halfW = item.width / 2;
   const halfH = item.height / 2;
   const style = resolvedBubbleStyle(item);
@@ -47,10 +46,8 @@ export function BubbleNode({ item, interactive, onSelect, onDragEnd, onDoubleCli
         rotation={item.rotation}
         opacity={item.opacity}
         visible={item.visible !== false}
-        draggable={interactive && !item.locked}
-        listening={interactive}
-        onMouseDown={onSelect}
-        onTap={onSelect}
+        draggable={interactive && !item.locked && Boolean(selected)}
+        listening={interactive && !item.locked}
         onDblClick={onDoubleClick}
         onDblTap={onDoubleClick}
         onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => onDragEnd?.(e.target.x(), e.target.y())}

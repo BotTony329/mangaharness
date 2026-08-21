@@ -5,7 +5,7 @@
 
 import { addAsset, addCharacter, addGenerationRecord, setAssetProcessedImage, setCharacterReference, type NewAssetInput } from "./libraryOps";
 import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAssetReferences, setAssetArchived, type DeleteAssetMode, type DeleteCharacterMode } from "./assetLifecycle";
-import { addBubble, addEffect, duplicateItem, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
+import { addBubble, addEffect, duplicateItem, moveItemToIndex, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
 import { addPage, removePage, setPageLayout } from "./pageOps";
 import { renameProject } from "./projectOps";
 import {
@@ -99,6 +99,7 @@ export type DomainCommand =
   | { type: "delete-instance"; instanceId: ID }
   | { type: "duplicate-instance"; instanceId: ID }
   | { type: "reorder-instance"; instanceId: ID; direction: ReorderDirection }
+  | { type: "move-item-to-index"; itemId: ID; index: number }
   | { type: "swap-instance-asset"; instanceId: ID; assetId: ID }
   | { type: "set-framing"; instanceId: ID; cropMode: CropMode }
   | { type: "update-instance-transform"; instanceId: ID; patch: { cx?: number; cy?: number; width?: number; height?: number; rotation?: number } }
@@ -261,6 +262,8 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
       const result = duplicateItem(doc, command.instanceId);
       return { doc: result.doc, createdId: result.itemId };
     }
+    case "move-item-to-index":
+      return { doc: moveItemToIndex(doc, command.itemId, command.index) };
     case "reorder-instance":
       return { doc: reorderItem(doc, command.instanceId, command.direction) };
     case "swap-instance-asset":

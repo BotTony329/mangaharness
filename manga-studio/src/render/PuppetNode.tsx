@@ -27,7 +27,7 @@ interface PuppetNodeProps {
   puppet: MangaPuppet;
   interactive: boolean;
   ghost?: boolean;
-  onSelect?: () => void;
+  selected?: boolean;
   onDragMove?: (cx: number, cy: number) => void;
   onDragEnd?: () => void;
 }
@@ -38,7 +38,7 @@ export function PuppetNode({
   puppet,
   interactive,
   ghost,
-  onSelect,
+  selected,
   onDragMove,
   onDragEnd,
 }: PuppetNodeProps) {
@@ -65,10 +65,8 @@ export function PuppetNode({
     <Group
       {...common}
       id={ghost ? undefined : `item-${item.id}`}
-      draggable={interactive && !ghost && !item.locked}
-      listening={interactive && !ghost}
-      onMouseDown={onSelect}
-      onTap={onSelect}
+      draggable={interactive && !ghost && !item.locked && Boolean(selected)}
+      listening={interactive && !ghost && !item.locked}
       onDragMove={(event: Konva.KonvaEventObject<DragEvent>) => onDragMove?.(event.target.x(), event.target.y())}
       onDragEnd={onDragEnd}
     >

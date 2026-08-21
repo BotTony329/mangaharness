@@ -296,6 +296,27 @@ export function reorderItem(doc: ProjectDocument, itemId: ID, direction: Reorder
   return next;
 }
 
+/**
+ * Move an item to an absolute position in the panel's draw order.
+ *
+ * The Layers panel needs this: dragging a row to a position is an absolute
+ * move, and expressing it as repeated relative steps would fire one document
+ * mutation per hop. Index 0 is the back of the panel, matching `itemIds`.
+ */
+export function moveItemToIndex(doc: ProjectDocument, itemId: ID, index: number): ProjectDocument {
+  const next = cloneDoc(doc);
+  const item = requireItem(next, itemId);
+  const ids = next.panels[item.panelId].itemIds;
+  const from = ids.indexOf(itemId);
+  if (from === -1) return doc;
+  const to = Math.max(0, Math.min(ids.length - 1, Math.round(index)));
+  if (to === from) return doc;
+  ids.splice(from, 1);
+  ids.splice(to, 0, itemId);
+  touch(next);
+  return next;
+}
+
 // ─── Internals ──────────────────────────────────────────────────────────────
 
 function requireItem(doc: ProjectDocument, itemId: ID): PanelItem {

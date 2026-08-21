@@ -15,6 +15,7 @@ import {
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
+import { LayersPanel } from "./LayersPanel";
 import { PoseEditControls } from "./PoseEditControls";
 import { PuppetControls } from "./PuppetControls";
 import { isPuppetInstance } from "@/domain/puppetOps";
@@ -50,13 +51,25 @@ export function InspectorPanel() {
   if (!doc) return null;
 
   const item = selection.itemId ? doc.items[selection.itemId] : null;
-  if (item) return <ItemInspector item={item} asset={item.kind === "asset" ? doc.assets[item.sourceAssetId] : undefined} />;
+  if (item) {
+    return (
+      <>
+        <ItemInspector item={item} asset={item.kind === "asset" ? doc.assets[item.sourceAssetId] : undefined} />
+        {/* The layer list follows the selection's own panel, so the stack the
+            creator is working in is always the one on screen. */}
+        <div className="border-t border-zinc-800 p-3">
+          <LayersPanel panelId={item.panelId} />
+        </div>
+      </>
+    );
+  }
 
   if (selection.panelId && doc.panels[selection.panelId]) {
     return (
       <div className="space-y-4 p-3">
         <SectionTitle>Panel</SectionTitle>
         <PanelStageControls panelId={selection.panelId} />
+        <LayersPanel panelId={selection.panelId} />
         <p className="text-[10px] leading-4 text-zinc-600">
           Drag assets from the library into this panel, or use + Bubble / + Effect in the toolbar.
         </p>

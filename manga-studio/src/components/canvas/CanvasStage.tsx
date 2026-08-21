@@ -38,7 +38,15 @@ import { puppetForInstance } from "@/domain/puppetOps";
 import { canApplyExpression } from "@/puppet/capability";
 import { EXPRESSION_DRAG_TYPE } from "@/puppet/dragTypes";
 import { faceDropTarget, isOverFace, toPuppetUnits } from "@/puppet/interaction";
+import { cycleHit, hitStack, type HitStackEntry } from "@/canvas/hitStack";
+import { sampleAssetAlpha } from "@/render/alphaMask";
+import { LayerContextMenu } from "./LayerContextMenu";
 import { useViewport, type Viewport } from "./useViewport";
+
+/** How far the pointer may move and still count as "the same spot" for cycling. */
+const CYCLE_RADIUS_PX = 4;
+/** Clicking the same spot again within this window walks down the stack. */
+const CYCLE_WINDOW_MS = 1200;
 
 export function CanvasStage() {
   const doc = useEditorStore((s) => s.doc);
@@ -62,6 +70,9 @@ export function CanvasStage() {
   const transformerRef = useRef<Konva.Transformer>(null);
   const [editingBubbleId, setEditingBubbleId] = useState<ID | null>(null);
   const [hoveredPanelId, setHoveredPanelId] = useState<ID | null>(null);
+  /** Last click, so repeating it in place cycles down the HitStack. */
+  const lastClick = useRef<{ x: number; y: number; panelId: ID; at: number } | null>(null);
+  const [layerMenu, setLayerMenu] = useState<{ x: number; y: number; panelId: ID; entries: HitStackEntry[] } | null>(null);
 
   const page = doc && currentPageId ? doc.pages[currentPageId] : null;
   const pageW = doc?.project.settings.pageWidth ?? 1200;
@@ -122,8 +133,11 @@ export function CanvasStage() {
     if (!transformer || !stage) return;
     const nodeId = selection.itemId ? `#item-${selection.itemId}` : selection.workspaceItemId ? `#loose-${selection.workspaceItemId}` : null;
     const node = nodeId && !shapeEditPanelId && !poseEditInstanceId ? stage.findOne(nodeId) : null;
-    const locked = selection.itemId && doc ? doc.items[selection.itemId]?.locked : false;
-    transformer.nodes(node && !locked ? [node] : []);
+    // A locked or hidden layer stays selectable from the Layers panel so it can
+    // be unlocked or shown again — but it must never get transform handles.
+    const target = selection.itemId && doc ? doc.items[selection.itemId] : undefined;
+    const manipulable = !target || (target.locked !== true && target.visible !== false);
+    transformer.nodes(node && manipulable ? [node] : []);
   }, [selection.itemId, selection.workspaceItemId, shapeEditPanelId, poseEditInstanceId, doc]);
 
   // ── Escape leaves shape-edit mode ─────────────────────────────────────────
@@ -140,8 +154,9 @@ export function CanvasStage() {
   const interaction: PanelInteraction = useMemo(
     () => ({
       selectedItemId: selection.itemId,
-      onSelectPanel: (panelId) => select({ panelId }),
-      onSelectItem: (itemId, panelId) => select({ itemId, panelId }),
+      // Selection is resolved at the stage, through the HitStack — nodes no
+      // longer pick for themselves, so there is exactly one definition of what
+      // is under the pointer.
       onPanelDoubleClick: (panelId) => {
         select({ panelId });
         setShapeEditPanel(panelId);
@@ -284,6 +299,77 @@ export function CanvasStage() {
       return false;
     },
     [page, pointerToWorkspace, panelAtWorkspacePoint, select],
+  );
+
+  /**
+   * Screen pointer → panel-local point, and which panel it landed in.
+   *
+   * Camera roll rotates scene content about the panel centre while the frame
+   * stays square, so the roll has to be undone here — otherwise every hit test
+   * in a Dutch-angle panel would be off by the tilt.
+   */
+  const pointerToPanel = useCallback(
+    (clientX: number, clientY: number): { panelId: ID; point: Point } | null => {
+      if (!doc || !page) return null;
+      const workspacePoint = pointerToWorkspace(clientX, clientY);
+      const panelId = panelAtWorkspacePoint(workspacePoint);
+      if (!panelId) return null;
+      const bounds = panelBoundsPx(doc, doc.panels[panelId]);
+      const local = pageToPanelLocal(workspaceToPage(workspacePoint, page), bounds);
+      const roll = doc.panels[panelId].camera?.roll ?? 0;
+      if (!roll) return { panelId, point: local };
+      const cx = bounds.width / 2;
+      const cy = bounds.height / 2;
+      const radians = (-roll * Math.PI) / 180;
+      const dx = local.x - cx;
+      const dy = local.y - cy;
+      return {
+        panelId,
+        point: {
+          x: cx + dx * Math.cos(radians) - dy * Math.sin(radians),
+          y: cy + dx * Math.sin(radians) + dy * Math.cos(radians),
+        },
+      };
+    },
+    [doc, page, pointerToWorkspace, panelAtWorkspacePoint],
+  );
+
+  /**
+   * The unified selection entry point (§ Photoshop-style layer selection).
+   *
+   * Every canvas click resolves through the same HitStack the right-click menu
+   * and the Layers panel use. A plain click takes the visually topmost eligible
+   * item; Alt-click, or clicking again without moving, walks down the stack, so
+   * an overlapped layer is reachable without pixel-perfect aim.
+   */
+  const selectAtPointer = useCallback(
+    (clientX: number, clientY: number, cycle: boolean): boolean => {
+      const target = pointerToPanel(clientX, clientY);
+      if (!target || !doc) return false;
+      const stack = hitStack(doc, target.panelId, target.point, { alpha: sampleAssetAlpha });
+      if (stack.length === 0) {
+        // Empty panel space selects the panel itself, as before.
+        select({ panelId: target.panelId });
+        lastClick.current = null;
+        return true;
+      }
+
+      const previous = lastClick.current;
+      const samePosition =
+        previous !== null &&
+        previous.panelId === target.panelId &&
+        Math.hypot(previous.x - clientX, previous.y - clientY) <= CYCLE_RADIUS_PX;
+      const shouldCycle = cycle || (samePosition && Date.now() - (previous?.at ?? 0) < CYCLE_WINDOW_MS);
+
+      const chosen = shouldCycle
+        ? cycleHit(stack, useEditorStore.getState().selection.itemId)
+        : stack[0];
+      if (!chosen) return false;
+      lastClick.current = { x: clientX, y: clientY, panelId: target.panelId, at: Date.now() };
+      select({ itemId: chosen.itemId, panelId: target.panelId });
+      return true;
+    },
+    [doc, pointerToPanel, select],
   );
 
   /**
@@ -441,11 +527,30 @@ export function CanvasStage() {
         y={view.y}
         onWheel={onWheel}
         onMouseDown={(e) => {
-          if (e.target === e.target.getStage()) {
-            select({});
-            setShapeEditPanel(null);
+          const native = e.evt as MouseEvent;
+          setLayerMenu(null);
+          if (!spaceHeld && native.button === 0) {
+            const handled = selectAtPointer(native.clientX, native.clientY, native.altKey);
+            if (!handled) {
+              select({});
+              setShapeEditPanel(null);
+              lastClick.current = null;
+            }
           }
           panHandlers.onMouseDown(e);
+        }}
+        onContextMenu={(e) => {
+          e.evt.preventDefault();
+          const native = e.evt as MouseEvent;
+          const target = pointerToPanel(native.clientX, native.clientY);
+          if (!target || !doc) return setLayerMenu(null);
+          // Locked layers ARE listed here: the menu is a way back to something
+          // the canvas deliberately refuses to select.
+          const entries = hitStack(doc, target.panelId, target.point, {
+            alpha: sampleAssetAlpha,
+            includeLocked: true,
+          });
+          setLayerMenu({ x: native.clientX, y: native.clientY, panelId: target.panelId, entries });
         }}
         onMouseMove={panHandlers.onMouseMove}
         onMouseUp={panHandlers.onMouseUp}
@@ -542,6 +647,20 @@ export function CanvasStage() {
             setEditingBubbleId(null);
           }}
           onCancel={() => setEditingBubbleId(null)}
+        />
+      )}
+
+      {layerMenu && (
+        <LayerContextMenu
+          x={layerMenu.x}
+          y={layerMenu.y}
+          entries={layerMenu.entries}
+          selectedItemId={selection.itemId}
+          onPick={(itemId: ID) => {
+            select({ itemId, panelId: layerMenu.panelId });
+            setLayerMenu(null);
+          }}
+          onClose={() => setLayerMenu(null)}
         />
       )}
 
