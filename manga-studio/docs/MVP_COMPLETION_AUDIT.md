@@ -13,37 +13,50 @@ execution evidence. `COMPLETE` requires a cited path from intent to persistence.
 ## Reachability matrix
 
 **A single COMPLETE is banned.** A capability can be finished in the domain,
-reachable by the Agent, and still be invisible to a creator — which is exactly
-how Relationships and Interactions came to be reported as done while nobody
-could find them. Every user-facing capability is scored on five independent
-axes.
+reachable by the Agent, and still be invisible to a creator. It can also be
+present in the code, verified locally, and absent from what the user is actually
+looking at — which is why "Production verified" is now its own column and is
+scored against `mangaharness.vercel.app`, not against localhost.
 
-| Capability | Domain | Agent | UI reachable | Real execution | Browser verified |
-|---|---|---|---|---|---|
-| Relationship — create | COMPLETE | COMPLETE (grounding) | COMPLETE | N/A (no generation) | COMPLETE |
-| Relationship — list / reciprocal | COMPLETE | COMPLETE | COMPLETE | N/A | COMPLETE |
-| Relationship — edit type | COMPLETE | N/A | COMPLETE | N/A | PARTIAL — control present, re-type not clicked through |
-| Relationship — delete | COMPLETE | N/A | COMPLETE | N/A | COMPLETE |
-| Relationship → Agent grounding ("her close friend") | COMPLETE | COMPLETE | COMPLETE | N/A | COMPLETE — resolves with the edge, refuses without it |
-| Interaction — single-character entry | COMPLETE | COMPLETE | COMPLETE | see below | COMPLETE |
-| Interaction — multi-select entry | COMPLETE | COMPLETE | COMPLETE | see below | COMPLETE |
-| Interaction — Instant vs Generate labels | COMPLETE | N/A | COMPLETE | N/A | COMPLETE |
-| Interaction — local (Walk Together, Beside) | COMPLETE | COMPLETE | COMPLETE | COMPLETE | PARTIAL — labelled Instant, not clicked through |
-| Interaction — joint render (Hug) | COMPLETE | COMPLETE | COMPLETE | IMPLEMENTED | PARTIAL — reaches `POST /api/generate`, 503 (no provider) |
-| Interaction — provider round trip | — | — | — | IMPLEMENTED | **UNVERIFIED** — no provider in this environment |
-| Subject vs scope precedence | COMPLETE | COMPLETE | COMPLETE (run log) | N/A | COMPLETE |
-| Temporal decomposition ("then") | COMPLETE | COMPLETE | COMPLETE (run log) | PARTIAL — plan requests N panels; the planner is told, not forced | COMPLETE |
-| Camera intent ("to the camera") | COMPLETE | PARTIAL — carried as a constraint to the planner | COMPLETE (run log) | PARTIAL | COMPLETE |
-| Dialogue planning ("shouting Yuri's name") | COMPLETE | COMPLETE | COMPLETE (run log) | COMPLETE — editor-native bubble | COMPLETE |
+### Relationship
 
-### What "browser verified" means here
+| Axis | Status | Evidence |
+|---|---|---|
+| Domain | COMPLETE | `domain/relationships.ts`, one edge per pair per type |
+| Agent grounding | COMPLETE | "her close friend" → Mori with the edge; refuses without it |
+| Inspector UI | COMPLETE | Right Inspector → character → **Details** |
+| Create | COMPLETE | Character ▾ / Relationship ▾ / Save |
+| Edit | COMPLETE | Pencil on the row re-opens the editor; remove + add, one edge |
+| Delete | COMPLETE | × on the row |
+| Reciprocal display | COMPLETE | Selecting the partner shows the same edge from their side |
+| Browser verified (local) | COMPLETE | — |
+| **Production verified** | **COMPLETE** | `e0f9416` — created Yuri · Close Friend on Mori, visible immediately in both the Inspector and the left card |
 
-This environment has **no AI provider**. `POST /api/agent` and
-`POST /api/generate` cannot reach a model. For the Agent runs above, the LLM
-call was stubbed in the page and **everything downstream ran for real**:
-grounding, subject resolution, scope, intent derivation, plan validation,
-capability routing, execution, post-validation and rollback. The stub is stated
-wherever it applies; nothing about the model's own output is claimed.
+### Interaction
+
+| Axis | Status | Evidence |
+|---|---|---|
+| Domain | COMPLETE | `domain/interactions.ts` capability resolver |
+| Agent | COMPLETE | `create_interaction` → `interactionService` |
+| Single-selection UI | COMPLETE | Right Inspector → character → **Interactions** → action → partner picker |
+| Multi-selection UI | COMPLETE | Pair banner above the tabs; shift-click on canvas or in the Layers list |
+| Instant / Generate labels | COMPLETE | From the same capability resolver the service uses |
+| Real execution path | COMPLETE | One path: `domain/interactionService` for UI and Agent alike |
+| Browser verified (local) | COMPLETE | — |
+| **Production verified** | **COMPLETE** | `e0f9416` — Interactions tab, Hug → "Hug with… Yuri" → reaches the provider boundary |
+| Live provider round trip | **BLOCKED — EXTERNAL CREDENTIAL** | Production returns "No image provider connected." at the boundary, after the plan exists |
+
+### Character identity (the reported production failure)
+
+| Axis | Status | Evidence |
+|---|---|---|
+| Resolver | COMPLETE | `characters/identity.ts`, all three links |
+| Inspector tabs | COMPLETE | Verified with both forward links deleted |
+| Character state controls | COMPLETE | Pose/Expression/Outfit/View render from the reverse link alone |
+| Layers labelling | COMPLETE | `hitStack` calls it a Character again |
+| Damage prevented at source | COMPLETE | `replaceAssetReferences` carries `characterId` forward |
+| Regression test | COMPLETE | `characters/identity.test.ts`, six cases |
+| **Production verified** | **COMPLETE** | `e0f9416` |
 
 ---
 

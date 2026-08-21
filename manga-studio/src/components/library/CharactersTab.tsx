@@ -16,10 +16,10 @@ import { generateCharacterAssetForState, starterPackStates } from "@/characters/
 import type { Character, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
+import { RelationshipEditor } from "../inspector/RelationshipEditor";
 import {
   AlertIcon,
   ChevronRightIcon,
-  CloseIcon,
   DeleteIcon,
   DoneIcon,
   ICON_SIZE_SM,
@@ -32,8 +32,6 @@ import { AssetThumb } from "./AssetThumb";
 import { AssetDeleteDialog, CharacterDeleteDialog } from "./LifecycleDialogs";
 import { uploadImageFile } from "./uploadAsset";
 import { repairAssetTransparency, type RepairProgress } from "@/assets/clientProcessing";
-import { RELATIONSHIP_LABELS, relationshipsFor } from "@/domain/relationships";
-import type { RelationshipType } from "@/domain/types";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import {
   inspectReferenceImage,
@@ -140,7 +138,10 @@ function CharacterCard({ character }: { character: Character }) {
           )}
           <PuppetStatusRow character={character} />
           <TransparencyRepairRow character={character} />
-          <RelationshipsRow character={character} />
+          {/* A shortcut, not the primary surface: relationships are authored in
+              the Inspector where the selected character lives. Keeping a second
+              full editor here is how two copies drift. */}
+          <RelationshipEditor character={character} compact />
           <div>
             <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Rendered states</p>
             <div className="flex flex-wrap gap-2">
@@ -647,110 +648,3 @@ function TransparencyRepairRow({ character }: { character: Character }) {
   );
 }
 
-/**
- * A character's relationships — deliberately small.
- *
- * This exists so "her best friend" can resolve to a stable character id rather
- * than to whatever an LLM guesses. It is not a social-graph editor: add, see,
- * remove. Anything richer would be building a feature nobody asked for on top
- * of a fact the grounding layer needs.
- */
-function RelationshipsRow({ character }: { character: Character }) {
-  const doc = useEditorStore((s) => s.doc)!;
-  const dispatch = useEditorStore((s) => s.dispatch);
-  const [adding, setAdding] = useState(false);
-  const [otherId, setOtherId] = useState("");
-  const [type, setType] = useState<RelationshipType>("friend");
-
-  const edges = relationshipsFor(doc, character.id);
-  const others = Object.values(doc.characters).filter((candidate) => candidate.id !== character.id);
-
-  return (
-    <div className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-zinc-500">Relationships</span>
-        <button
-          className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
-          disabled={others.length === 0}
-          onClick={() => setAdding((open) => !open)}
-        >
-          {adding ? "Cancel" : "+ Relationship"}
-        </button>
-      </div>
-
-      {edges.length === 0 && !adding && (
-        <p className="text-[10px] text-zinc-600">
-          None. Add one so the Agent can resolve “her best friend” to a real character.
-        </p>
-      )}
-
-      <ul className="space-y-0.5">
-        {edges.map((edge) => {
-          const otherCharacterId = edge.characterAId === character.id ? edge.characterBId : edge.characterAId;
-          const other = doc.characters[otherCharacterId];
-          return (
-            <li key={edge.id} className="flex items-center gap-1 text-[11px]">
-              <span className="min-w-0 flex-1 truncate text-zinc-300">
-                {other?.name ?? "Unknown"} <span className="text-zinc-500">· {edge.label ?? RELATIONSHIP_LABELS[edge.type]}</span>
-              </span>
-              <button
-                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-                aria-label={`Remove relationship with ${other?.name ?? "character"}`}
-                title="Remove relationship"
-                onClick={() => dispatch({ type: "remove-relationship", relationshipId: edge.id })}
-              >
-                <CloseIcon size={11} strokeWidth={2.25} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      {adding && (
-        <div className="mt-1.5 space-y-1">
-          <select
-            aria-label="Related character"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-[11px]"
-            value={otherId}
-            onChange={(event) => setOtherId(event.target.value)}
-          >
-            <option value="">Choose a character…</option>
-            {others.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Relationship type"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-[11px]"
-            value={type}
-            onChange={(event) => setType(event.target.value as RelationshipType)}
-          >
-            {(Object.keys(RELATIONSHIP_LABELS) as RelationshipType[]).map((key) => (
-              <option key={key} value={key}>
-                {RELATIONSHIP_LABELS[key]}
-              </option>
-            ))}
-          </select>
-          <button
-            className="w-full rounded-md bg-[var(--accent)] py-1 text-[11px] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
-            disabled={!otherId}
-            onClick={() => {
-              dispatch({
-                type: "add-relationship",
-                characterAId: character.id,
-                characterBId: otherId,
-                relationshipType: type,
-              });
-              setAdding(false);
-              setOtherId("");
-            }}
-          >
-            Add
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}

@@ -34,6 +34,8 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
   const selection = useEditorStore((s) => s.selection);
   const dispatch = useEditorStore((s) => s.dispatch);
   const select = useEditorStore((s) => s.select);
+  /** Co-selected actors, so a pair reads as a pair in the list. */
+  const alsoSelected = new Set(selection.alsoItemIds ?? []);
   const [dragging, setDragging] = useState<ID | null>(null);
 
   if (!doc?.panels[panelId]) return null;
@@ -75,7 +77,9 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                 /* Selection is the accent, not a border: the list reads as rows,
                    not as a grid of boxes. */
                 className={`flex items-center gap-0.5 rounded px-1 py-1 ${
-                  active ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg-hover)]"
+                  active || alsoSelected.has(layer.itemId)
+                    ? "bg-[var(--accent-soft)]"
+                    : "hover:bg-[var(--bg-hover)]"
                 } ${dragging === layer.itemId ? "opacity-40" : ""}`}
               >
                 <IconToggle
@@ -117,7 +121,27 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
                   className="min-w-0 flex-1 text-left"
                   // A locked layer is still selectable from here on purpose:
                   // otherwise nothing could ever unlock it.
-                  onClick={() => select({ itemId: layer.itemId, panelId })}
+                  title="Click to select · Shift-click to add a second actor"
+                  onClick={(event) => {
+                    /**
+                     * Shift-click adds a second actor.
+                     *
+                     * The canvas gesture depends on hit testing two overlapping
+                     * characters apart; this list never has that problem, so it
+                     * is the reliable way to reach a two-character interaction.
+                     */
+                    if (event.shiftKey) {
+                      const current = useEditorStore.getState().selection;
+                      if (current.itemId && current.itemId !== layer.itemId) {
+                        const also = new Set(current.alsoItemIds ?? []);
+                        if (also.has(layer.itemId)) also.delete(layer.itemId);
+                        else also.add(layer.itemId);
+                        select({ itemId: current.itemId, panelId, alsoItemIds: [...also] });
+                        return;
+                      }
+                    }
+                    select({ itemId: layer.itemId, panelId });
+                  }}
                   onDoubleClick={() => renameLayer(layer.itemId)}
                 >
                   <span className={`block truncate text-[11px] ${layer.hidden ? "text-zinc-600 line-through" : "text-zinc-200"}`}>

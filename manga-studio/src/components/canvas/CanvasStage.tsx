@@ -375,12 +375,25 @@ export function CanvasStage() {
        */
       if (extend) {
         const current = useEditorStore.getState().selection;
-        if (current.itemId && current.itemId !== chosen.itemId) {
-          const also = new Set(current.alsoItemIds ?? []);
-          if (also.has(chosen.itemId)) also.delete(chosen.itemId);
-          else also.add(chosen.itemId);
-          select({ itemId: current.itemId, panelId: target.panelId, alsoItemIds: [...also] });
-          return true;
+        if (current.itemId) {
+          /**
+           * Two characters placed with Fit both fill the panel box, so a shift
+           * click very often lands on the actor that is ALREADY primary. Taking
+           * the next unselected entry in the hit stack makes the gesture mean
+           * "and this one too" instead of silently doing nothing — which is how
+           * the pair selection looked broken on a crowded panel.
+           */
+          const already = new Set([current.itemId, ...(current.alsoItemIds ?? [])]);
+          const partner = chosen.itemId === current.itemId
+            ? stack.find((entry) => !already.has(entry.itemId))
+            : chosen;
+          if (partner && partner.itemId !== current.itemId) {
+            const also = new Set(current.alsoItemIds ?? []);
+            if (also.has(partner.itemId)) also.delete(partner.itemId);
+            else also.add(partner.itemId);
+            select({ itemId: current.itemId, panelId: target.panelId, alsoItemIds: [...also] });
+            return true;
+          }
         }
       }
       select({ itemId: chosen.itemId, panelId: target.panelId });

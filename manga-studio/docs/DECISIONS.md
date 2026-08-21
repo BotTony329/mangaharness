@@ -725,3 +725,33 @@ Agent's `create_interaction` — goes through `domain/interactionService`. The
 Inspector previously ran its own capability check, dispatch and anchor logic;
 two implementations of "what a hug is" drift until the result depends on how the
 creator asked.
+
+## D65 — Identity is resolved from any surviving link, and LEFT/RIGHT have jobs
+
+Reported from production: a character selected on the canvas showed no State,
+Interactions or Details tabs. The Inspector asked one of the three links that
+can tie an asset to a character, and that link was the one the document had
+lost. `characters/identity.ts` is now the single resolver, checking the
+instance's own state, the asset's metadata, and the character's asset list in
+that order. Existing damaged documents heal on load; no migration.
+
+The damage is also stopped at source — `replaceAssetReferences` carries the
+character onto the replacement asset — but the resolver stays, because a
+document that has already been through the old path must still work.
+
+**LEFT is what exists. RIGHT is what the selected thing means and does.**
+Character thumbnails and asset states belong in the library; relationships,
+interactions and state editing belong in the Inspector. The relationships
+editor in the left card is now the same component as the Inspector's, rendered
+compact — a shortcut, not a second implementation.
+
+## D66 — A gesture that silently does nothing is a broken gesture
+
+Shift-clicking a second actor did nothing whenever both characters were placed
+with Fit, because both then fill the panel box and the click resolved to the
+actor that was already primary. Shift-click now takes the next unselected entry
+in the hit stack, so the gesture means "and this one too" rather than "nothing".
+
+The Layers list also accepts shift-click, and highlights both rows. Canvas hit
+testing has to tell two overlapping images apart; a list never does, so the
+two-character workflow has one path that cannot degrade.
