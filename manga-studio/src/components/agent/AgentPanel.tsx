@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { buildAgentContext } from "@/agent/contextBuilder";
-import { countGenerations, describeStep, executePlan, type RunGuards, type StepProgress } from "@/agent/executor";
+import { countGenerations, describeStep, executePlan, type ExecutionSummary, type RunGuards, type StepProgress } from "@/agent/executor";
 import { groundPrompt, type GroundingReport } from "@/agent/grounding";
 import { validateGroundedPlan } from "@/agent/planValidation";
 import { resolveAgentScope, scopeForPanels, scopeForSubject, type AgentScopePreference } from "@/agent/scope";
@@ -86,6 +86,8 @@ export function AgentPanel() {
   const [activity, setActivity] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<AgentDiagnostics | null>(null);
+  /** The final run verdict: completed / partially_completed / failed, with named fallbacks. */
+  const [runSummary, setRunSummary] = useState<ExecutionSummary | null>(null);
   const [agentConfigured, setAgentConfigured] = useState<boolean | null>(null);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -107,6 +109,7 @@ export function AgentPanel() {
     setErrorDetails(null);
     setPlan(null);
     setGrounding(null);
+    setRunSummary(null);
     setGuards(null);
     setAssetTrace([]);
     setSteps([]);
@@ -362,19 +365,23 @@ export function AgentPanel() {
       setError(
         `${summary.abortReason ?? "The run could not be completed."} Nothing was changed — your page is exactly as it was.`,
       );
+      setRunSummary(summary);
       setStatusLine(null);
       setPhase("error");
       return;
     }
 
     setActivity((current) => [...current, "Done"]);
-    const warnings = summary.validationIssues.filter(
-      (issue) => !issue.corrected && issue.severity !== "info",
-    );
+    setRunSummary(summary);
+    /**
+     * The verdict is the run STATUS, never "done with N failed steps".
+     * Partial means something the creator asked for is missing, and they are
+     * told what, why, and what they can do about it.
+     */
     setStatusLine(
-      summary.failed === 0 && warnings.length === 0
-        ? "Done. Everything stays editable — one Undo reverts the whole run."
-        : `Done with ${summary.failed} failed step${summary.failed !== 1 ? "s" : ""} and ${warnings.length} validation warning${warnings.length !== 1 ? "s" : ""}.`,
+      summary.status === "completed"
+        ? "Completed. Everything stays editable — one Undo reverts the whole run."
+        : null,
     );
     setPhase("done");
   };
@@ -611,7 +618,7 @@ export function AgentPanel() {
       )}
       {error && (
         <div className="rounded border border-red-900 bg-red-950/50 p-3 text-red-200">
-          <p className="font-medium">Agent planning failed</p>
+          <p className="font-medium">{runSummary?.status === "failed" ? "Run failed — nothing was changed" : "Agent planning failed"}</p>
           <p className="mt-1 text-[11px] text-red-300">{error}</p>
           {errorDetails && (
             <details className="mt-2 text-[10px] text-zinc-400">
@@ -641,7 +648,8 @@ export function AgentPanel() {
       {plan && steps.length > 0 && (
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md bg-[var(--bg-elevated)] p-2">
           <p className="mb-1 text-[10px] font-medium text-[var(--accent-text)]">Target: {plan.targetScope?.label ?? "Current Page"}</p>
-          <p className="mb-2 text-zinc-400">{plan.summary}</p>
+          <p className="mb-1 text-zinc-400">{plan.summary}</p>
+          <p className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Execution</p>
           <ul className="space-y-1">
             {steps.map((step, i) => (
               <li key={i} className="flex items-start gap-2">
@@ -692,6 +700,62 @@ export function AgentPanel() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/*
+        The final verdict is a STATUS, not a shrug. "Done with 1 failed step"
+        claimed success while the page was missing something; a partial run now
+        says what is missing, what was used instead, and offers the two honest
+        next actions: retry, or revert the whole run.
+      */}
+      {runSummary && runSummary.status === "partially_completed" && (
+        <div className="rounded-md border border-amber-900/60 bg-amber-950/20 p-3" aria-label="Run partially completed">
+          <p className="text-xs font-medium text-amber-300">Partially completed</p>
+          <ul className="mt-1.5 space-y-1 text-[11px] text-amber-200/90">
+            {runSummary.fallbacks.map((fallback) => (
+              <li key={`fallback-${fallback.index}`}>
+                <span className="font-medium">Fallback:</span> {fallback.detail}
+              </li>
+            ))}
+            {runSummary.skippedSteps.map((step) => (
+              <li key={`skipped-${step.index}`}>
+                <span className="font-medium">Skipped:</span> {step.message}
+              </li>
+            ))}
+            {runSummary.validationIssues
+              .filter((issue) => !issue.corrected && issue.severity !== "info")
+              .map((issue) => (
+                <li key={issue.message}>
+                  <span className="font-medium">Warning:</span> {issue.message}
+                </li>
+              ))}
+          </ul>
+          <p className="mt-1.5 text-[10px] text-amber-200/70">
+            What changed is on the page and stays editable. What is missing is listed above.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              className="rounded border border-amber-800 px-2.5 py-1 text-[10px] text-amber-200 hover:bg-amber-900/40"
+              onClick={() => run(prompt.trim())}
+            >
+              Retry
+            </button>
+            <button
+              className="rounded border border-zinc-700 px-2.5 py-1 text-[10px] text-zinc-400 hover:text-zinc-200"
+              onClick={() => {
+                useEditorStore.getState().undo();
+                setRunSummary(null);
+                setPhase("idle");
+                setPlan(null);
+                setSteps([]);
+                setActivity([]);
+                setStatusLine("Run reverted — your page is exactly as it was.");
+              }}
+            >
+              Revert this run
+            </button>
+          </div>
         </div>
       )}
 

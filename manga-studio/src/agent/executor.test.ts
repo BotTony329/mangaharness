@@ -307,7 +307,10 @@ describe("executePlan", () => {
     const summary = await executePlan(plan, (_index, status, detail) => {
       if (status === "failed" && detail) details.push(detail);
     });
-    expect(summary).toMatchObject({ completed: 1, failed: 1, validationIssues: [], rolledBack: false });
+    // A scope breach is a safety violation: the run aborts and the page is
+    // restored, whatever the blocked tool was going to do.
+    expect(summary).toMatchObject({ completed: 1, failed: 1, validationIssues: [], rolledBack: true });
+    expect(summary.status).toBe("failed");
     expect(details[0]).toContain("Scope violation");
     expect(useEditorStore.getState().doc!.panels[page.panelIds[1]].itemIds).toHaveLength(0);
   });
@@ -427,22 +430,35 @@ describe("executePlan", () => {
     expect(failures.join(" ").toLowerCase()).toContain("background removal");
   });
 
-  it("reports failed steps but keeps executing the rest", async () => {
-    const { plan } = validatePlan({
-      summary: "partially bad",
+  it("a failed REQUIRED step aborts and rolls back; a failed NONCRITICAL step is skipped by name", async () => {
+    // Required failure: no fallback exists for a placement, so the run is
+    // FAILED and the page is restored — never "done with failed steps".
+    const { plan: required } = validatePlan({
+      summary: "required failure",
       steps: [
+        { tool: "add_effect", args: { panel: 1, effectKind: "screentone" } }, // would succeed
         { tool: "place_asset", args: { panel: 9, characterName: "Akari" } }, // no such panel
-        { tool: "place_asset", args: { panel: 1, characterName: "Nobody" } }, // no such character
-        { tool: "add_effect", args: { panel: 1, effectKind: "screentone" } }, // fine
       ],
     });
-    const details: (string | undefined)[] = [];
-    const summary = await executePlan(plan, (_i, status, detail) => {
-      if (status === "failed") details.push(detail);
+    const hard = await executePlan(required, () => {});
+    expect(hard.status).toBe("failed");
+    expect(hard.rolledBack).toBe(true);
+    expect(hard.failed).toBe(1);
+
+    // Noncritical failure: decoration is skipped, the scene it decorated
+    // survives, and the run says so by name.
+    const { plan: decorative } = validatePlan({
+      summary: "decorative failure",
+      steps: [
+        { tool: "add_effect", args: { panel: 1, effectKind: "screentone" } }, // fine
+        { tool: "add_effect", args: { panel: 9, effectKind: "impact-burst" } }, // no such panel
+      ],
     });
-    expect(summary.completed).toBe(1);
-    expect(summary.failed).toBe(2);
-    expect(details.join(" ")).toMatch(/Panel 9 does not exist/);
-    expect(details.join(" ")).toMatch(/Nobody/);
+    const soft = await executePlan(decorative, () => {});
+    expect(soft.status).toBe("partially_completed");
+    expect(soft.rolledBack).toBe(false);
+    expect(soft.completed).toBe(1);
+    expect(soft.skippedSteps).toHaveLength(1);
+    expect(soft.skippedSteps[0].message).toMatch(/Panel 9 does not exist/);
   });
 });

@@ -55,10 +55,16 @@ import type { PuppetJoint } from "@/puppet/model";
 import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
 import type { AgentRunScope } from "./scope";
-import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
+import { validateStepScope, ScopeViolationError, type AgentPlan, type ToolName } from "./tools/schemas";
 import { resolveDepthPlacements } from "./cameraIntent";
 import type { SequencePlan } from "./sequencePlan";
-import { couldGenerate } from "./capabilityRouter";
+import {
+  runStatusOf,
+  stepPolicyFor,
+  type FallbackUse,
+  type RunStatus,
+  type StepFailure,
+} from "./stepPolicy";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
 
@@ -76,6 +82,15 @@ export interface ExecutionSummary {
   rolledBack: boolean;
   /** Why the run was abandoned, when it was. */
   abortReason?: string;
+  /**
+   * The product truth of the run: COMPLETED / PARTIALLY_COMPLETED / FAILED.
+   * "Done with a failed step" is not a status — see `stepPolicy.ts`.
+   */
+  status: RunStatus;
+  /** Required steps rescued by an explicit fallback, named for the creator. */
+  fallbacks: FallbackUse[];
+  /** Noncritical steps that failed and were skipped. */
+  skippedSteps: StepFailure[];
 }
 
 export function describeStep(step: AgentPlan["steps"][number]): string {
@@ -205,6 +220,8 @@ export async function executePlan(
   let completed = 0;
   let failed = 0;
   let validationIssues: CompositionIssue[] = [];
+  const fallbacks: FallbackUse[] = [];
+  const skippedSteps: StepFailure[] = [];
 
   activeGuards = guards;
   createdCharacterIds = [];
@@ -228,23 +245,53 @@ export async function executePlan(
         completed += 1;
         onProgress(i, "done", completedDetail(plan.steps[i].tool));
       } catch (error) {
-        failed += 1;
         const message = error instanceof Error ? error.message : "Step failed";
-        onProgress(i, "failed", message);
-        /**
-         * A failed step that was meant to put artwork on the page means the
-         * rest of the plan composes around a hole.
-         *
-         * The test covers anything that COULD have generated, not only the
-         * always-generative tools: `place_character` escalates to generation
-         * when no cached state matches, and a failed one used to be shrugged
-         * off — the browser run left a shout bubble in the panel with nobody
-         * there to shout it. Stop and restore instead.
-         */
-        if (couldGenerate(plan.steps[i].tool)) {
+        // A scope breach is never skippable or fallback-able, whatever the tool.
+        if (error instanceof ScopeViolationError) {
+          failed += 1;
+          onProgress(i, "failed", message);
           abortReason = message;
           break;
         }
+        const policy = stepPolicyFor(plan.steps[i].tool);
+
+        /**
+         * What a failed step MEANS is policy, not a shrug.
+         *
+         * A noncritical decoration is skipped and named. A required step with
+         * an explicit fallback runs the fallback and the run is honest about
+         * being partial. Anything else aborts and rolls the page back — the
+         * rest of the plan would be composing around a hole, and "Done with 1
+         * failed step" is how a shout bubble once landed in a panel with
+         * nobody there to shout it.
+         */
+        if (!policy.required) {
+          skippedSteps.push({ index: i, tool: plan.steps[i].tool, message });
+          onProgress(i, "failed", `${message} — skipped (not critical to the scene)`);
+          continue;
+        }
+        if (policy.fallback === "APPROXIMATE_COMPOSITION" && plan.steps[i].tool === "create_interaction") {
+          try {
+            await approximateInteraction(plan.steps[i].args as InteractionArgs);
+            fallbacks.push({
+              index: i,
+              tool: plan.steps[i].tool,
+              detail: "Approximate composition used — the joint render failed, so both characters were placed from their existing reusable assets instead.",
+            });
+            completed += 1;
+            onProgress(i, "done", "Approximate composition used (joint render failed)");
+            continue;
+          } catch (fallbackError) {
+            failed += 1;
+            abortReason = `${message} Approximate composition also failed: ${fallbackError instanceof Error ? fallbackError.message : "no usable assets"}`;
+            onProgress(i, "failed", abortReason);
+            break;
+          }
+        }
+        failed += 1;
+        onProgress(i, "failed", message);
+        abortReason = message;
+        break;
       }
     }
 
@@ -268,7 +315,51 @@ export async function executePlan(
     activeGuards = DENY_ALL_CREATION;
   }
 
-  return { completed, failed, validationIssues, rolledBack, abortReason };
+  const unresolvedWarnings = validationIssues.filter(
+    (issue) => !issue.corrected && issue.severity !== "info",
+  ).length;
+  return {
+    completed,
+    failed,
+    validationIssues,
+    rolledBack,
+    abortReason,
+    fallbacks,
+    skippedSteps,
+    status: runStatusOf({ rolledBack, fallbacks, skippedSteps, unresolvedWarnings }),
+  };
+}
+
+type InteractionArgs = {
+  panel: number;
+  interaction: InteractionType;
+  subjectCharacterName: string;
+  subjectCharacterId?: ID;
+  targetCharacterName: string;
+  targetCharacterId?: ID;
+};
+
+/**
+ * Fallback Composition — an explicit product behaviour, not a hidden rescue.
+ *
+ * A joint render that failed leaves two characters who still have perfectly
+ * good reusable assets. The fallback places each of them from EXISTING ready
+ * assets only (generateIfMissing is false: a fallback must never spend a
+ * second generation trying to fix the first). The run then reports
+ * PARTIALLY COMPLETED and names what is missing — the true joint render.
+ */
+async function approximateInteraction(args: InteractionArgs): Promise<void> {
+  const panelId = panelIdByNumber(args.panel);
+  for (const who of [
+    { characterName: args.subjectCharacterName, characterId: args.subjectCharacterId },
+    { characterName: args.targetCharacterName, characterId: args.targetCharacterId },
+  ]) {
+    const { asset } = await resolveOrGenerateState(
+      { characterName: who.characterName, characterId: who.characterId, generateIfMissing: false },
+      "Fallback composition reuses existing assets only.",
+    );
+    dispatch({ type: "add-instance", panelId, assetId: asset.id });
+  }
 }
 
 function runningDetail(tool: ToolName): string | undefined {
@@ -290,7 +381,7 @@ function completedDetail(tool: ToolName): string | undefined {
 
 async function executeStep(step: AgentPlan["steps"][number], scope?: AgentRunScope): Promise<void> {
   const scopeError = scope ? validateStepScope(step.tool, step.args, scope) : null;
-  if (scopeError) throw new Error(scopeError);
+  if (scopeError) throw new ScopeViolationError(scopeError);
   const args = step.args as never;
   switch (step.tool) {
     case "create_character":

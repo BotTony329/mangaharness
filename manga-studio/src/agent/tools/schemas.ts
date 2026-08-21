@@ -429,6 +429,12 @@ const PANEL_LEVEL_TOOLS = new Set<ToolName>([
   "set_focal_character",
 ]);
 
+/**
+ * A scope violation is a safety breach, not a step failure: it always aborts
+ * the run, regardless of how decorative the tool would otherwise be.
+ */
+export class ScopeViolationError extends Error {}
+
 /** Pure guard used both while validating model output and immediately before execution. */
 export function validateStepScope(tool: ToolName, args: Record<string, unknown>, scope: AgentRunScope): string | null {
   /**

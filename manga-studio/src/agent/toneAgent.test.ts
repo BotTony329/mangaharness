@@ -127,7 +127,10 @@ describe("the Agent uses the creator's own editor", () => {
   it("refuses a tone it cannot identify rather than applying a random one", async () => {
     studio();
     const summary = await run([{ tool: "apply_tone", args: { panel: 1, mood: "a bowl of soup" } }]);
-    expect(summary.failed).toBe(1);
+    // A tone is decoration: the unidentified mood is skipped by name, never
+    // silently replaced with a random one, and the run reports itself partial.
+    expect(summary.skippedSteps).toHaveLength(1);
+    expect(summary.status).toBe("partially_completed");
     expect(tones()).toHaveLength(0);
   });
 
