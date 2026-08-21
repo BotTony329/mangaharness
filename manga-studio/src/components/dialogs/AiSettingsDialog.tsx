@@ -42,19 +42,27 @@ interface StatusResponse {
   background: ProviderSummary;
 }
 
-const AGENT_TYPES = [
-  { id: "openai-compatible", label: "OpenAI Compatible", placeholder: "https://api.deepseek.com" },
-  { id: "anthropic-compatible", label: "Anthropic Compatible", placeholder: "https://api.anthropic.com" },
-  { id: "gemini", label: "Google Gemini", placeholder: "https://generativelanguage.googleapis.com" },
+/**
+ * Protocol-first: these are API STANDARDS, not a vendor list. Any provider
+ * name, any base URL — the protocol alone decides runtime behaviour. "Custom
+ * JSON" is one of the standards, not a separate mode.
+ */
+const AGENT_PROTOCOLS = [
+  { id: "openai-compatible", label: "OpenAI-compatible", placeholder: "https://api.deepseek.com/v1" },
+  { id: "anthropic-compatible", label: "Anthropic Messages", placeholder: "https://api.anthropic.com" },
+  { id: "gemini", label: "Gemini Native", placeholder: "https://generativelanguage.googleapis.com" },
+  { id: "custom", label: "Custom JSON", placeholder: "https://example.com/v1/generate" },
 ];
 
-const IMAGE_TYPES = [
-  { id: "gemini", label: "Google Gemini (reference images)", placeholder: "https://generativelanguage.googleapis.com" },
-  { id: "openai-compatible", label: "OpenAI-Compatible Image API", placeholder: "https://api.example.com/v1" },
+const IMAGE_PROTOCOLS = [
+  { id: "gemini", label: "Gemini Native", placeholder: "https://generativelanguage.googleapis.com" },
+  { id: "openai-compatible", label: "OpenAI-compatible", placeholder: "https://api.example.com/v1" },
+  { id: "custom", label: "Custom JSON", placeholder: "https://example.com/v1/generate" },
 ];
 
-const BACKGROUND_TYPES = [
+const BACKGROUND_PROTOCOLS = [
   { id: "remove-bg", label: "remove.bg", placeholder: "https://api.remove.bg/v1.0/removebg" },
+  { id: "custom", label: "Custom JSON", placeholder: "https://example.com/cutout" },
 ];
 
 export function AiSettingsDialog() {
@@ -93,14 +101,15 @@ export function AiSettingsDialog() {
           </button>
         </div>
         <p className="mb-4 text-xs leading-5 text-zinc-500">
-          Bring your own API: connect any compatible provider for each capability. Credentials are encrypted and stored
-          for this browser session only — they never appear in project data, exports, or client-side storage.
+          Bring your own API. You only need to know which standard your provider speaks — then paste its address, key
+          and model. Any provider name works; the standard decides how Kumanga talks to it. Credentials are encrypted
+          and stored for this browser session only.
         </p>
 
         <ProviderCard
           kind="agent"
           title="Manga Agent (LLM)"
-          types={AGENT_TYPES}
+          protocols={AGENT_PROTOCOLS}
           summary={status?.agent ?? null}
           onChanged={refresh}
           supportsModelDiscovery
@@ -108,7 +117,7 @@ export function AiSettingsDialog() {
         <ProviderCard
           kind="image"
           title="Image Generation"
-          types={IMAGE_TYPES}
+          protocols={IMAGE_PROTOCOLS}
           summary={status?.image ?? null}
           onChanged={refresh}
           footnote={
@@ -119,16 +128,59 @@ export function AiSettingsDialog() {
               : undefined
           }
         />
-        <ProviderCard
-          kind="background"
-          title="Background Removal"
-          types={BACKGROUND_TYPES}
-          summary={status?.background ?? null}
-          onChanged={refresh}
-          footnote="Optional fallback after native alpha and Image AI editing. remove.bg is a quick preset; Custom API supports any JSON cutout service. Provider usage may incur charges."
-        />
+        <BackgroundRemovalCard summary={status?.background ?? null} onChanged={refresh} />
       </div>
     </div>
+  );
+}
+
+/**
+ * Background removal is a FALLBACK, not a third provider to configure.
+ *
+ * The primary path needs no setup at all: foreground assets are generated on
+ * pure white and the built-in extractor cuts them out. A removal API is only
+ * ever consulted when that fails — and only if the creator chose to connect
+ * one here.
+ */
+function BackgroundRemovalCard({ summary, onChanged }: { summary: ProviderSummary | null; onChanged: () => void }) {
+  const configured = summary?.configured ?? false;
+  const [configuring, setConfiguring] = useState(false);
+  return (
+    <section className="mb-4 rounded-md p-3" style={{ background: "var(--bg-elevated)" }}>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">Background Removal</h3>
+        <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--success)" }}>
+          <DoneIcon size={12} strokeWidth={2} />
+          Built-in
+        </span>
+      </div>
+      <p className="mb-2 text-[11px] leading-4 text-zinc-500">
+        <span className="text-zinc-400">Primary:</span> built-in white-background extraction — always on, nothing to
+        configure.
+      </p>
+      <p className="mb-2 text-[11px] leading-4 text-zinc-500">
+        <span className="text-zinc-400">Fallback:</span>{" "}
+        {configured
+          ? `${summary?.name || summary?.providerType || "custom"} — used only if built-in extraction fails`
+          : "none — if extraction fails, you get a repair prompt instead"}
+      </p>
+      {!configuring && (
+        <button
+          className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs hover:bg-zinc-700"
+          onClick={() => setConfiguring(true)}
+        >
+          {configured ? "Edit fallback" : "Configure fallback (optional)"}
+        </button>
+      )}
+      {configuring && (
+        <div className="mt-2 border-t border-zinc-800 pt-2">
+          <ProviderCard kind="background" title="Fallback provider" protocols={BACKGROUND_PROTOCOLS} summary={summary} onChanged={onChanged} />
+          <button className="text-xs text-zinc-500 hover:text-zinc-300" onClick={() => setConfiguring(false)}>
+            Collapse
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -137,18 +189,17 @@ export function AiSettingsDialog() {
 interface ProviderCardProps {
   kind: "agent" | "image" | "background";
   title: string;
-  types: { id: string; label: string; placeholder: string }[];
+  protocols: { id: string; label: string; placeholder: string }[];
   summary: ProviderSummary | null;
   onChanged: () => void;
   supportsModelDiscovery?: boolean;
   footnote?: string;
 }
 
-function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDiscovery, footnote }: ProviderCardProps) {
-  // "custom" is the universal mode; presets are conveniences.
-  const [mode, setMode] = useState<"custom" | "preset">("custom");
+function ProviderCard({ kind, title, protocols, summary, onChanged, supportsModelDiscovery, footnote }: ProviderCardProps) {
+  const simpleProtocols = protocols.filter((p) => p.id !== "custom");
   const [customForm, setCustomForm] = useState<CustomFormState>(() => emptyCustomForm(kind));
-  const [providerType, setProviderType] = useState(types[0].id);
+  const [providerType, setProviderType] = useState(simpleProtocols[0].id);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -160,56 +211,56 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
+  const isCustom = providerType === "custom";
+
   // Prefill the form from the saved summary once (never the key — the server
   // doesn't return it; an empty key field means "keep the stored key").
   useEffect(() => {
     if (!summary || hydrated) return;
     if (summary.configured) {
       if (summary.providerType === "custom" && summary.custom) {
-        setMode("custom");
+        setProviderType("custom");
         setCustomForm(hydrateCustomForm(kind, summary));
       } else {
-        setMode("preset");
-        setProviderType(summary.providerType ?? types[0].id);
+        setProviderType(summary.providerType ?? simpleProtocols[0].id);
         setName(summary.name ?? "");
         setBaseUrl(summary.baseUrl ?? "");
         setModel(summary.model ?? "");
       }
     }
     setHydrated(true);
-  }, [summary, hydrated, types, kind]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, hydrated, kind]);
 
-  const typeInfo = types.find((t) => t.id === providerType) ?? types[0];
+  const typeInfo = protocols.find((t) => t.id === providerType) ?? protocols[0];
   const configured = summary?.configured ?? false;
-  const canSave =
-    mode === "custom"
-      ? Boolean(customForm.endpoint && customForm.model && (configured || customForm.apiKey || customForm.authMode === "none"))
-      : Boolean((kind === "background" || model) && (configured || apiKey));
+  const canSave = isCustom
+    ? Boolean(customForm.endpoint && customForm.model && (configured || customForm.apiKey || customForm.authMode === "none"))
+    : Boolean((kind === "background" || model) && (configured || apiKey));
 
   const save = async () => {
     setBusy("save");
     setMessage(null);
     try {
-      const payload =
-        mode === "custom"
-          ? {
-              kind,
-              providerType: "custom",
-              name: customForm.name || undefined,
-              baseUrl: customForm.endpoint,
-              apiKey: customForm.apiKey || undefined,
-              model: customForm.model,
-              custom: customPayloadFromForm(kind, customForm),
-            }
-          : {
-              kind,
-              providerType,
-              name: name || undefined,
-              baseUrl: baseUrl || undefined,
-              // Empty field + already configured = keep the stored key.
-              apiKey: apiKey || undefined,
-              model: model || (kind === "background" ? "background-removal" : ""),
-            };
+      const payload = isCustom
+        ? {
+            kind,
+            providerType: "custom",
+            name: customForm.name || undefined,
+            baseUrl: customForm.endpoint,
+            apiKey: customForm.apiKey || undefined,
+            model: customForm.model,
+            custom: customPayloadFromForm(kind, customForm),
+          }
+        : {
+            kind,
+            providerType,
+            name: name || undefined,
+            baseUrl: baseUrl || undefined,
+            // Empty field + already configured = keep the stored key.
+            apiKey: apiKey || undefined,
+            model: model || (kind === "background" ? "background-removal" : ""),
+          };
       const response = await fetch("/api/provider/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -294,51 +345,49 @@ function ProviderCard({ kind, title, types, summary, onChanged, supportsModelDis
         </span>
       </div>
 
-      {/* Custom API is the universal, prominent mode; presets are shortcuts. */}
-      <div className="mb-3 flex gap-1 rounded-md border border-zinc-800 bg-zinc-950 p-1 text-xs">
-        <ModeTab active={mode === "custom"} onClick={() => setMode("custom")}>
-          Custom API
-        </ModeTab>
-        <ModeTab active={mode === "preset"} onClick={() => setMode("preset")}>
-          Quick Preset
-        </ModeTab>
+      {/*
+        One simple setup: pick the API STANDARD, name the provider anything,
+        paste address, key, model. "Custom JSON" is one of the standards and is
+        the only one that unfolds the request/response mapping.
+      */}
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="API standard / protocol">
+          <select
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
+            value={providerType}
+            onChange={(e) => {
+              setProviderType(e.target.value);
+              setBaseUrl("");
+              setModels([]);
+              if (kind === "background") setModel("background-removal");
+            }}
+          >
+            {protocols.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Provider name (any label)">
+          <input
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Kimi, MiniMax, OpenRouter, My Gateway…"
+          />
+        </Field>
       </div>
 
-      {mode === "custom" && (
-        <CustomProviderForm kind={kind} form={customForm} configured={configured} onChange={setCustomForm} />
-      )}
-
-      {mode === "preset" && (
+      {isCustom ? (
+        <details className="mb-2" open>
+          <summary className="mb-2 cursor-pointer text-[10px] uppercase tracking-wider text-zinc-500">
+            Advanced API mapping
+          </summary>
+          <CustomProviderForm kind={kind} form={customForm} configured={configured} onChange={setCustomForm} />
+        </details>
+      ) : (
         <>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="API standard">
-              <select
-                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
-                value={providerType}
-                onChange={(e) => {
-                  setProviderType(e.target.value);
-                  setBaseUrl("");
-                  setModels([]);
-                  if (kind === "background") setModel("background-removal");
-                }}
-              >
-                {types.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Provider name (optional)">
-              <input
-                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Kimi, MiniMax, …"
-              />
-            </Field>
-          </div>
-
           <Field label="Base URL">
             <input
               className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 font-mono text-xs"
@@ -463,17 +512,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block text-[10px] uppercase tracking-wider text-zinc-500">{label}</span>
       {children}
     </label>
-  );
-}
-
-function ModeTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      className={`flex-1 rounded px-2 py-1 ${active ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "text-zinc-500 hover:text-zinc-300"}`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
   );
 }
 
