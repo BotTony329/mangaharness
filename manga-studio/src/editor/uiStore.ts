@@ -7,7 +7,7 @@
 
 import { create } from "zustand";
 import type { ID } from "@/domain/types";
-import type { PoseRigState } from "@/characters/poseRig";
+import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
 
 export interface GeneratorRequest {
   assetType: "character" | "character-pose" | "character-expression" | "background" | "prop";
@@ -35,6 +35,9 @@ interface UiState {
    */
   poseEditInstanceId: ID | null;
   poseDraft: PoseRigState | null;
+  /** Calibration mode reuses the same overlay but drags baseline anchors (§3). */
+  calibrating: boolean;
+  calibrationDraft: PoseCalibration | null;
   /** AI Settings can be opened from anywhere ("Connect model" prompts). */
   settingsOpen: boolean;
   artStyleOpen: boolean;
@@ -44,6 +47,9 @@ interface UiState {
   beginPoseEdit(instanceId: ID, rig: PoseRigState): void;
   setPoseDraft(rig: PoseRigState): void;
   endPoseEdit(): void;
+  beginCalibration(instanceId: ID, calibration: PoseCalibration): void;
+  setCalibrationDraft(calibration: PoseCalibration): void;
+  endCalibration(): void;
   openSettings(): void;
   closeSettings(): void;
   openArtStyle(): void;
@@ -55,6 +61,8 @@ export const useUiStore = create<UiState>((set) => ({
   shapeEditPanelId: null,
   poseEditInstanceId: null,
   poseDraft: null,
+  calibrating: false,
+  calibrationDraft: null,
   settingsOpen: false,
   artStyleOpen: false,
   openGenerator: (request) => set({ generator: request }),
@@ -62,7 +70,11 @@ export const useUiStore = create<UiState>((set) => ({
   setShapeEditPanel: (panelId) => set({ shapeEditPanelId: panelId }),
   beginPoseEdit: (instanceId, rig) => set({ poseEditInstanceId: instanceId, poseDraft: rig }),
   setPoseDraft: (rig) => set({ poseDraft: rig }),
-  endPoseEdit: () => set({ poseEditInstanceId: null, poseDraft: null }),
+  endPoseEdit: () => set({ poseEditInstanceId: null, poseDraft: null, calibrating: false, calibrationDraft: null }),
+  beginCalibration: (instanceId, calibration) =>
+    set({ poseEditInstanceId: instanceId, calibrating: true, calibrationDraft: calibration, poseDraft: null }),
+  setCalibrationDraft: (calibration) => set({ calibrationDraft: calibration }),
+  endCalibration: () => set({ calibrating: false, calibrationDraft: null, poseEditInstanceId: null }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   openArtStyle: () => set({ artStyleOpen: true }),

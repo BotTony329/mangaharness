@@ -190,3 +190,25 @@ Phase 3 makes the action-figure metaphor real: a draggable skeleton over the sel
 ### Bug found by the acceptance test
 
 `swapInstanceAsset` rebuilt an instance's semantic state via `stateFromAsset`, which had never been taught to read the dimensions Phase 2 and 3 added. Swapping an instance therefore dropped `props` and `poseRig` silently. Fixed at the root: `stateFromAsset` now reads every dimension a render declares. Any dimension added later must be added there too, or the same class of silent loss returns.
+
+## D36 — PoseIntent is the one pose representation, and calibration belongs to the render
+
+Phase 4 closes two Phase 3 gaps: the generic rig did not sit on real artwork, and the editor and the Agent produced pose data by different routes.
+
+**One representation.** `PoseIntent { basePose, descriptors[], jointOverrides?, torsoDirection?, headDirection?, motionVector? }` is produced by both paths. The editor drags joints and derives descriptors; the Agent supplies descriptors and normalizes them. Everything downstream — cache key, resolver, prompt — consumes only a PoseIntent, so there is no agent-only pose vocabulary and no agent-only pose path.
+
+**Consistency rule.** Joint edits are authoring truth; descriptors summarize them. `normalizePoseIntent` re-derives descriptors whenever joints are present, so contradictory descriptors are discarded rather than merged. Descriptor-only intents keep their normalized descriptors.
+
+**Descriptor normalization is token-based, not a lookup table.** "raise her right hand", "right hand up" and "lift right arm" all reduce to side=right, part=arm, action=raised → `right arm raised`. A table would only cover phrasings we thought of; unrecognized text returns null rather than being coerced into the nearest descriptor, because a wrong pose is worse than an ignored one.
+
+**Calibration is stored per rendered state, not per character.** A walking render and a crouching render need different alignment; a single per-character fit would be wrong for both. It lives on `CharacterStateRecord.poseCalibration` and never triggers regeneration — it only moves where the editor draws the skeleton.
+
+**A calibrated joint carries its descendants.** Aligning the hips moves the whole lower body; aligning a hand moves only the hand. Without propagation, fitting one landmark would visibly detach the limb it belongs to.
+
+**Calibration does not participate in the cache key.** It is alignment, not pose, so a calibrated walking render still satisfies a plain walking request.
+
+### Three bugs the acceptance test caught
+
+1. **`"look right"` parsed to nothing.** The bare side word was consumed as a body side before it could serve as a direction. For head and torso a side word IS the direction, and verbs like "look" and "lean" now imply their body part.
+2. **Dragging a hand reported a bend nobody asked for.** The untouched elbow was left off the limb line, so "raise the arm" also produced "right elbow bent" — and the Agent's equivalent intent did not, breaking unification. Dragging a tip now carries its mid joint at half the delta, which is also how a puppet limb behaves.
+3. **Bend was measured absolutely, not as a change.** A calibrated arm that already looked bent reported "elbow bent" with zero movement, so a calibrated character read as permanently posed. Bend is now a delta against the calibrated baseline, consistent with every other descriptor.

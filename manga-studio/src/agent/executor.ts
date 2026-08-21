@@ -36,6 +36,7 @@ import { useEditorStore } from "@/editor/store";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
 import { assetRenderUrl, isAssetReadyForComposition } from "@/assets/renderSource";
 import { findCharacter, findUnreadyCharacterAsset, resolveCharacterState, resolveLibraryAsset } from "./resolver";
+import { poseIntentFromDescriptors } from "@/characters/poseRig";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
 
@@ -729,12 +730,12 @@ function doAttachBubble(args: {
 }
 
 /**
- * Semantic pose adjustment (§12).
+ * Semantic pose adjustment (§6).
  *
- * Builds the SAME PoseRigState the joint editor produces and routes it through
- * the same state runtime, so there is no agent-only pose path. The model
- * supplies meaning; descriptors are the pose's identity, so an agent request
- * and a hand-dragged pose that mean the same thing share one cached render.
+ * Produces a PoseIntent through the SAME normalizer the joint editor uses, so
+ * "raise her right hand" and a dragged arm land on the identical canonical
+ * descriptor and therefore the identical cached render. There is no agent-only
+ * pose vocabulary and no agent-only pose path.
  */
 async function doSetCharacterPoseRig(args: {
   panel: number;
@@ -748,12 +749,13 @@ async function doSetCharacterPoseRig(args: {
   const current = stateFromInstance(doc, instance);
   if (!current) throw new Error("The targeted instance is not a character");
 
-  const basePose = (args.basePose ?? current.poseRig?.basePose ?? current.pose).trim().toLowerCase();
-  const descriptors = [...new Set(args.adjustments.map((value) => value.trim().toLowerCase()).filter(Boolean))].sort();
-  if (descriptors.length === 0) throw new Error("set_character_pose_rig needs at least one adjustment");
+  const basePose = args.basePose ?? current.poseRig?.basePose ?? current.pose;
+  const intent = poseIntentFromDescriptors(basePose, args.adjustments);
+  if (intent.descriptors.length === 0) {
+    throw new Error(
+      `None of those adjustments are recognized pose descriptors. Try phrasings like "right arm raised" or "head turned left".`,
+    );
+  }
 
-  await applyCharacterStateToInstance({
-    instanceId: instance.id,
-    patch: { poseRig: { basePose, joints: {}, descriptors } },
-  });
+  await applyCharacterStateToInstance({ instanceId: instance.id, patch: { poseRig: intent } });
 }

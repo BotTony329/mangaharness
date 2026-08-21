@@ -10,6 +10,7 @@
 
 import { newId, now } from "./factory";
 import { DEFAULT_STYLE_PROFILE_ID } from "@/styles/profiles";
+import type { PoseCalibration } from "@/characters/poseRig";
 import type {
   CharacterStateDelta,
   CharacterStateRecord,
@@ -107,6 +108,22 @@ export function setStateLineage(
     record.canonicalReferenceAssetId = lineage.canonicalReferenceAssetId;
   }
   if (lineage.delta !== undefined) record.delta = lineage.delta;
+}
+
+/**
+ * Save rig calibration for one rendered state.
+ *
+ * Never regenerates anything (§3): calibration only changes where the editor
+ * draws the skeleton, so the render is untouched.
+ */
+export function setStateCalibration(
+  doc: ProjectDocument,
+  stateId: ID,
+  calibration: PoseCalibration | undefined,
+): void {
+  const record = doc.characterStates[stateId];
+  if (!record) throw new Error(`Unknown character state: ${stateId}`);
+  record.poseCalibration = calibration;
 }
 
 /** Backfill the graph from every character render already in a document. */

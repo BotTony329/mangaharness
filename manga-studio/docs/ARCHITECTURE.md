@@ -64,7 +64,7 @@ Processing is non-destructive. `storageUrl`/`sourceUrl` always identify the orig
 
 ## Pose rig
 
-`characters/poseRig.ts` holds the 14-joint semantic rig: presets, normalized sparse joint overrides, corrective (non-IK) constraints, and `deriveDescriptors`, which reads joint positions back as sentences. Descriptors are the pose's identity via `poseRigKey` and participate in the state key; raw coordinates never do. `components/canvas/PoseEditOverlay.tsx` draws the draggable skeleton on the overlay layer and writes only to `uiStore.poseDraft`, so nothing enters the document until Apply routes through the normal resolver and state runtime.
+`characters/poseRig.ts` holds the 14-joint semantic rig and the canonical `PoseIntent` that both the editor and the Agent produce: presets, normalized sparse joint overrides, corrective (non-IK) constraints, a shared descriptor vocabulary with token-based normalization (`normalizeDescriptor`), per-render `PoseCalibration` that shifts the generic skeleton onto real artwork, and `deriveDescriptors`, which reads joint positions back as sentences relative to the calibrated baseline. Descriptors are the pose's identity via `poseRigKey` and participate in the state key; raw coordinates never do. `components/canvas/PoseEditOverlay.tsx` draws the draggable skeleton on the overlay layer and writes only to `uiStore.poseDraft`, so nothing enters the document until Apply routes through the normal resolver and state runtime.
 
 ## Module rules
 

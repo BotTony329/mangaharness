@@ -7,7 +7,7 @@ import { addAsset, addCharacter, addGenerationRecord, setAssetProcessedImage, se
 import { deleteAsset, deleteCharacter, renameAsset, renameCharacter, replaceAssetReferences, setAssetArchived, type DeleteAssetMode, type DeleteCharacterMode } from "./assetLifecycle";
 import { addBubble, addEffect, duplicateItem, placeAsset, removeItem, reorderItem, setCropMode, swapInstanceAsset, updateBubble, updateItemProps, updateItemTransform, type ReorderDirection } from "./itemOps";
 import { addPage, removePage, setPageLayout } from "./pageOps";
-import { panelPxRect } from "./docHelpers";
+import { cloneDoc, panelPxRect, touch } from "./docHelpers";
 import { reshapePanel } from "./panelOps";
 import { addSceneRelationship, setSceneCharacterSemantics, setSceneContinuity } from "./sceneOps";
 import { addCustomStyle, setProjectStyle } from "./styleOps";
@@ -30,6 +30,8 @@ import type {
   StyleProfile,
 } from "./types";
 import { validateAndCorrectComposition, type CompositionIssue, type CompositionRequirements } from "./compositionValidation";
+import type { PoseCalibration } from "@/characters/poseRig";
+import { setStateCalibration } from "./characterStateOps";
 import type { CameraPatch } from "./camera";
 import type { PerspectivePatch } from "./perspective";
 import {
@@ -107,7 +109,8 @@ export type DomainCommand =
   | { type: "set-effect-params"; itemId: ID; patch: Record<string, unknown> }
   | { type: "set-effect-target"; itemId: ID; targetItemId?: ID }
   | { type: "set-bubble-target"; itemId: ID; characterId?: ID; instanceId?: ID }
-  | { type: "refresh-bubble-tails"; panelId: ID };
+  | { type: "refresh-bubble-tails"; panelId: ID }
+  | { type: "set-state-calibration"; stateId: ID; calibration?: PoseCalibration };
 
 export interface CommandResult {
   doc: ProjectDocument;
@@ -249,6 +252,12 @@ export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand)
       return { doc: setBubbleTarget(doc, command.itemId, { characterId: command.characterId, instanceId: command.instanceId }) };
     case "refresh-bubble-tails":
       return { doc: refreshBubbleTails(doc, command.panelId) };
+    case "set-state-calibration": {
+      const next = cloneDoc(doc);
+      setStateCalibration(next, command.stateId, command.calibration);
+      touch(next);
+      return { doc: next };
+    }
     case "validate-composition": {
       const result = validateAndCorrectComposition(doc, command.panelIds, command.requirements);
       return { doc: result.doc, issues: result.issues };

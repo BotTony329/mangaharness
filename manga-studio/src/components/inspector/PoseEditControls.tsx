@@ -18,6 +18,7 @@ import {
   resetPoseRig,
 } from "@/characters/poseRig";
 import { stateFromInstance } from "@/characters/state";
+import { findRenderedStateRecord } from "@/characters/stateGraph";
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { resolveInstancePatch } from "@/characters/stateResolver";
 import type { AssetInstance } from "@/domain/types";
@@ -26,30 +27,96 @@ import { useUiStore } from "@/editor/uiStore";
 
 export function PoseEditControls({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((state) => state.doc)!;
+  const dispatch = useEditorStore((state) => state.dispatch);
   const poseEditInstanceId = useUiStore((state) => state.poseEditInstanceId);
   const poseDraft = useUiStore((state) => state.poseDraft);
   const beginPoseEdit = useUiStore((state) => state.beginPoseEdit);
   const setPoseDraft = useUiStore((state) => state.setPoseDraft);
   const endPoseEdit = useUiStore((state) => state.endPoseEdit);
+  const calibrating = useUiStore((state) => state.calibrating);
+  const calibrationDraft = useUiStore((state) => state.calibrationDraft);
+  const beginCalibration = useUiStore((state) => state.beginCalibration);
+  const setCalibrationDraft = useUiStore((state) => state.setCalibrationDraft);
+  const endCalibration = useUiStore((state) => state.endCalibration);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>();
   const [error, setError] = useState<string>();
 
   const state = stateFromInstance(doc, item);
   if (!state) return null;
+  // Calibration belongs to the rendered state, so it is read from the graph
+  // node backing this instance's current asset.
+  const record = findRenderedStateRecord(doc, state);
+  const savedCalibration = record?.poseCalibration;
   const editing = poseEditInstanceId === item.id && poseDraft !== null;
+  const isCalibrating = poseEditInstanceId === item.id && calibrating;
+
+  if (isCalibrating) {
+    const draft = calibrationDraft ?? savedCalibration ?? { anchors: {}, updatedAt: new Date().toISOString() };
+    const anchorCount = Object.keys(draft.anchors).length;
+    return (
+      <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-950/20 p-2.5">
+        <p className="mb-2 text-[10px] uppercase tracking-wider text-amber-300">Calibrate rig</p>
+        <p className="mb-2 text-[10px] leading-4 text-zinc-400">
+          Drag the anchors so the skeleton lines up with this drawing. This only changes where the editor shows the
+          rig — the character is not regenerated.
+        </p>
+        <p className="mb-2 text-[10px] text-zinc-500">{anchorCount} anchor{anchorCount === 1 ? "" : "s"} adjusted</p>
+        <div className="grid grid-cols-3 gap-1 text-[11px]">
+          <button
+            className="rounded border border-zinc-700 py-1 hover:bg-zinc-800"
+            onClick={() => setCalibrationDraft({ anchors: {}, updatedAt: new Date().toISOString() })}
+          >
+            Reset
+          </button>
+          <button className="rounded border border-zinc-700 py-1 hover:bg-zinc-800" onClick={() => endCalibration()}>
+            Cancel
+          </button>
+          <button
+            disabled={!record}
+            title={record ? undefined : "This render has no state record yet"}
+            className="rounded bg-amber-600 py-1 text-white hover:bg-amber-500 disabled:opacity-40"
+            onClick={() => {
+              if (record) {
+                dispatch({
+                  type: "set-state-calibration",
+                  stateId: record.id,
+                  calibration: anchorCount > 0 ? draft : undefined,
+                });
+              }
+              endCalibration();
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!editing) {
     return (
-      <div className="mt-2">
+      <div className="mt-2 grid grid-cols-2 gap-1">
         <button
-          className="w-full rounded border border-zinc-700 bg-zinc-800 py-1.5 text-[11px] hover:bg-zinc-700"
+          className="rounded border border-zinc-700 bg-zinc-800 py-1.5 text-[11px] hover:bg-zinc-700"
           onClick={() => beginPoseEdit(item.id, state.poseRig ?? createPoseRigState(state.pose))}
         >
           Edit Pose
         </button>
+        <button
+          className="rounded border border-zinc-700 bg-zinc-800 py-1.5 text-[11px] hover:bg-zinc-700"
+          title="Fit the skeleton to this drawing"
+          onClick={() =>
+            beginCalibration(item.id, savedCalibration ?? { anchors: {}, updatedAt: new Date().toISOString() })
+          }
+        >
+          Calibrate Rig
+        </button>
         {isPoseEdited(state.poseRig) && (
-          <p className="mt-1 text-[10px] text-indigo-300">{describePoseRig(state.poseRig, state.pose)}</p>
+          <p className="col-span-2 mt-1 text-[10px] text-indigo-300">{describePoseRig(state.poseRig, state.pose)}</p>
+        )}
+        {savedCalibration && (
+          <p className="col-span-2 text-[10px] text-amber-400/80">Rig calibrated for this render.</p>
         )}
       </div>
     );

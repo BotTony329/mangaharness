@@ -8,7 +8,7 @@
  */
 
 import type { EffectParams } from "./effects";
-import type { PoseRigState } from "@/characters/poseRig";
+import type { PoseCalibration, PoseRigState } from "@/characters/poseRig";
 
 // ─── Shared primitives ──────────────────────────────────────────────────────
 
@@ -210,6 +210,11 @@ export interface CharacterStateRecord {
   props: string[];
   /** Authored pose edit for this state, when one was applied. */
   poseRig?: PoseRigState;
+  /**
+   * Rig alignment fitted to THIS render. Stored per state because a walking
+   * render and a crouching render need different alignment (§4).
+   */
+  poseCalibration?: PoseCalibration;
   styleProfileId: ID;
   createdAt: ISODate;
 }

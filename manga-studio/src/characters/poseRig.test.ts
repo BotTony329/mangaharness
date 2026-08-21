@@ -18,15 +18,15 @@ import {
   DRAGGABLE_JOINTS,
   JOINT_IDS,
   applyConstraints,
-  createPoseRigState,
-  describePoseRig,
+  createPoseIntent,
+  describePoseIntent,
   findPoseDefinition,
   isPoseEdited,
   jointPositionPx,
   moveJoint,
   poseDelta,
-  poseRigKey,
-  resetPoseRig,
+  poseIntentKey,
+  resetPoseIntent,
   resolveJoints,
 } from "./poseRig";
 import { defaultCharacterState } from "./kit";
@@ -97,11 +97,11 @@ const nodeFor = (doc: ProjectDocument, assetId: ID) =>
   Object.values(doc.characterStates).find((record) => record.assetId === assetId);
 
 /** Raise the right hand well above its resting position. */
-const raiseRightHand = (rig = createPoseRigState("walking")) => moveJoint(rig, "handRight", { x: 0.72, y: 0.14 });
+const raiseRightHand = (rig = createPoseIntent("walking")) => moveJoint(rig, "handRight", { x: 0.72, y: 0.14 });
 
 describe("normalized joints", () => {
   it("keeps every joint inside the character bounds", () => {
-    const rig = moveJoint(createPoseRigState("standing"), "handRight", { x: 4.2, y: -3 });
+    const rig = moveJoint(createPoseIntent("standing"), "handRight", { x: 4.2, y: -3 });
     const joints = resolveJoints(rig);
     for (const id of JOINT_IDS) {
       expect(joints[id].x).toBeGreaterThanOrEqual(0);
@@ -135,10 +135,10 @@ describe("normalized joints", () => {
 
   it("stores only the joints that actually moved", () => {
     const rig = raiseRightHand();
-    expect(Object.keys(rig.joints).length).toBeGreaterThan(0);
-    expect(Object.keys(rig.joints).length).toBeLessThan(JOINT_IDS.length);
-    expect(rig.joints.handRight).toBeDefined();
-    expect(rig.joints.footLeft).toBeUndefined();
+    expect(Object.keys(rig.jointOverrides!).length).toBeGreaterThan(0);
+    expect(Object.keys(rig.jointOverrides!).length).toBeLessThan(JOINT_IDS.length);
+    expect(rig.jointOverrides!.handRight).toBeDefined();
+    expect(rig.jointOverrides!.footLeft).toBeUndefined();
   });
 
   it("draws a connected skeleton", () => {
@@ -174,7 +174,7 @@ describe("normalized joints", () => {
 
 describe("constraints", () => {
   it("keeps an elbow from drifting off its limb", () => {
-    const joints = resolveJoints(createPoseRigState("standing"));
+    const joints = resolveJoints(createPoseIntent("standing"));
     const broken = { ...joints, elbowRight: { x: 0.02, y: 0.98 } };
     const fixed = applyConstraints(broken);
     const midX = (fixed.shoulderRight.x + fixed.handRight.x) / 2;
@@ -183,13 +183,13 @@ describe("constraints", () => {
   });
 
   it("leaves a naturally bent elbow alone", () => {
-    const joints = resolveJoints(createPoseRigState("jumping"));
+    const joints = resolveJoints(createPoseIntent("jumping"));
     const fixed = applyConstraints(joints);
     expect(fixed.elbowRight).toEqual(joints.elbowRight);
   });
 
   it("does not solve the whole chain — the dragged joint keeps its position", () => {
-    const rig = moveJoint(createPoseRigState("standing"), "handRight", { x: 0.78, y: 0.12 });
+    const rig = moveJoint(createPoseIntent("standing"), "handRight", { x: 0.78, y: 0.12 });
     // No IK: the hand stays exactly where the creator put it.
     expect(resolveJoints(rig).handRight).toEqual({ x: 0.78, y: 0.12 });
   });
@@ -201,24 +201,24 @@ describe("semantic descriptors", () => {
   });
 
   it("reads a turned head", () => {
-    const rig = moveJoint(createPoseRigState("standing"), "head", { x: 0.38, y: 0.08 });
+    const rig = moveJoint(createPoseIntent("standing"), "head", { x: 0.38, y: 0.08 });
     expect(rig.descriptors).toContain("head turned left");
   });
 
   it("reads a lifted leg", () => {
-    const rig = moveJoint(createPoseRigState("standing"), "footRight", { x: 0.57, y: 0.8 });
+    const rig = moveJoint(createPoseIntent("standing"), "footRight", { x: 0.57, y: 0.8 });
     expect(rig.descriptors).toContain("right leg lifted");
   });
 
   it("ignores movement too small to draw differently", () => {
-    const rig = moveJoint(createPoseRigState("standing"), "handRight", { x: 0.685, y: 0.545 });
+    const rig = moveJoint(createPoseIntent("standing"), "handRight", { x: 0.685, y: 0.545 });
     expect(rig.descriptors).toHaveLength(0);
     expect(isPoseEdited(rig)).toBe(false);
   });
 
   it("produces a readable sentence", () => {
     const rig = moveJoint(raiseRightHand(), "head", { x: 0.4, y: 0.08 });
-    const sentence = describePoseRig(rig, "walking");
+    const sentence = describePoseIntent(rig, "walking");
     expect(sentence).toContain("Walking");
     expect(sentence).toContain("right arm raised");
     expect(sentence).toContain("head turned left");
@@ -233,15 +233,15 @@ describe("semantic descriptors", () => {
 
   it("identifies a pose by meaning, not by coordinates", () => {
     // Two different drags that both mean "right arm raised".
-    const a = moveJoint(createPoseRigState("walking"), "handRight", { x: 0.72, y: 0.14 });
-    const b = moveJoint(createPoseRigState("walking"), "handRight", { x: 0.7, y: 0.17 });
-    expect(a.joints.handRight).not.toEqual(b.joints.handRight);
-    expect(poseRigKey(a)).toBe(poseRigKey(b));
+    const a = moveJoint(createPoseIntent("walking"), "handRight", { x: 0.72, y: 0.14 });
+    const b = moveJoint(createPoseIntent("walking"), "handRight", { x: 0.7, y: 0.17 });
+    expect(a.jointOverrides!.handRight).not.toEqual(b.jointOverrides!.handRight);
+    expect(poseIntentKey(a)).toBe(poseIntentKey(b));
   });
 
   it("treats an unedited rig as no pose key at all", () => {
-    expect(poseRigKey(createPoseRigState("walking"))).toBe("");
-    expect(poseRigKey(undefined)).toBe("");
+    expect(poseIntentKey(createPoseIntent("walking"))).toBe("");
+    expect(poseIntentKey(undefined)).toBe("");
   });
 });
 
@@ -261,7 +261,7 @@ describe("pose presets are a starting point", () => {
   });
 
   it("reset returns to the clean preset", () => {
-    const rig = resetPoseRig(raiseRightHand());
+    const rig = resetPoseIntent(raiseRightHand());
     expect(isPoseEdited(rig)).toBe(false);
     expect(rig.basePose).toBe("walking");
   });
@@ -294,7 +294,7 @@ describe("apply workflow", () => {
   it("makes no network call while dragging", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    let rig = createPoseRigState("walking");
+    let rig = createPoseIntent("walking");
     for (let step = 0; step < 20; step += 1) {
       rig = moveJoint(rig, "handRight", { x: 0.7, y: 0.5 - step * 0.02 });
     }
@@ -322,7 +322,7 @@ describe("apply workflow", () => {
       ...defaultCharacterState(base.characterId),
       pose: "walking",
       // A different drag with the same meaning must still hit the cache.
-      poseRig: moveJoint(createPoseRigState("walking"), "handRight", { x: 0.7, y: 0.17 }),
+      poseRig: moveJoint(createPoseIntent("walking"), "handRight", { x: 0.7, y: 0.17 }),
     });
     expect(resolution.status).toBe("cached");
     if (resolution.status === "cached") expect(resolution.assetId).toBe(posed.assetId);
@@ -379,7 +379,7 @@ describe("apply workflow", () => {
     const restored = deserializeProject(serializeProject(next));
     const state = stateOf(restored, instanceId);
     expect(state.poseRig?.descriptors).toContain("right arm raised");
-    expect(state.poseRig?.joints.handRight).toEqual(rig.joints.handRight);
+    expect(state.poseRig?.jointOverrides!.handRight).toEqual(rig.jointOverrides!.handRight);
     expect(state.expression).toBe("shocked");
   });
 
@@ -388,7 +388,7 @@ describe("apply workflow", () => {
     const before = doc.panels[panelIds[0]].itemIds.length;
     // Dragging is pure UI state; the rig produces no item and therefore cannot
     // reach the exported page.
-    const rig = moveJoint(createPoseRigState("walking"), "handRight", { x: 0.72, y: 0.14 });
+    const rig = moveJoint(createPoseIntent("walking"), "handRight", { x: 0.72, y: 0.14 });
     expect(isPoseEdited(rig)).toBe(true);
     expect(doc.panels[panelIds[0]].itemIds).toHaveLength(before);
     expect(Object.values(doc.items).some((item) => item.kind === "effect")).toBe(false);
@@ -435,7 +435,7 @@ describe("acceptance: pose the action figure", () => {
     const beforeApply = doc;
 
     // Enter Edit Pose: raise the free hand, turn the head slightly left.
-    let draft = createPoseRigState("walking");
+    let draft = createPoseIntent("walking");
     draft = moveJoint(draft, "handRight", { x: 0.72, y: 0.14 });
     draft = moveJoint(draft, "head", { x: 0.4, y: 0.08 });
     expect(draft.descriptors).toContain("right arm raised");

@@ -42,6 +42,8 @@ export function CanvasStage() {
   const shapeEditPanelId = useUiStore((s) => s.shapeEditPanelId);
   const poseEditInstanceId = useUiStore((s) => s.poseEditInstanceId);
   const poseDraft = useUiStore((s) => s.poseDraft);
+  const calibrating = useUiStore((s) => s.calibrating);
+  const calibrationDraft = useUiStore((s) => s.calibrationDraft);
   const setShapeEditPanel = useUiStore((s) => s.setShapeEditPanel);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -293,6 +295,12 @@ export function CanvasStage() {
   const shapeEditPanel = shapeEditPanelId ? doc.panels[shapeEditPanelId] : null;
   const poseEditCandidate = poseEditInstanceId ? doc.items[poseEditInstanceId] : null;
   const poseEditInstance = poseEditCandidate?.kind === "asset" ? poseEditCandidate : null;
+  // Calibration is stored on the rendered state, so the overlay reads it from
+  // the graph node backing this instance's current asset.
+  const poseCalibration = poseEditInstance
+    ? Object.values(doc.characterStates).find((record) => record.assetId === poseEditInstance.sourceAssetId)
+        ?.poseCalibration
+    : undefined;
   const looseItems = doc.workspaceOrder.map((id) => doc.workspaceItems[id]).filter(Boolean);
 
   return (
@@ -352,8 +360,16 @@ export function CanvasStage() {
             <PanelOutline doc={doc} page={page} panelId={hoveredPanel.id} color="#22d3ee" scale={view.scale} />
           )}
           {shapeEditPanel && <ShapeEditOverlay doc={doc} page={page} panel={shapeEditPanel} scale={view.scale} />}
-          {poseEditInstance && poseDraft && (
-            <PoseEditOverlay doc={doc} page={page} instance={poseEditInstance} rig={poseDraft} scale={view.scale} />
+          {poseEditInstance && (poseDraft || calibrating) && (
+            <PoseEditOverlay
+              doc={doc}
+              page={page}
+              instance={poseEditInstance}
+              intent={poseDraft}
+              calibration={calibrating ? (calibrationDraft ?? undefined) : poseCalibration}
+              calibrating={calibrating}
+              scale={view.scale}
+            />
           )}
           <Transformer
             ref={transformerRef}
