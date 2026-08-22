@@ -744,3 +744,42 @@ src/editor/          store.ts (doc + undo), projectsStore.ts, uiStore.ts (transi
 src/components/      library/ (left dock), inspector/ (right), canvas/, dialogs/, agent/
 docs/DECISIONS.md    durable ADRs — read before changing architecture
 ```
+
+---
+
+## Agent V2 + Harness (2026-08-22, commits 5f8eb7f / a64645e / f1fdcfa)
+
+**AGENT V2 SHIPPED.** The 1703-line `src/agent/executor.ts` is deleted and
+replaced by `src/agent-v2/`:
+
+- `pipeline.ts` — UNDERSTAND → PLAN → RESOLVE → CALL → VALIDATE; AgentPanel
+  only renders pipeline events.
+- `orchestrator.ts` — run lifecycle: transaction, step policy, validation,
+  execution summary.
+- `process/*` — per-domain execution (character / scene / panel / dialogue /
+  tone / camera / interaction / localEdit), each taking a run-scoped
+  `RunContext` (no module-level run globals).
+- `validation/` — plan / sequence / identity post-conditions.
+- Architecture boundary tests now cover both `src/agent/` and `src/agent-v2/`.
+
+**New agent tool `edit_asset_region`** — golden case J pins it to the same
+`/api/assets/edit` route and the same `LocalEditService.saveEditedVariation`
+write path as the Asset Detail Editor UI. The agent passes a full-canvas mask
+(regionless edit; locality comes from the instruction — recorded assumption).
+Result lands as a NEW asset with local-edit provenance and is swapped into the
+targeted instance; the original is never mutated.
+
+**HARNESS v0.1.0.** Root npm workspace: one `npm install` at the root, then
+`npm run dev|build|start|test|typecheck|lint`. Root scripts call `next`
+directly so host/port args forward (the `npm --prefix` chain swallowed `-p`).
+No registration, localhost-first: blob storage falls back to `./.data`,
+provider status treats non-Vercel as configured. README rewritten for Kumanga,
+NOTICE.md + in-app "Kumanga by BotTony329" credit added, CONTRIBUTING.md and
+ARCHITECTURE.md added. Clean-clone verified: install → dev (custom port) →
+build → start → 873 tests, all pass from a fresh clone.
+
+**Tests: 873 passed / 74 files. Gates: tsc / eslint / build all clean.
+Production: https://mangaharness.vercel.app (HTTP 200).**
+
+NOT verified in this environment: live BYOK generation against a real
+provider key (no key available here) — first item of POST-MVP work.
