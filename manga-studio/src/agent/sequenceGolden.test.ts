@@ -19,7 +19,7 @@ import { resolveSubject } from "./subject";
 import { resolveAgentScope, scopeForPanels, scopeForSubject } from "./scope";
 import { deriveSceneIntent } from "./sceneIntent";
 import { buildSequencePlan, compileSequencePlan } from "./sequencePlan";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { validatePlan } from "./tools/schemas";
 import { validateGroundedPlan } from "./planValidation";
 

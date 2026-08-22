@@ -31,11 +31,13 @@ function violations(dir: string, pattern: RegExp): string[] {
 
 describe("architecture boundaries", () => {
   it("agent never imports provider adapters, the generation HTTP client, or persistence", () => {
-    const bad = violations(
-      join(SRC, "agent"),
-      /@\/ai\/(clientGeneration|providers)|@\/storage\/|from ["']\.\.\/\.\.\/storage/,
-    );
-    expect(bad).toEqual([]);
+    for (const dir of ["agent", "agent-v2"]) {
+      const bad = violations(
+        join(SRC, dir),
+        /@\/ai\/(clientGeneration|providers)|@\/storage\/|from ["']\.\.\/\.\.\/storage/,
+      );
+      expect(bad, `${dir} boundary`).toEqual([]);
+    }
   });
 
   it("characters never calls the generation HTTP client or provider endpoints directly", () => {
@@ -62,9 +64,9 @@ describe("architecture boundaries", () => {
 
   it("manual and agent character creation both go through CharacterService", () => {
     const manual = readFileSync(join(SRC, "components/library/CharactersTab.tsx"), "utf8");
-    const agentExec = readFileSync(join(SRC, "agent/executor.ts"), "utf8");
+    const agentExec = readFileSync(join(SRC, "agent-v2/process/characterProcess.ts"), "utf8");
     const agentFulfil = readFileSync(join(SRC, "agent/fulfilRequirements.ts"), "utf8");
-    for (const [name, file] of [["CharactersTab", manual], ["executor", agentExec], ["fulfilRequirements", agentFulfil]] as const) {
+    for (const [name, file] of [["CharactersTab", manual], ["characterProcess", agentExec], ["fulfilRequirements", agentFulfil]] as const) {
       expect(file, `${name} must call @/services/characters`).toMatch(/@\/services\/characters/);
       expect(file, `${name} must not dispatch create-character directly`).not.toMatch(/type: "create-character"/);
     }

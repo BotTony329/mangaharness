@@ -9,7 +9,7 @@ import { createProjectDocument } from "@/domain/factory";
 import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { AssetInstance } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { resolveAgentScope } from "./scope";
 import { validatePlan } from "./tools/schemas";
 

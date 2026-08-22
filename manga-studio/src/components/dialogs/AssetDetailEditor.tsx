@@ -27,6 +27,7 @@ import { characterReferenceId, stateFromInstance } from "@/characters/state";
 import { getActiveStyleProfile } from "@/styles/profiles";
 import { DEFAULT_FEATHER, MAX_FEATHER } from "@/assets/localEdit";
 import { buildEditInstruction } from "@/assets/editRequest";
+import { editAssetRegion, saveEditedVariation } from "@/services/localEdit";
 import type { AssetInstance, ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
@@ -164,21 +165,16 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
         styleName: style.name,
       });
 
-      const response = await fetch("/api/assets/edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceUrl,
-          maskPng: maskRef.current.toDataURL("image/png"),
-          instruction,
-          feather,
-          referenceUrls,
-          // Scenes stay rectangular; cut-outs keep their alpha.
-          preserveAlpha: asset.category !== "background",
-        }),
+      // UI and the agent share one client path: LocalEditService.
+      const body = await editAssetRegion({
+        sourceUrl,
+        maskPng: maskRef.current.toDataURL("image/png"),
+        instruction,
+        feather,
+        referenceUrls,
+        // Scenes stay rectangular; cut-outs keep their alpha.
+        preserveAlpha: asset.category !== "background",
       });
-      const body = (await response.json()) as EditResult & { error?: string };
-      if (!response.ok || !body.url) throw new Error(body.error ?? "Local edit failed");
       setResults((current) => [...current, body]);
       setChosen(results.length);
     } catch (caught) {
@@ -193,33 +189,8 @@ function Editor({ assetId, instanceId, onClose }: { assetId: ID; instanceId?: ID
   /** Register the chosen result as a NEW asset. The original is never touched. */
   const saveVariation = (): ID | undefined => {
     if (!result) return undefined;
-    const created = dispatch({
-      type: "create-asset",
-      input: {
-        category: asset.category,
-        name: `${asset.name} · ${prompt.trim().slice(0, 24) || "edit"}`,
-        storageUrl: result.url,
-        processedImageUrl: result.url,
-        width: asset.width,
-        height: asset.height,
-        hasAlpha: asset.hasAlpha,
-        backgroundRemoved: asset.backgroundRemoved,
-        processingStatus: "ready",
-        metadata: asset.metadata,
-        provenance: {
-          ...asset.provenance,
-          generatedFromAssetIds: [asset.id],
-          localEdit: {
-            parentAssetId: asset.id,
-            editPrompt: prompt.trim(),
-            // A pixel repair is not a semantic state change (§22).
-            intent: "cosmetic",
-            editedAt: new Date().toISOString(),
-          },
-        },
-      },
-    });
-    return created.createdId;
+    // One write path for UI and agent: LocalEditService.saveEditedVariation.
+    return saveEditedVariation(dispatch, asset, result.url, prompt);
   };
 
   const scale = zoom;

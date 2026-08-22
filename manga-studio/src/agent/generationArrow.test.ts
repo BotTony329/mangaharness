@@ -21,7 +21,7 @@ import { useEditorStore } from "@/editor/store";
 import { characterIdOfAsset } from "@/characters/identity";
 import { deriveAssetRequirements } from "./assetRequirements";
 import { fulfilRequirements } from "./fulfilRequirements";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { groundPrompt, groundingContext } from "./grounding";
 import { resolveSubject } from "./subject";
 import { deriveSceneIntent } from "./sceneIntent";

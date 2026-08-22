@@ -21,7 +21,7 @@ import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { characterIdOfAsset } from "@/characters/identity";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { validatePlan } from "./tools/schemas";
 
 class MockImage {

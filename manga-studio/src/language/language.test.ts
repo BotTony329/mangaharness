@@ -24,7 +24,7 @@ import {
 } from "@/domain/languageOps";
 import type { ID, ProjectDocument, SpeechBubbleItem } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { executePlan, type RunGuards } from "@/agent/executor";
+import { executePlan, type RunGuards } from "@/agent-v2";
 import { groundPrompt } from "@/agent/grounding";
 import { validateGroundedPlan } from "@/agent/planValidation";
 import { validatePlan } from "@/agent/tools/schemas";

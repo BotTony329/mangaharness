@@ -17,7 +17,7 @@ import { createProjectDocument } from "@/domain/factory";
 import { addAsset, addCharacter } from "@/domain/libraryOps";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { executePlan, type RunGuards } from "./executor";
+import { executePlan, type RunGuards } from "@/agent-v2";
 import { detectCreationIntent, groundPrompt, resolveCharacterReference } from "./grounding";
 import { validateGroundedPlan } from "./planValidation";
 import { resolveAgentScope } from "./scope";

@@ -12,7 +12,7 @@ import type { ID, ProjectDocument, ToneItem } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { toneForMood } from "@/tones/mood";
 import { TONE_PRESETS } from "@/domain/tones";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { validatePlan } from "./tools/schemas";
 
 class MockImage {

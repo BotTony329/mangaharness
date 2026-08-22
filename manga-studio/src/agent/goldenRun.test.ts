@@ -15,7 +15,7 @@ import { addAsset, addCharacter } from "@/domain/libraryOps";
 import { charactersInAsset } from "@/domain/interactions";
 import type { ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { executePlan } from "./executor";
+import { executePlan } from "@/agent-v2";
 import { resolveAgentScope } from "./scope";
 import { validatePlan } from "./tools/schemas";
 import { groundPrompt } from "./grounding";

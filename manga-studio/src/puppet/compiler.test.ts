@@ -16,7 +16,7 @@ import { applyDomainCommand } from "@/domain/commands";
 import { deserializeProject, serializeProject } from "@/domain/serialization";
 import type { AssetInstance, ID, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { executePlan } from "@/agent/executor";
+import { executePlan } from "@/agent-v2";
 import { validatePlan } from "@/agent/tools/schemas";
 import { compilePuppet, compilerIssues, isCompilable, proposePartRegions } from "./compiler";
 import { canApplyJoint, canRepresentView } from "./capability";

@@ -9,7 +9,8 @@
 
 import { useEffect, useState } from "react";
 import { buildAgentContext } from "@/agent/contextBuilder";
-import { countGenerations, describeStep, executePlan, type ExecutionSummary, type RunGuards, type StepProgress } from "@/agent/executor";
+import { countGenerations, describeStep, executePlan, type ExecutionSummary, type RunGuards, type StepProgress } from "@/agent-v2";
+import { runPipeline } from "@/agent-v2/pipeline";
 import { groundPrompt, type GroundingReport } from "@/agent/grounding";
 import { validateGroundedPlan } from "@/agent/planValidation";
 import { resolveAgentScope, scopeForPanels, scopeForSubject, type AgentScopePreference } from "@/agent/scope";
@@ -123,173 +124,41 @@ export function AgentPanel() {
       window.setTimeout(() => setStatusLine("This is taking longer than usual…"), 18_000),
     ];
     try {
-      let scope = resolveAgentScope({
-        doc: state.doc,
-        currentPageId: state.currentPageId,
-        selection: state.selection,
-        prompt: requestPrompt,
-        preference: scopePreference,
+      // UNDERSTAND → PLAN → RESOLVE → CALL → VALIDATE lives in agent-v2/pipeline;
+      // this panel only renders what the pipeline reports.
+      const outcome = await runPipeline(requestPrompt, scopePreference, {
+        activity: (label) => setActivity((current) => [...current, label]),
+        status: setStatusLine,
+        grounding: (report) => setGrounding(report),
+        subject: setSubject,
+        intent: setIntent,
+        sequence: setSequence,
+        requirements: setRequirements,
+        scope: setRunScope,
+        plan: setPlan,
+        assetTrace: setAssetTrace,
+        skillsUsed: setSkillsUsed,
+        guards: setGuards,
+        errorDetails: setErrorDetails,
       });
-      /**
-       * Entity grounding runs BEFORE the model is called. Identity is decided
-       * deterministically from the project, and the planner is handed the
-       * answer instead of being asked to guess it.
-       */
-      const report = groundPrompt({
-        doc: state.doc,
-        prompt: requestPrompt,
-        selectedCharacterId: selectedCharacterId(state.doc, state.selection.itemId),
-        selectedInstanceId: state.selection.itemId,
-        sceneCharacterIds: panelCharacterIds(state.doc, scope.panelId),
-      });
-      setGrounding(report);
-      setIntent(null);
-      setSubject(null);
-      setSequence(null);
-      setRequirements(null);
 
-      // A reference we could not ground stops the run here — before the model
-      // is paid for, before anything is generated, before anything is mutated.
-      if (report.blocking.length > 0) {
-        setStatusLine(report.blocking[0]);
+      if (outcome.kind === "blocked") {
+        setStatusLine(outcome.reason);
         setPhase("done");
         return;
       }
-
-      /**
-       * Subject, then scope, then intent — in that order.
-       *
-       * Grounding says WHO. Only then can scope decide whether the creator's
-       * selection is a target or merely the panel they are looking at, and only
-       * then can the semantic plan be built. Doing scope first is what let a
-       * selected lamp overrule a named character.
-       */
-      const resolvedSubject = resolveSubject({ doc: state.doc, grounding: report });
-      setSubject(resolvedSubject);
-      scope = scopeForSubject(scope, resolvedSubject, state.doc);
-      setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
-
-      const sceneIntent = deriveSceneIntent({
-        doc: state.doc,
-        prompt: requestPrompt,
-        grounding: report,
-        subject: resolvedSubject,
-        scope,
-      });
-      setIntent(sceneIntent);
-      setActivity((current) => [...current, "Scene intent"]);
-
-      /**
-       * The sequence plan is the ENFORCED structure.
-       *
-       * Beat-to-panel mapping, layout growth and camera compilation are decided
-       * here, deterministically, before the model is asked for anything. When
-       * the request has explicit structure — sequential moments, a named panel,
-       * or camera language — these compiled steps are what runs, and the
-       * planner is not given the opportunity to collapse two moments into one
-       * panel or to quietly drop a framing instruction.
-       */
-      const plan = buildSequencePlan({
-        doc: state.doc,
-        intent: sceneIntent,
-        scope,
-        characterIds: resolvedSubject.characterIds.length > 0
-          ? resolvedSubject.characterIds
-          : report.entities.filter((e) => e.characterId).map((e) => e.characterId as ID),
-      });
-      // A named panel widens the scope, just as a named character does.
-      scope = scopeForPanels(scope, plan.allocation.panelNumbers, plan.needsPanelLevel);
-      setRunScope({ label: scope.label, demotionReason: scope.demotionReason });
-      setSequence(plan);
-      /**
-       * What this request NEEDS, before anything is spent.
-       *
-       * A missing asset is a requirement, not a failure. Deriving it here means
-       * the creator sees "Roach Man — not in the library, create the character"
-       * in the plan rather than discovering afterwards that the run refused.
-       */
-      const requirementReport = deriveAssetRequirements({
-        doc: state.doc,
-        plan,
-        newCharacters: resolvedSubject.newCharacters,
-      });
-      setRequirements(requirementReport);
-      setActivity((current) => [...current, "Asset requirements"]);
-
-      const compiled = compileSequencePlan(plan, state.doc);
-      const deterministic = compiled.length > 0 && (plan.requiredPanelCount > 1 || plan.beats.some((beat) => beat.camera));
-      setActivity((current) => [...current, "Panel allocation"]);
-
-      const context = buildAgentContext({
-        doc: state.doc,
-        currentPageId: state.currentPageId,
-        selection: state.selection,
-        scope,
-        grounding: report,
-        intent: sceneIntent,
-      });
-      const response = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: requestPrompt, context, scope }),
-      });
-      const body = await response.json() as { error?: string; details?: AgentDiagnostics; diagnostics?: AgentDiagnostics };
-      if (!response.ok) {
-        setErrorDetails(body.details ?? null);
-        throw new Error(body.error ?? "Agent planning failed");
-      }
-
-      const received = body as typeof body & { plan: AgentPlan; skillsUsed: string[]; rejected: { tool: string; error: string }[] };
-      setSkillsUsed(received.skillsUsed);
-      setActivity((current) => [...current, "Scene plan"]);
-
-      // Bind names to IDs and refuse anything unresolvable, unauthorized, or
-      // already satisfied by the library — all before the first mutation.
-      /**
-       * Deterministic steps replace the model's for structured requests. The
-       * model still ran — its reading of the sentence produced nothing we keep,
-       * but it remains the interpretation layer for prompts with no explicit
-       * structure, which is the majority.
-       */
-      const sourcePlan = deterministic
-        ? { ...received.plan, steps: compiled, summary: received.plan.summary || plan.allocation.reason }
-        : received.plan;
-
-      const validated = validateGroundedPlan({
-        plan: sourcePlan,
-        doc: state.doc,
-        grounding: report,
-        scope,
-        panelCount: Math.max(scope.panelCount, ...plan.allocation.panelNumbers, 1),
-      });
-      setPlan(validated.plan);
-      setAssetTrace(validated.rejected.map((entry) => `${entry.tool}: ${entry.error}`));
-      setSteps(validated.plan.steps.map((s) => ({ label: describeStep(s), status: "pending" })));
-
-      if (validated.blocked) {
-        setStatusLine(validated.blockReason ?? "The plan referenced a character that could not be resolved.");
+      if (outcome.kind === "empty") {
+        setStatusLine(outcome.message);
         setPhase("done");
         return;
       }
-      if (validated.plan.steps.length === 0) {
-        setStatusLine(validated.plan.summary || "The agent had nothing to do for that request.");
-        setPhase("done");
-        return;
-      }
-      const runGuards: RunGuards = {
-        creationAuthorized: validated.creationAuthorized,
-        authorizedCreationNames: validated.authorizedCreationNames,
-        selectedCharacterId: report.selectedCharacterId,
-      };
-      setGuards(runGuards);
-      setStatusLine(received.diagnostics?.provider ? `Plan received from ${received.diagnostics.provider}.` : "Plan received.");
-
-      if (countGenerations(validated.plan) > CONFIRM_THRESHOLD) {
-        setStatusLine(`This plan generates ${countGenerations(validated.plan)} images.`);
+      setSteps(outcome.run.plan.steps.map((step) => ({ label: describeStep(step), status: "pending" })));
+      if (outcome.kind === "confirm") {
+        setStatusLine(`This plan generates ${outcome.generationCount} images.`);
         setPhase("confirm");
         return;
       }
-      await execute(validated.plan, runGuards, plan, requirementReport);
+      await execute(outcome.run.plan, outcome.run.guards, outcome.run.sequence, outcome.run.requirements);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent failed");
       setPhase("error");
