@@ -27,6 +27,7 @@ import {
   type CharacterResolution,
   type GroundingReport,
 } from "./grounding";
+import { validatePlanSemantics } from "./semanticValidation";
 import type { AgentRunScope } from "./scope";
 import { validateStepScope, type AgentPlan, type ToolName } from "./tools/schemas";
 
@@ -85,6 +86,12 @@ export interface GroundedPlanInput {
   scope?: AgentRunScope;
   /** Panel count of the page the run targets; steps beyond it are rejected. */
   panelCount?: number;
+  /**
+   * The creator's raw prompt — the only source of truth for semantic
+   * validation. When present, every identity the plan invents is checked
+   * against the literal evidence before anything executes.
+   */
+  prompt?: string;
 }
 
 export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanValidation {
@@ -224,9 +231,31 @@ export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanVali
   const identityRejections = rejected.filter(
     (entry) => entry.error.includes("does not exist in this project") || entry.error.includes("Refusing to guess"),
   );
-  const blocked = grounding.blocking.length > 0 || identityRejections.length > 0;
+
+  /**
+   * Semantic validation — the deterministic distrust layer (§semantic).
+   *
+   * The planner is a parser, not a source of truth: a character invented from
+   * an attribute word, a location, or thin air is a wrong MEANING, and a run
+   * that starts from a wrong meaning can only execute it faithfully. Such
+   * violations block the whole run, exactly like an unresolvable identity.
+   */
+  const semanticViolations = input.prompt
+    ? validatePlanSemantics({
+        prompt: input.prompt,
+        plan,
+        grounding,
+        authorizedNames,
+        projectCharacters,
+      })
+    : [];
+  for (const violation of semanticViolations) {
+    rejected.push({ tool: violation.tool, error: violation.message });
+  }
+
+  const blocked = grounding.blocking.length > 0 || identityRejections.length > 0 || semanticViolations.length > 0;
   const blockReason = blocked
-    ? [...grounding.blocking, ...identityRejections.map((entry) => entry.error)][0]
+    ? [...grounding.blocking, ...identityRejections.map((entry) => entry.error), ...semanticViolations.map((v) => v.message)][0]
     : undefined;
 
   return {

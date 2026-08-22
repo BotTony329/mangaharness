@@ -20,6 +20,7 @@ import type { Character, ID, ProjectDocument, RelationshipType } from "@/domain/
 import { relatedCharacters, relationshipTypeFromPhrase } from "@/domain/relationships";
 import { resolveUnmatched, type EntityResolution } from "./entityResolution";
 import { applyAppositions } from "./coreference";
+import { attributeTokenSet, extractLiteralEvidence } from "./literalEvidence";
 import { ACTION_VERBS, MOVEMENT_VERBS, SHOUT_VERBS, SPEAK_VERBS, WHISPER_VERBS } from "./sceneIntent";
 
 // ─── Normalization ──────────────────────────────────────────────────────────
@@ -346,7 +347,7 @@ export interface CreationAuthorization {
 const CREATION_VERB = /\b(create|design|invent|introduce|add|make|generate)\b/i;
 const NEW_ENTITY =
   /\b(new|another|second|additional)\s+(?:[a-z-]+\s+){0,2}(character|girl|boy|woman|man|guy|lady|villain|hero|heroine|teacher|student|rival|friend|protagonist|antagonist|kid|child|cast\s+member)\b/i;
-const NAMED_AS = /\b(?:named|called)\s+["“”']?([A-Za-z][\w'’-]*(?:\s+[A-Z][\w'’-]*)?)/g;
+
 
 /**
  * Persistent Character creation is privileged, so it is gated by an explicit
@@ -357,12 +358,11 @@ const NAMED_AS = /\b(?:named|called)\s+["“”']?([A-Za-z][\w'’-]*(?:\s+[A-Z]
 export function detectCreationIntent(prompt: string): CreationAuthorization {
   const hasVerb = CREATION_VERB.test(prompt);
   const hasNewEntity = NEW_ENTITY.test(prompt);
-  const names: string[] = [];
-  for (const match of prompt.matchAll(NAMED_AS)) {
-    const name = match[1]?.trim();
-    if (name) names.push(name);
-  }
-  const allowed = hasVerb && (hasNewEntity || names.length > 0);
+  // Explicit naming IS a creation request: "a girl named Kiki walks" asks for
+  // Kiki to exist. One extraction source — literalEvidence — so the gate and
+  // the validator can never disagree about what was named.
+  const names = extractLiteralEvidence(prompt).explicitNames.map((entry) => entry.name);
+  const allowed = names.length > 0 || (hasVerb && hasNewEntity);
   return {
     allowed,
     requestedNames: names,
@@ -555,6 +555,14 @@ export interface GroundPromptInput {
 export function groundPrompt(input: GroundPromptInput): GroundingReport {
   const projectCharacters = Object.values(input.doc.characters);
   const creation = detectCreationIntent(input.prompt);
+  /**
+   * Literal evidence is the prompt's ground truth: surfaces it classifies as
+   * LOCATIONS or as ATTRIBUTE words of a named entity are never characters,
+   * whatever the capitalization looks like. This is the fix for the P0 where
+   * "Japanese" and "Kyoto" became characters beside the explicitly named Kiki.
+   */
+  const evidence = extractLiteralEvidence(input.prompt);
+  const protectedSurfaces = new Set([...evidence.locationSet, ...attributeTokenSet(evidence)]);
   const sceneCharacterIds = input.sceneCharacterIds ?? [];
   const entities: GroundedEntity[] = [];
   const matchedSurfaces = new Set<string>();
@@ -593,6 +601,7 @@ export function groundPrompt(input: GroundPromptInput): GroundingReport {
   // explicitly requested for them, these block the run.
   const authorizedNames = new Set(creation.requestedNames.map(normalizeReference));
   for (const surface of unmatchedProperNouns(input.prompt, matchedSurfaces)) {
+    if (protectedSurfaces.has(normalizeReference(surface))) continue;
     const at = input.prompt.indexOf(surface);
     const resolution = resolveCharacterReference({ query: surface, projectCharacters });
     if (resolution.status === "resolved") {

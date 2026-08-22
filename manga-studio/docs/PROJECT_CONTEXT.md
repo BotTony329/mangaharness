@@ -783,3 +783,47 @@ Production: https://mangaharness.vercel.app (HTTP 200).**
 
 NOT verified in this environment: live BYOK generation against a real
 provider key (no key available here) — first item of POST-MVP work.
+
+---
+
+## Semantic Integrity (2026-08-22)
+
+P0 root cause: the LLM planner was treated as a source of truth — it invented
+characters "Japanese"/"Kyoto" from a prompt whose only named entity was Kiki,
+and nothing downstream distrusted it.
+
+Fix — a provider-independent Semantic Parser Contract, three layers:
+
+- `src/agent/literalEvidence.ts` — deterministic extraction of the prompt's
+  immutable facts: explicit naming structures (called/named/whose name is +
+  叫/名叫/名字叫/叫做) with attribute binding, and location spans (location
+  preposition + proper noun; "X-style street" scene frames). No model, no
+  hard-coded names.
+- `src/agent/prompts/semanticParser.ts` — the single versioned system-prompt
+  contract (SEMANTIC_PARSER_CONTRACT v1), imported by the planner only.
+- `src/agent/semanticValidation.ts` — runtime distrust layer: any plan step
+  whose character name is a location, an attribute word, or absent from the
+  prompt's evidence is a violation; violations BLOCK the run before
+  AssetRequirements/executor. Apposition double-participants are caught too.
+
+Grounding now consumes literal evidence (protected surfaces never become
+entities) and explicit naming alone authorizes creation ("a girl named Kiki"
+asks for Kiki to exist — no creation verb required, per §10 three-state
+EXISTING/CREATE/UNRESOLVED).
+
+Answers: (1) Kiki can't become "Japanese" because explicit naming binds
+nearby descriptors as attributes and the validator rejects attribute-derived
+identities. (2) Kyoto can't auto-become a character: location evidence +
+grounding protection; only explicit naming ("a villain named Kyoto") makes it
+one — CASE 2 proves this is structural, not hardcode. (3) If the LLM still
+errs, semanticValidation blocks the run inside validateGroundedPlan. (4) No
+test strings in the implementation — rules are structural. (5) New providers
+need no Agent Core change: the contract is one imported prompt, validation is
+deterministic. (6) No reverse coupling: UI → pipeline → services → domain.
+
+Golden cases P0 + 2–7 in `src/agent/semanticGolden.test.ts` (12 tests).
+Suite: 885 passed / 75 files. Gates clean. Production HTTP 200.
+
+Remaining: scene background auto-requirement for P0-style prompts still rides
+the planner (validator guards identities, not scene completeness); compound
+pose fidelity is asserted at grounding level, generation fidelity is POST-MVP.

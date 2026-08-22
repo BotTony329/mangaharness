@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { AgentRunScope } from "./scope";
 import { AGENT_REQUEST_TIMEOUT_MS, AgentModelError, type AgentModelProvider, type AgentProviderEvent } from "./providers/types";
 import { selectSkills } from "./skills/selector";
+import { SEMANTIC_PARSER_CONTRACT } from "./prompts/semanticParser";
 import { TOOL_DOCS, validatePlan, type PlanValidation } from "./tools/schemas";
 
 export const agentRequestSchema = z.object({
@@ -117,6 +118,7 @@ function buildSystemPrompt(skillInstructions: string[]): string {
 editor the human creator uses, through a fixed set of tools. You NEVER produce
 finished images of whole panels — you compose editable pages from reusable
 library assets, generating individual assets only when the library lacks them.`,
+    SEMANTIC_PARSER_CONTRACT,
     TOOL_DOCS,
     ...skillInstructions,
     `# Output format

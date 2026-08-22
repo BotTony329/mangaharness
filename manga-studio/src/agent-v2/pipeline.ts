@@ -224,6 +224,7 @@ export async function runPipeline(
     plan: sourcePlan,
     doc,
     grounding: report,
+    prompt,
     scope,
     panelCount: Math.max(scope.panelCount, ...sequencePlan.allocation.panelNumbers, 1),
   });
