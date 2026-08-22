@@ -40,6 +40,9 @@ export interface GenerateImageRequest {
   referenceUrls?: string[];
   size?: "portrait" | "landscape" | "square";
   expectMonochrome?: boolean;
+  /** Screentone semantics, when assetType is "tone". */
+  toneType?: "texture" | "atmosphere" | "decorative" | "pattern";
+  tileable?: boolean;
 }
 
 /** Call the server generation route. Provider identity stays server-side. */

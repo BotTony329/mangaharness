@@ -4,7 +4,7 @@ import { generateMangaEffectImage, registerMangaEffectAsset } from "@/services/l
 import type { EffectKind, ID, ProjectDocument, MangaLanguageCategory } from "@/domain/types";
 import { characterIdOfInstance } from "@/characters/identity";
 import { tonePreset, type ToneMask } from "@/domain/tones";
-import { toneForMood } from "@/tones/mood";
+import { ensureToneGenerated, findLibraryTone, resolveToneIntent } from "@/services/tones";
 import { panelPxRect } from "@/domain/docHelpers";
 import { bestLanguageAsset } from "@/language/library";
 import type { RunContext } from "../types";
@@ -32,7 +32,7 @@ export function doAddEffect(ctx: RunContext, args: { panel: number; effectKind: 
  * hide and delete. There is no Agent-only tone path, and nothing here can bake
  * tone into artwork because no such command exists.
  */
-export function doApplyTone(ctx: RunContext, args: {
+export async function doApplyTone(ctx: RunContext, args: {
   panel: number;
   presetId?: string;
   toneAssetName?: string;
@@ -41,27 +41,36 @@ export function doApplyTone(ctx: RunContext, args: {
   opacity?: number;
   maskToCharacterName?: string;
   maskToCharacterId?: string;
-}): void {
+}): Promise<void> {
   const doc = ctx.currentDoc();
   const panelId = ctx.panelIdByNumber(args.panel);
 
-  const assetId = args.toneAssetId
-    ? args.toneAssetId
-    : args.toneAssetName
-      ? Object.values(doc.assets).find(
-          (asset) => asset.category === "tone" && asset.name.toLowerCase() === args.toneAssetName!.toLowerCase(),
-        )?.id
-      : undefined;
+  let assetId = args.toneAssetId;
+  if (!assetId && args.toneAssetName) {
+    assetId = findLibraryTone(doc, args.toneAssetName)?.id;
+  }
 
   let presetId = args.presetId && tonePreset(args.presetId) ? args.presetId : undefined;
   if (!assetId && !presetId) {
-    const fromMood = toneForMood(args.mood ?? args.presetId ?? args.toneAssetName);
-    if (!fromMood) {
-      throw new Error(
-        `No tone matches "${args.mood ?? args.presetId ?? args.toneAssetName ?? "that"}". Name a tone from the Tones shelf, or describe the mood.`,
-      );
-    }
-    presetId = fromMood.id;
+    const resolved = resolveToneIntent(doc, { name: args.toneAssetName, mood: args.mood });
+    if (resolved?.kind === "preset") presetId = resolved.presetId;
+    if (resolved?.kind === "asset") assetId = resolved.assetId;
+  }
+
+  if (!assetId && !presetId && args.mood) {
+    /**
+     * REUSE failed → GENERATE, through the same Tone capability the manual
+     * Tones shelf uses. The new tone lands in the shared registry, so the
+     * shelf sees it too — there are no agent-only tones.
+     */
+    const generated = await ensureToneGenerated({ description: args.mood, toneType: "atmosphere", tileable: true });
+    assetId = generated.assetId;
+  }
+
+  if (!assetId && !presetId) {
+    throw new Error(
+      `No tone matches "${args.mood ?? args.presetId ?? args.toneAssetName ?? "that"}". Name a tone from the Tones shelf, or describe the mood.`,
+    );
   }
 
   /**

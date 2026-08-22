@@ -17,13 +17,16 @@ import { createAssetProcessingPipeline } from "@/assets/processingPipeline";
 import { createBackgroundRemovalProvider } from "@/assets/providers/registry";
 
 export const generateRequestSchema = z.object({
-  assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop", "manga-effect"]),
+  assetType: z.enum(["character", "character-pose", "character-expression", "background", "prop", "manga-effect", "tone"]),
   prompt: z.string().min(3).max(4000),
   negativePrompt: z.string().max(1000).optional(),
   referenceUrls: z.array(z.string().max(2048)).max(3).optional(),
   size: z.enum(["portrait", "landscape", "square"]).optional(),
   /** Monochrome project style: refuse colour-contaminated character results. */
   expectMonochrome: z.boolean().optional(),
+  /** Screentone semantics, when assetType is "tone". */
+  toneType: z.enum(["texture", "atmosphere", "decorative", "pattern"]).optional(),
+  tileable: z.boolean().optional(),
 });
 
 export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
@@ -76,8 +79,18 @@ export async function generateAssetImage(
 
   const size = SIZE_MAP[input.size ?? "portrait"];
   const category = categoryFor(input.assetType);
+  /**
+   * Transparency contract: characters/props get full cutout extraction. Tones
+   * are overlays, not cutouts — texture/pattern tones keep their field (the
+   * renderer tiles them); atmosphere/decorative tones ask the provider for
+   * NATIVE transparency so a glow never ships as a white rectangle. A tone is
+   * never routed through the prop pipeline to borrow its alpha handling.
+   */
   const transparentBackground =
-    provider.capabilities.supportsTransparentBackground && (category === "character" || category === "prop");
+    provider.capabilities.supportsTransparentBackground &&
+    (category === "character" ||
+      category === "prop" ||
+      (category === "tone" && (input.toneType === "atmosphere" || input.toneType === "decorative")));
   trace?.("normalized_request_constructed", {
     assetType: input.assetType,
     references: referenceImages.length,
@@ -157,6 +170,9 @@ function categoryFor(assetType: GeneratedAssetType): AssetCategory {
   // shape a prop is — so it takes the prop post-processing path and gets real
   // transparency instead of a pasted white rectangle.
   if (assetType === "manga-effect") return "prop";
+  // Tone is Tone: first-class category, overlay semantics (see the
+  // transparency contract above).
+  if (assetType === "tone") return "tone";
   return "character";
 }
 

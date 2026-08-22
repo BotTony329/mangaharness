@@ -16,6 +16,7 @@ import {
   type GenerateApiResult,
 } from "@/services/generation";
 import { registerMangaEffectAsset } from "@/services/language";
+import { generateTone, registerTone } from "@/services/tones";
 import { buildAssetPrompt, defaultAspect } from "@/ai/promptTemplates";
 import { DEFAULT_CHARACTER_STATE, characterIdentityDescription, characterReferenceId } from "@/characters/state";
 import { referenceOptions } from "@/characters/stateResolver";
@@ -141,8 +142,10 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
 
   // Whether this result may become a library asset at all. Backgrounds always
   // pass; characters and props must carry a validated transparent derivative.
+  // Tones are validated AS tones: texture/pattern tones are legitimately
+  // opaque fields — pretending a tone is a prop here would reject valid ones.
   const contract = validateCharacterTransparency({
-    category: isCharacterType ? "character" : isLanguageType || isToneType ? "prop" : (request.assetType as AssetCategory),
+    category: isCharacterType ? "character" : isLanguageType ? "prop" : (request.assetType as AssetCategory),
     processingStatus: result?.processingStatus,
     hasAlpha: result?.hasAlpha,
     processedImageUrl: result?.processedImageUrl,
@@ -181,14 +184,17 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
             (asset, index, list) => Boolean(asset) && list.findIndex((candidate) => candidate?.id === asset?.id) === index,
           )
         : [];
-      const output = await generateImage({
-        assetType: request.assetType,
-        prompt,
-        negativePrompt: style?.profile.negativePrompt,
-        size: defaultAspect(request.assetType),
-        expectMonochrome: isMonochromeStyle(style?.profile),
-        referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
-      });
+      const output = isToneType
+        ? // The shared Tone capability owns tone prompts and request shape.
+          (await generateTone(doc!, { description: description || "screentone", toneType, tileable })).result
+        : await generateImage({
+            assetType: request.assetType,
+            prompt,
+            negativePrompt: style?.profile.negativePrompt,
+            size: defaultAspect(request.assetType),
+            expectMonochrome: isMonochromeStyle(style?.profile),
+            referenceUrls: referenceAssets.length > 0 ? referenceAssets.map((asset) => assetRenderUrl(asset)!).filter(Boolean) : undefined,
+          });
       setResult(output);
       setPhase("done");
     } catch (e) {
@@ -217,6 +223,13 @@ function GeneratorDialogInner({ request, onClose }: { request: GeneratorRequest;
         description,
         category: languageCategory,
       });
+      onClose();
+      return;
+    }
+
+    if (isToneType) {
+      // Same boundary as generate(): ToneService registers on the Tones shelf.
+      await registerTone({ result, prompt, intent: { description: description || "screentone", toneType, tileable } });
       onClose();
       return;
     }
