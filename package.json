@@ -1,0 +1,17 @@
+{
+  "name": "kumanga",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kumanga — a local-first, bring-your-own-key manga creation harness.",
+  "workspaces": [
+    "manga-studio"
+  ],
+  "scripts": {
+    "dev": "npm --prefix manga-studio run dev",
+    "build": "npm --prefix manga-studio run build",
+    "start": "npm --prefix manga-studio run start",
+    "test": "npm --prefix manga-studio run test",
+    "typecheck": "npm --prefix manga-studio run typecheck",
+    "lint": "npm --prefix manga-studio run lint"
+  }
+}

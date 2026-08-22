@@ -178,7 +178,23 @@ export function Studio() {
       <InteractionDialog />
       <AssetDetailEditor />
       <ToneMaskDialog />
+      <Attribution />
     </div>
+  );
+}
+
+/** Origin credit: quiet, fixed, never over the canvas. */
+function Attribution() {
+  return (
+    <a
+      href="https://github.com/BotTony329/mangaharness"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="fixed bottom-1.5 left-2 z-40 text-[10px] opacity-50 transition-opacity hover:opacity-90"
+      style={{ color: "var(--text-muted)" }}
+    >
+      Kumanga by BotTony329
+    </a>
   );
 }
 
@@ -216,6 +232,7 @@ function WelcomeState() {
         </button>
       </div>
       {creating && <NewProjectDialog onClose={() => setCreating(false)} />}
+      <Attribution />
     </div>
   );
 }
