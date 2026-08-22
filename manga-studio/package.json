@@ -2,6 +2,10 @@
   "name": "manga-studio",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "sharp": "^0.35.3",
+    "postcss": "^8.5.26"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
