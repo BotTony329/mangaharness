@@ -7,9 +7,9 @@
     "manga-studio"
   ],
   "scripts": {
-    "dev": "next dev manga-studio --turbopack",
-    "build": "next build manga-studio --turbopack",
-    "start": "next start manga-studio",
+    "dev": "npm --prefix manga-studio run dev",
+    "build": "npm --prefix manga-studio run build",
+    "start": "npm --prefix manga-studio run start",
     "test": "npm --prefix manga-studio run test",
     "typecheck": "npm --prefix manga-studio run typecheck",
     "lint": "npm --prefix manga-studio run lint"
