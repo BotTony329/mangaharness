@@ -914,3 +914,9 @@ one main LLM call per run; Editor never imports Agent; agent-v2/pipeline.ts is
 retained but no longer on the production path.
 
 KUMANGA AGENT ARCHITECTURE CLOSED.
+
+## TONE GENERATION CLOSED (2026-08-22)
+- Root cause: generateRequestSchema.assetType missing "tone" → manual Generate Tone returned 400 "Invalid generation request".
+- Fix: schema accepts tone + toneType/tileable; atmosphere/decorative request native alpha, texture/pattern stay opaque for tiling.
+- One capability boundary: src/services/tones.ts shared by GeneratorDialog and Agent V3 toneProcess. Tone no longer masquerades as prop.
+- CASE 1–10: 10/10 PASS; 949 tests total. Live generation UNVERIFIED (no provider key).
