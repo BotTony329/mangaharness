@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 /**
@@ -36,6 +37,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // This app is a workspace member; Vercel installs dependencies at the
+  // repository root, so tracing and the globs below must anchor there too.
+  outputFileTracingRoot: path.join(__dirname, ".."),
   // sharp resolves its libvips binaries through a runtime-computed
   // `@img/sharp-<platform>` require that the output tracer cannot follow, so
   // without this the serverless bundle ships without them and every API route
