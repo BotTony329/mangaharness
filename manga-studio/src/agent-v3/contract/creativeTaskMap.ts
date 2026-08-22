@@ -158,6 +158,14 @@ export function parseCreativeTaskMap(raw: unknown): { map?: CreativeTaskMap; err
     return { error: `Creative Task Map invalid: ${details}` };
   }
   const map = parsed.data;
+  // A scene whose "description" is a placeholder word carries no semantic
+  // evidence — the model emitted it to fill the template, not because the
+  // request needs an environment. Dropping it here keeps the invariant
+  // NO SEMANTIC EVIDENCE = NO CAPABILITY TASK at the contract boundary, so
+  // the router/verifier never see a fake scene.
+  if (map.scene && /^(?:unspecified|none|unknown|n\/?a|default|any)?\s*$/i.test(map.scene.description)) {
+    delete map.scene;
+  }
   // Defence in depth: a ref that LOOKS like a runtime ID is rejected here,
   // before resolution — planner output carries names, never identity.
   const idLike = /^(?:new_|tmp_|semantic_|char_|asset_|panel_)|_placeholder$/i;

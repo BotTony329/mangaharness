@@ -55,7 +55,9 @@ Rules that outrank everything else:
 
 8. Respect the target scope. If a panel is selected and the request is about it, scope = selected_panel.
 
-9. For optional fields that do not apply, omit the field entirely. Do not return null unless the schema explicitly allows it.
+9. For optional fields that do not apply, omit the field entirely. Do not return null unless the schema explicitly allows it. NEVER fill an optional field with a placeholder word ("unspecified", "none", "unknown", "n/a") — an absent field is the only honest answer.
+
+10. SCENE IS OPT-IN, NOT DEFAULT. Include "scene" ONLY when the creator explicitly names or describes a place/background/environment, or a full new_scene genuinely needs the environment the director stated. A pose, expression, tone, camera, dialogue, object or local-edit request standing alone has NO scene — omit the field. No semantic evidence = no capability task.
 
 10. If a reference genuinely cannot be resolved ("her sister" with no sister in the inventory), do not invent one — set clarificationNeeded, e.g. "Who does 'her sister' refer to?"
 
