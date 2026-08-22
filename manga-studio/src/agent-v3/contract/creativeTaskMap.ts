@@ -105,9 +105,50 @@ export type Participant = z.infer<typeof participantSchema>;
 export type Beat = z.infer<typeof beatSchema>;
 export type CameraIntent = z.infer<typeof cameraIntentSchema>;
 
+/**
+ * Structural normalization at the LLM boundary.
+ *
+ * STRUCTURAL NORMALIZATION ≠ SEMANTIC GUESSING. This only repairs JSON
+ * shapes models commonly emit for OPTIONAL fields: explicit null, empty
+ * strings, untrimmed whitespace, null array entries. It never invents or
+ * reinterprets semantic content — a required field that is null still fails
+ * validation, just at a precise path.
+ */
+export function normalizeCreativeTaskMap(raw: unknown): unknown {
+  if (raw === null) return undefined;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry) => normalizeCreativeTaskMap(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (typeof raw === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const normalized = normalizeCreativeTaskMap(value);
+      if (normalized !== undefined) out[key] = normalized;
+    }
+    return out;
+  }
+  return raw;
+}
+
 export function parseCreativeTaskMap(raw: unknown): { map?: CreativeTaskMap; error?: string } {
-  const parsed = creativeTaskMapSchema.safeParse(raw);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid Creative Task Map" };
+  const parsed = creativeTaskMapSchema.safeParse(normalizeCreativeTaskMap(raw));
+  if (!parsed.success) {
+    // Field paths are the whole point: "beats[0].dialogue — expected string,
+    // received null" is actionable; "Invalid input" is not.
+    const formatPath = (path: PropertyKey[]) =>
+      path.reduce<string>((acc, seg) => (typeof seg === "number" ? `${acc}[${seg}]` : acc ? `${acc}.${String(seg)}` : String(seg)), "");
+    const details = parsed.error.issues
+      .slice(0, 3)
+      .map((issue) => `${formatPath(issue.path) || "(root)"} — ${issue.message}`)
+      .join("; ");
+    return { error: `Creative Task Map invalid: ${details}` };
+  }
   const map = parsed.data;
   // Defence in depth: a ref that LOOKS like a runtime ID is rejected here,
   // before resolution — planner output carries names, never identity.

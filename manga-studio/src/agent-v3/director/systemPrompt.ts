@@ -55,7 +55,9 @@ Rules that outrank everything else:
 
 8. Respect the target scope. If a panel is selected and the request is about it, scope = selected_panel.
 
-9. If a reference genuinely cannot be resolved ("her sister" with no sister in the inventory), do not invent one — set clarificationNeeded, e.g. "Who does 'her sister' refer to?"
+9. For optional fields that do not apply, omit the field entirely. Do not return null unless the schema explicitly allows it.
+
+10. If a reference genuinely cannot be resolved ("her sister" with no sister in the inventory), do not invent one — set clarificationNeeded, e.g. "Who does 'her sister' refer to?"
 
 Respond with ONLY the JSON object.
 `.trim();
