@@ -43,13 +43,16 @@ export const beatSchema = z.object({
   poseDetails: z.array(z.string().max(80)).max(6).default([]),
   /** A second participant for interactions ("chasing Momo" → target Momo). */
   target: name.optional(),
-  /** The interaction kind when the beat names one. */
-  interaction: z
-    .enum(["beside", "face_to_face", "look_at", "hold_hands", "hug", "high_five", "hand_object", "lean_on", "walk_together", "sit_together"])
-    .optional(),
+  /**
+   * The interaction, in the director's own words ("hug", "comforts",
+   * "argues with"). CREATIVE vocabulary — translation to the editor's
+   * InteractionType enum happens exactly once in routing/interactionSemantics.
+   */
+  interaction: z.string().max(60).optional(),
   /** Exact dialogue, byte-preserved from quotes in the prompt. */
   dialogue: z.string().min(1).max(300).optional(),
-  dialogueKind: z.enum(["speech", "thought", "shout", "whisper", "narration"]).default("speech"),
+  /** Delivery in creative words ("yells", "voiceover"); normalized in routing/dialogueSemantics. */
+  dialogueKind: z.string().max(40).default("speech"),
   /** Expression change for the actor. */
   expression: z.string().max(80).optional(),
 });

@@ -17,6 +17,8 @@ import type { AgentPlan } from "@/agent/tools/schemas";
 import type { CreativeTaskMap } from "../contract/creativeTaskMap";
 import type { Resolution } from "../resolution/entityResolver";
 import { resolveCameraIntent, type NormalizedCamera } from "./cameraSemantics";
+import { resolveInteraction } from "./interactionSemantics";
+import { resolveDialogueDelivery } from "./dialogueSemantics";
 
 type Step = AgentPlan["steps"][number];
 
@@ -99,17 +101,37 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
     }
 
     if (beat.target && beat.interaction) {
-      steps.push({
-        tool: "create_interaction",
-        args: {
-          panel,
-          interaction: beat.interaction,
-          subjectCharacterName: beat.actor,
-          targetCharacterName: beat.target,
-          expressions: beat.expression ? { [beat.actor]: beat.expression } : undefined,
-        },
-        reason: "Coordinated interaction",
-      });
+      const interaction = resolveInteraction(beat.interaction);
+      if (interaction?.warning) warnings.push(interaction.warning);
+      if (interaction?.type) {
+        steps.push({
+          tool: "create_interaction",
+          args: {
+            panel,
+            interaction: interaction.type,
+            subjectCharacterName: beat.actor,
+            targetCharacterName: beat.target,
+            expressions: beat.expression ? { [beat.actor]: beat.expression } : undefined,
+          },
+          reason: "Coordinated interaction",
+        });
+      } else {
+        /**
+         * Unmapped creative interaction: never FAIL, never discard. Both
+         * participants are placed and the raw intent survives as the scene
+         * relationship text and the actor's generation instruction.
+         */
+        steps.push({
+          tool: "place_character",
+          args: { panel, characterName: beat.actor, pose: beat.action ?? interaction?.raw, expression: beat.expression, generateIfMissing: true },
+          reason: "Put the actor in the panel",
+        });
+        steps.push({
+          tool: "add_scene_relationship",
+          args: { panel, subjectCharacterName: beat.actor, action: interaction?.raw ?? "interacts with", targetCharacterName: beat.target },
+          reason: "Scene action between participants",
+        });
+      }
     } else {
       steps.push({
         tool: "place_character",
@@ -133,13 +155,15 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
     }
 
     if (beat.dialogue) {
+      const delivery = resolveDialogueDelivery(beat.dialogueKind);
+      if (delivery.warning) warnings.push(delivery.warning);
       steps.push({
         tool: "attach_bubble",
         args: {
           panel,
           characterName: beat.actor,
           ...(actorId ? { characterId: actorId } : {}),
-          bubbleType: beat.dialogueKind,
+          bubbleType: delivery.bubbleType,
           text: beat.dialogue,
         },
         reason: "Exact dialogue from the prompt",
