@@ -4,12 +4,14 @@
  * the test console.
  */
 
-import { assertSafeProviderUrl, redactSecrets } from "@/ai/security";
+import { redactSecrets } from "@/ai/security";
+import { outboundFetch, readBodyText, UnsafeOutboundUrlError } from "../outboundFetch";
 import type { ProviderConfig } from "../providerSession";
 import type { CustomApiConfig } from "./config";
 
 const REQUEST_TIMEOUT_MS = 90_000;
 export const MAX_RESPONSE_BYTES = 40 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 export class CustomApiError extends Error {
   readonly safeMessage: string;
@@ -38,36 +40,33 @@ export function buildHeaders(config: ProviderConfig, custom: CustomApiConfig): R
   return headers;
 }
 
-/** Fetch with timeout + SSRF validation on the (possibly runtime-built) URL. */
+/** Fetch with timeout + SSRF validation (lexical, DNS-resolved, and per redirect hop). */
 export async function customFetch(
   url: string,
   init: RequestInit,
   control: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<Response> {
   try {
-    assertSafeProviderUrl(url);
+    return await outboundFetch(url, init, {
+      timeoutMs: control.timeoutMs ?? REQUEST_TIMEOUT_MS,
+      signal: control.signal,
+    });
   } catch (error) {
-    throw new CustomApiError(error instanceof Error ? error.message : "Unsafe URL", 400);
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), control.timeoutMs ?? REQUEST_TIMEOUT_MS);
-  const signal = control.signal ? AbortSignal.any([controller.signal, control.signal]) : controller.signal;
-  try {
-    return await fetch(url, { ...init, signal });
-  } catch (error) {
+    if (error instanceof UnsafeOutboundUrlError) {
+      throw new CustomApiError(error.message, 400);
+    }
     if (error instanceof Error && error.name === "AbortError") {
       if (control.signal?.aborted) throw new CustomApiError("Agent planning was cancelled", 499);
       throw new CustomApiError("Timed out", 504);
     }
     throw new CustomApiError("Endpoint unreachable", 502);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
 export async function readJsonBounded(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.length > MAX_RESPONSE_BYTES) throw new CustomApiError("Response too large");
+  const text = await readBodyText(response, MAX_RESPONSE_BYTES).catch(() => {
+    throw new CustomApiError("Response too large");
+  });
   try {
     return JSON.parse(text);
   } catch {
@@ -82,7 +81,7 @@ export async function customErrorFrom(response: Response, apiKey?: string): Prom
   if (response.status === 404) {
     return new CustomApiError("Endpoint or model not found — check the URL and model name", 404);
   }
-  const text = await response.text().catch(() => "");
+  const text = await readBodyText(response, MAX_ERROR_BODY_BYTES).catch(() => "");
   return new CustomApiError(
     `Provider error (HTTP ${response.status})${text ? `: ${scrub(text, apiKey).slice(0, 200)}` : ""}`,
   );

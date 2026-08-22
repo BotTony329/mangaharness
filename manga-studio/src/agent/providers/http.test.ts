@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentErrorFrom, boundedFetch } from "./http";
 
+// These tests exercise abort semantics; the egress boundary's DNS check would
+// otherwise hit the real resolver and hang under fake timers.
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

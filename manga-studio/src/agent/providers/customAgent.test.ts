@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConfig } from "@/server/providerSession";
 import { createCustomAgentProvider } from "./customAgent";
 
+// The egress boundary's DNS check must not hit the real resolver here —
+// these tests stub fetch and exercise timeout/streaming semantics only.
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -16,6 +16,7 @@ import {
   MAX_RESPONSE_BYTES,
   readJsonBounded,
 } from "@/server/customApi/execute";
+import { readBodyBytes } from "@/server/outboundFetch";
 import { IMAGE_TEMPLATE_VARS } from "@/server/customApi/config";
 import type { ProviderConfig } from "@/server/providerSession";
 import { detectImageType } from "@/storage/imageValidation";
@@ -197,8 +198,9 @@ async function materializeImage(
       httpStatus: response.status,
     });
     if (!response.ok) throw new CustomApiError(`Could not download the generated image (HTTP ${response.status})`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_RESPONSE_BYTES) throw new CustomApiError("Generated image too large");
+    // Cap the download itself, not just the final buffer — a user-configured
+    // provider must not be able to stream an unbounded body into memory.
+    const bytes = Buffer.from(await readBodyBytes(response, MAX_RESPONSE_BYTES));
     data = bytes;
   } else {
     // Tolerate data-URI prefixes some providers add.

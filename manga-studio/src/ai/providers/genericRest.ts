@@ -6,6 +6,7 @@
  */
 
 import { assertSafeProviderUrl, redactSecrets } from "../security";
+import { outboundFetch, readBodyText, UnsafeOutboundUrlError } from "@/server/outboundFetch";
 import {
   ProviderError,
   type ImageGenerationProvider,
@@ -15,6 +16,8 @@ import {
 } from "../types";
 
 const REQUEST_TIMEOUT_MS = 90_000;
+const MAX_RESPONSE_BYTES = 40 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 interface GenericRestConfig {
   apiKey: string;
@@ -86,7 +89,8 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
           },
         );
       }
-      const body = (await response.json().catch(() => null)) as { data?: { b64_json?: string }[] } | null;
+      const bodyText = await readBodyText(response, MAX_RESPONSE_BYTES).catch(() => null);
+      const body = bodyText ? (JSON.parse(bodyText).catch(() => null) as { data?: { b64_json?: string }[] } | null) : null;
       const b64 = body?.data?.[0]?.b64_json;
       if (!b64) throw new ProviderError("Invalid image response from provider");
       request.trace?.("provider_response_parsed", { provider: "generic-rest", imageFound: true });
@@ -96,23 +100,22 @@ export function createGenericRestProvider(config: GenericRestConfig): ImageGener
 }
 
 async function boundedFetch(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await outboundFetch(url, init, { timeoutMs: REQUEST_TIMEOUT_MS });
   } catch (error) {
+    if (error instanceof UnsafeOutboundUrlError) {
+      throw new ProviderError(error.message, 400);
+    }
     if (error instanceof Error && error.name === "AbortError") {
       throw new ProviderError("Generation timed out", 504);
     }
     throw new ProviderError("Provider temporarily unavailable", 502);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
 async function safeErrorMessage(response: Response, apiKey?: string): Promise<string> {
   if (response.status === 401 || response.status === 403) return "Authentication failed — check the API key";
-  const text = await response.text().catch(() => "");
+  const text = await readBodyText(response, MAX_ERROR_BODY_BYTES).catch(() => "");
   const redacted = redactSecrets(text);
   const scrubbed = apiKey && apiKey.length >= 4 ? redacted.split(apiKey).join("[redacted]") : redacted;
   return `Provider error (HTTP ${response.status})${scrubbed ? `: ${scrubbed.slice(0, 300)}` : ""}`;

@@ -5,6 +5,7 @@
  */
 
 import { redactSecrets } from "../security";
+import { outboundFetch, readBodyText, UnsafeOutboundUrlError } from "@/server/outboundFetch";
 import {
   ProviderError,
   type ImageGenerationProvider,
@@ -18,6 +19,7 @@ const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 const DEFAULT_MODEL = "gemini-2.5-flash-image";
 const REQUEST_TIMEOUT_MS = 90_000;
 const MAX_RESPONSE_BYTES = 30 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 interface GeminiConfig {
   apiKey: string;
@@ -118,27 +120,26 @@ async function runGeminiImageRequest(
 }
 
 async function geminiFetch(config: GeminiConfig, path: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(`${config.baseUrl}${path}`, {
+    return await outboundFetch(`${config.baseUrl}${path}`, {
       ...init,
       headers: { ...init.headers, "x-goog-api-key": config.apiKey },
-      signal: controller.signal,
-    });
+    }, { timeoutMs: REQUEST_TIMEOUT_MS });
   } catch (error) {
+    if (error instanceof UnsafeOutboundUrlError) {
+      throw new ProviderError(error.message, 400);
+    }
     if (error instanceof Error && error.name === "AbortError") {
       throw new ProviderError("Generation timed out", 504);
     }
     throw new ProviderError("Provider temporarily unavailable", 502);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
 async function readBounded(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.length > MAX_RESPONSE_BYTES) throw new ProviderError("Provider response too large");
+  const text = await readBodyText(response, MAX_RESPONSE_BYTES).catch(() => {
+    throw new ProviderError("Provider response too large");
+  });
   try {
     return JSON.parse(text);
   } catch {
@@ -158,7 +159,7 @@ async function safeErrorMessage(response: Response, model?: string, apiKey?: str
   if (response.status === 401 || response.status === 403) return "Authentication failed — check the API key";
   if (response.status === 404) return `Model unavailable: ${model ?? "configured model"}`;
   if (response.status === 429) return "Provider rate limit reached — try again shortly";
-  const text = await response.text().catch(() => "");
+  const text = await readBodyText(response, MAX_ERROR_BODY_BYTES).catch(() => "");
   const redacted = scrubByok(redactSecrets(text), apiKey).slice(0, 300);
   return `Provider error (HTTP ${response.status})${redacted ? `: ${redacted}` : ""}`;
 }

@@ -1,9 +1,11 @@
 import { ProviderError, type ProviderStatus } from "@/ai/types";
+import { outboundFetch, readBodyBytes, UnsafeOutboundUrlError } from "@/server/outboundFetch";
 import type { ProviderConfig } from "@/server/providerSession";
 import type { BackgroundRemovalProvider } from "./types";
 import { validatedProviderResult } from "./validateResult";
 
 const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RESPONSE_BYTES = 40 * 1024 * 1024;
 
 export function createRemoveBgProvider(config: ProviderConfig): BackgroundRemovalProvider {
   const id = "remove-bg";
@@ -41,7 +43,7 @@ export function createRemoveBgProvider(config: ProviderConfig): BackgroundRemova
           : response.status === 402 || response.status === 429 ? response.status : 502;
         throw new ProviderError(safeMessage(response.status), status);
       }
-      const data = Buffer.from(await response.arrayBuffer());
+      const data = Buffer.from(await readBodyBytes(response, MAX_RESPONSE_BYTES));
       return validatedProviderResult({ data, mimeType: response.headers.get("content-type") ?? "image/png", id, name, model: config.model });
     },
     async testConnection(): Promise<ProviderStatus> {
@@ -51,15 +53,12 @@ export function createRemoveBgProvider(config: ProviderConfig): BackgroundRemova
 }
 
 async function boundedFetch(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await outboundFetch(url, init, { timeoutMs: REQUEST_TIMEOUT_MS });
   } catch (error) {
+    if (error instanceof UnsafeOutboundUrlError) throw new ProviderError(error.message, 400);
     if (error instanceof Error && error.name === "AbortError") throw new ProviderError("Background removal timed out", 504);
     throw new ProviderError("Background-removal provider is temporarily unavailable", 502);
-  } finally {
-    clearTimeout(timer);
   }
 }
 

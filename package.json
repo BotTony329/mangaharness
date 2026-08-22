@@ -6,6 +6,10 @@
   "workspaces": [
     "manga-studio"
   ],
+  "overrides": {
+    "sharp": "^0.35.3",
+    "postcss": "^8.5.26"
+  },
   "scripts": {
     "dev": "npm --prefix manga-studio run dev",
     "build": "npm --prefix manga-studio run build",

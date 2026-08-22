@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { ProviderConfig } from "@/server/providerSession";
+import { outboundFetch, readBodyBytes } from "@/server/outboundFetch";
 import { readLocalObject } from "@/storage/objectStore";
 import { createImageProvider } from "./providerRegistry";
 import { isAllowedReferenceUrl } from "./security";
@@ -195,19 +196,18 @@ async function loadLocalReference(url: string): Promise<{ mimeType: string; data
 }
 
 async function fetchRemoteReference(url: string): Promise<{ mimeType: string; data: Buffer } | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    // The allowlist already pins the host; outboundFetch adds the redirect-hop
+    // and DNS guards so even a compromised/misconfigured store cannot relay
+    // the fetch into private networks.
+    const response = await outboundFetch(url, { method: "GET" }, { timeoutMs: 15_000 });
     if (!response.ok) throw new ProviderError("Unsupported reference image", 400);
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = Buffer.from(await readBodyBytes(response, MAX_REFERENCE_BYTES));
     if (bytes.length > MAX_REFERENCE_BYTES) throw new ProviderError("Reference image too large", 400);
     return { mimeType: response.headers.get("content-type")?.split(";")[0] ?? guessMime(url), data: bytes };
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     throw new ProviderError("Could not load the reference image", 400);
-  } finally {
-    clearTimeout(timer);
   }
 }
 

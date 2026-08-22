@@ -6,7 +6,7 @@
  * is connected to the image perimeter, preserving enclosed white artwork.
  */
 
-import sharp from "sharp";
+import sharp, { type OutputInfo } from "sharp";
 import type { AssetCategory } from "@/domain/types";
 import {
   builtInBackgroundRemovalProvider,
@@ -62,7 +62,7 @@ export async function processAssetImage(
   category: AssetCategory,
   options: AssetProcessingOptions = {},
 ): Promise<AssetProcessingResult> {
-  let decoded: { data: Buffer; info: sharp.OutputInfo };
+  let decoded: { data: Buffer; info: OutputInfo };
   try {
     decoded = await sharp(data, { limitInputPixels: MAX_DECODED_PIXELS })
       .ensureAlpha()
@@ -176,7 +176,7 @@ export async function validateTransparentImageBytes(
   processingProvider: string,
   options: AssetProcessingOptions = {},
 ): Promise<AssetProcessingResult> {
-  let decoded: { data: Buffer; info: sharp.OutputInfo };
+  let decoded: { data: Buffer; info: OutputInfo };
   try {
     decoded = await sharp(data, { limitInputPixels: MAX_DECODED_PIXELS }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   } catch {

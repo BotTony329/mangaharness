@@ -48,8 +48,10 @@ async function putLocal(key: string, data: Buffer): Promise<StoredObject> {
 
 export async function readLocalObject(key: string): Promise<Buffer | null> {
   const safePath = path.normalize(path.join(LOCAL_DIR, key));
-  // Path traversal guard for the dev file server.
-  if (!safePath.startsWith(LOCAL_DIR)) return null;
+  // Path traversal guard for the dev file server. The separator matters:
+  // a bare prefix check would let "../.data-notes/x" reach sibling dirs whose
+  // names merely start with ".data".
+  if (safePath !== LOCAL_DIR && !safePath.startsWith(LOCAL_DIR + path.sep)) return null;
   try {
     return await fs.readFile(safePath);
   } catch {
