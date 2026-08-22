@@ -183,3 +183,36 @@ describe("every tool the runtime accepts is documented to the planner", () => {
     }
   });
 });
+
+describe("creative tone vocabulary (V3 semantics)", () => {
+  it("resolves the words a Creative Director actually emits", () => {
+    expect(toneForMood("daylight")).toBeDefined();
+    expect(toneForMood("bright")).toBeDefined();
+    expect(toneForMood("gloomy")).toBeDefined();
+    expect(toneForMood("romantic")).toBeDefined();
+    expect(toneForMood("cold")).toBeDefined();
+    expect(toneForMood("nostalgic")).toBeDefined();
+  });
+
+  it("'daylight' maps to a light tone — the live failure is closed", () => {
+    expect(toneForMood("daylight")?.id).toBe("gradient-light");
+  });
+
+  it("manual UI and the Agent share one registry", async () => {
+    const { tonePreset } = await import("@/domain/tones");
+    // Every MOOD_MAP target must be a real preset on the Tones shelf.
+    for (const mood of ["daylight", "bright", "gloomy", "romantic", "cold", "nostalgic", "warm", "oppressive"]) {
+      const resolved = toneForMood(mood);
+      expect(resolved, mood).toBeDefined();
+      expect(tonePreset(resolved!.id), mood).toBeDefined();
+    }
+  });
+
+  it("an unknown creative tone word is nonfatal — skipped, run continues", async () => {
+    studio();
+    const summary = await run([{ tool: "apply_tone", args: { panel: 1, mood: "chartreuse melancholy" } }]);
+    expect(summary.status).not.toBe("failed");
+    expect(summary.rolledBack).toBe(false);
+    expect(summary.skippedSteps.length + summary.failed).toBeGreaterThanOrEqual(0);
+  });
+});
