@@ -4,6 +4,7 @@ import type { DomainCommand } from "@/domain/commands";
 import type { AssetInstance, Character, ID, Point, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { requireCharacter } from "@/agent/resolver";
+import { normalizeReference } from "@/agent/grounding";
 import type { AgentRunScope } from "@/agent/scope";
 import type { RunContext, RunGuards } from "../types";
 
@@ -160,6 +161,13 @@ export function createRunContext(guards: RunGuards): RunContext {
     guards,
     createdCharacterIds: [],
     lastLanguageAction: undefined,
+    bindings: new Map(),
+    pendingPlaceholders: new Map(),
+    bindCreatedCharacter(name, id) {
+      const pending = ctx.pendingPlaceholders.get(normalizeReference(name)) ?? [];
+      for (const placeholder of pending) ctx.bindings.set(placeholder, id);
+      ctx.pendingPlaceholders.delete(normalizeReference(name));
+    },
     currentDoc,
     dispatch,
     panelIdByNumber,
@@ -168,4 +176,54 @@ export function createRunContext(guards: RunGuards): RunContext {
     findTargetInstance,
   };
   return ctx;
+}
+
+/** characterId arg → the name arg it must agree with. */
+const ID_TO_NAME_ARG: Record<string, string> = {
+  characterId: "characterName",
+  subjectCharacterId: "subjectCharacterName",
+  targetCharacterId: "targetCharacterName",
+};
+
+/**
+ * Canonicalize step args at the EXECUTION boundary — the one rule, not a
+ * per-process patch.
+ *
+ * A planning-stage placeholder ID (NEW_*_PLACEHOLDER, semanticId, tempId) is
+ * not a domain ID and must never reach a service, command, validation lookup,
+ * or asset metadata. For every *CharacterId arg: a real doc ID passes; a
+ * previously bound placeholder is replaced by its canonical ID; an unknown ID
+ * beside a resolvable name is bound and replaced; an unknown ID beside a name
+ * that does not exist yet is queued in pendingPlaceholders and REMOVED, so the
+ * name-based resolution path runs honestly (and create_character binds the
+ * placeholder the moment the real ID exists).
+ */
+export function canonicalizeStepArgs(ctx: RunContext, args: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...args };
+  const doc = ctx.currentDoc();
+  for (const key of Object.keys(out)) {
+    if (!(key === "characterId" || key.endsWith("CharacterId"))) continue;
+    const value = out[key];
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (doc.characters[value]) continue;
+    const bound = ctx.bindings.get(value);
+    if (bound && doc.characters[bound]) {
+      out[key] = bound;
+      continue;
+    }
+    const nameValue = out[ID_TO_NAME_ARG[key] ?? "characterName"];
+    const byName =
+      typeof nameValue === "string" ? ctx.requireCharacterOrNull(doc, { characterName: nameValue }) : null;
+    if (byName) {
+      ctx.bindings.set(value, byName.id);
+      out[key] = byName.id;
+      continue;
+    }
+    if (typeof nameValue === "string") {
+      const name = normalizeReference(nameValue);
+      ctx.pendingPlaceholders.set(name, [...(ctx.pendingPlaceholders.get(name) ?? []), value]);
+    }
+    delete out[key];
+  }
+  return out;
 }

@@ -827,3 +827,34 @@ Suite: 885 passed / 75 files. Gates clean. Production HTTP 200.
 Remaining: scene background auto-requirement for P0-style prompts still rides
 the planner (validator guards identities, not scene completeness); compound
 pose fidelity is asserted at grounding level, generation fidelity is POST-MVP.
+
+---
+
+## Placeholder ID Lifecycle (2026-08-22)
+
+Live P0: the planner emitted `NEW_MOMO_ID_PLACEHOLDER` as characterId; Momo was
+created and her asset generated, then execution/validation died on "Character
+NEW_MOMO_ID_PLACEHOLDER no longer exists". Two leak paths: (1) planValidation's
+pendingNames branch skipped rebinding and left the invented characterId in the
+args; (2) `requireCharacter` prefers characterId over name, so the placeholder
+outranked the correct name resolution.
+
+Fix — one rule at the boundaries, no per-process patches:
+
+- `RunContext.bindings` (runtime identity binding table) +
+  `pendingPlaceholders`, created per run in `createRunContext`.
+- `canonicalizeStepArgs` (process/shared.ts) runs at the execution boundary in
+  `executeStep`: real doc IDs pass; bound placeholders are replaced; unknown ID
+  + resolvable name → bind and replace; unknown ID + not-yet-created name →
+  queued and REMOVED so name resolution runs.
+- `doCreateCharacter` drains pendingPlaceholders into bindings with the real ID
+  from CharacterService's return value (no re-search by name).
+- `validateGroundedPlan` strips invented characterIds for pending-creation
+  names — planning IDs never enter the validated plan.
+
+Golden: `src/agent-v2/placeholderGolden.test.ts` replays the live Momo plan
+shape (placeholder on every post-creation step) and asserts the placeholder
+reaches no domain command, no asset metadata, no final document ID, and the
+run completes with Momo in library + panel + bubble. Negative cases pin that
+the service's real ID always wins and unbindable placeholders are stripped.
+Suite: 892 passed / 77 files.

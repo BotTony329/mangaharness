@@ -10,7 +10,7 @@ import { validateStepScope, ScopeViolationError, type AgentPlan, type ToolName }
 import type { SequencePlan } from "@/agent/sequencePlan";
 import { runStatusOf, stepPolicyFor, type FallbackUse, type StepFailure } from "@/agent/stepPolicy";
 import { DENY_ALL_CREATION, type ExecutionSummary, type InteractionArgs, type RunContext, type RunGuards, type StepStatus } from "./types";
-import { createRunContext } from "./process/shared";
+import { canonicalizeStepArgs, createRunContext } from "./process/shared";
 import {
   doCreateCharacter,
   doGenerateCharacterAsset,
@@ -275,7 +275,9 @@ export function completedDetail(ctx: RunContext, tool: ToolName): string | undef
 export async function executeStep(ctx: RunContext, step: AgentPlan["steps"][number], scope?: AgentRunScope): Promise<void> {
   const scopeError = scope ? validateStepScope(step.tool, step.args, scope) : null;
   if (scopeError) throw new ScopeViolationError(scopeError);
-  const args = step.args as never;
+  // Placeholder IDs never cross this line as-is: every process below receives
+  // canonical domain IDs (or no ID, resolving by name instead).
+  const args = canonicalizeStepArgs(ctx, step.args) as never;
   switch (step.tool) {
     case "create_character":
       return doCreateCharacter(ctx, args);

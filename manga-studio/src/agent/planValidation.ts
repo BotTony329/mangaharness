@@ -169,7 +169,16 @@ export function validateGroundedPlan(input: GroundedPlanInput): GroundedPlanVali
           if (binding.required) error = `${step.tool} needs a character reference.`;
           continue;
         }
-        if (pendingNames.has(normalizeReference(raw))) continue; // created earlier in this plan
+        if (pendingNames.has(normalizeReference(raw))) {
+          /**
+           * Created later in this plan — but the model may ALSO have invented a
+           * placeholder characterId ("NEW_MOMO_ID_PLACEHOLDER"). Strip it: a
+           * planning ID is not a domain ID, and execution rebinds by name
+           * through the runtime binding table.
+           */
+          delete args[binding.idArg];
+          continue;
+        }
         const resolution = resolveCharacterReference({
           query: raw,
           projectCharacters,

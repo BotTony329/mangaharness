@@ -82,6 +82,21 @@ export interface RunContext {
   guards: RunGuards;
   createdCharacterIds: ID[];
   lastLanguageAction: string | undefined;
+  /**
+   * Runtime entity bindings — the single place a planning-stage placeholder
+   * ID becomes a real domain ID. A placeholder (NEW_*_PLACEHOLDER and friends)
+   * may exist in UNDERSTAND/PLAN/RESOLVE; from execution on, only the bound
+   * canonical ID may be used. Processes never do `characterId ?? semanticId`.
+   */
+  bindings: Map<string, ID>;
+  /**
+   * Placeholder IDs seen beside a not-yet-created character name, awaiting the
+   * create step. doCreateCharacter drains these into `bindings` with the real
+   * ID the moment the character exists.
+   */
+  pendingPlaceholders: Map<string, string[]>;
+  /** Register placeholder → real ID after a successful creation. */
+  bindCreatedCharacter(name: string, id: ID): void;
   currentDoc(): import("@/domain/types").ProjectDocument;
   dispatch(command: import("@/domain/commands").DomainCommand): import("@/domain/commands").CommandResult;
   panelIdByNumber(panel: number): ID;

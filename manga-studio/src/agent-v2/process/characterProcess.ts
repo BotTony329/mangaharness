@@ -40,13 +40,15 @@ export function doCreateCharacter(ctx: RunContext, args: { name: string; appeara
   if (authorized.length > 0 && !authorized.includes(normalizeReference(args.name))) {
     throw new Error(`Creation was authorized for ${authorized.join(", ")}, not "${args.name}".`);
   }
-  ctx.createdCharacterIds.push(
-    createCharacter({
-      name: args.name,
-      appearance: args.appearance ?? args.description,
-      personalityNotes: args.personalityNotes,
-    }),
-  );
+  const realId = createCharacter({
+    name: args.name,
+    appearance: args.appearance ?? args.description,
+    personalityNotes: args.personalityNotes,
+  });
+  ctx.createdCharacterIds.push(realId);
+  // Any planning-stage placeholder that stood in for this name now resolves to
+  // the real domain ID — later steps receive it via canonicalizeStepArgs.
+  ctx.bindCreatedCharacter(args.name, realId);
 }
 
 /** Resolution that reports "no unambiguous match" rather than throwing. */
