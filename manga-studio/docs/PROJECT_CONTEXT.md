@@ -858,3 +858,59 @@ reaches no domain command, no asset metadata, no final document ID, and the
 run completes with Momo in library + panel + bubble. Negative cases pin that
 the service's real ID always wins and unbindable placeholders are stripped.
 Suite: 892 passed / 77 files.
+
+---
+
+## Agent V3 — Creative Director architecture (2026-08-22, current)
+
+The agent engine was rewritten from "deterministic syntax guesses semantics" to
+**LLM Creative Director → Creative Task Map → deterministic harness**. The LLM
+owns ambiguous meaning; code owns state, identity and execution.
+
+Pipeline (single production path):
+
+1. `literalLock` (agent-v3/contract) — immutable evidence from the prompt:
+   explicit names, byte-exact quoted dialogue, verbatim project-entity matches.
+2. `projectInventory` (agent-v3/context) — semantic project summary, no internals.
+3. ONE server call: `POST /api/agent/direct` → `planCreativeDirection` with the
+   single canonical `CREATIVE_DIRECTOR_SYSTEM_PROMPT`. Output is validated
+   against `creativeTaskMapSchema` (zod); refs that look like runtime IDs are
+   rejected at the boundary.
+4. `resolveTaskMap` (agent-v3/resolution) — binds names to real character IDs,
+   decides existing vs create, never invents ("existing" + missing → blocked).
+5. `compileTaskMap` (agent-v3/routing) — emits agent-v2 tool steps addressed by
+   NAME only. Camera intent that requires a redraw is injected into generation
+   instructions UPSTREAM (no post-hoc enlarge). REUSE/TRANSFORM/GENERATE is
+   decided here, not by the model.
+6. `executePlan` (agent-v2 orchestrator, unchanged) — transactions, rollback,
+   preserved-asset honesty, placeholder protection all apply.
+7. `verifyTaskMap` (agent-v3/verification) — deterministic post-run check:
+   participants exist (re-resolved by name in the AFTER doc), beat actors are
+   in their panels, quoted dialogue is byte-identical in a real bubble,
+   requested scenes exist, out-of-scope panels are fingerprint-untouched, no
+   asset claims a fake character identity.
+
+UI: `AgentPanel` calls `runCreativeDirection` / `executeCreativeRun`
+(agent-v3/run.ts) with creator-facing progress (Understanding your scene →
+Planning the shot → Preparing characters → Composing panel → Checking result).
+Generation count ≥ 3 still requires explicit confirmation. Verification issues
+are shown verbatim with Retry / Revert-this-run.
+
+Tests: `src/agent-v3/goldenV3.test.ts` — CASE 1–10 with fixed Task Map fixtures
+(LLM stubbed by construction) covering create+scene+dialogue, existing reuse,
+dialogue-only zero-generation, interaction by name, upstream camera, no-state
+no-generate, unresolved blocking, scope isolation, placeholder absence,
+rollback + preserved-asset honesty; plus a phrasing-independence Literal Lock
+test. `src/services/architecture.test.ts` pins: editor/domain/services never
+import any agent engine, AgentPanel never imports agent-v2/pipeline, exactly
+one canonical director prompt.
+
+Suite: 907 passed / 78 files. Typecheck/lint/build clean. Browser smoke
+(no model connected): graceful 503 path, zero console errors. Live BYOK
+generation: UNVERIFIED (no API key available in this environment).
+
+Red lines, still in force: Task Map carries names only, never runtime IDs;
+one main LLM call per run; Editor never imports Agent; agent-v2/pipeline.ts is
+retained but no longer on the production path.
+
+KUMANGA AGENT ARCHITECTURE CLOSED.

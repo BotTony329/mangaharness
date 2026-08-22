@@ -72,3 +72,36 @@ describe("architecture boundaries", () => {
     }
   });
 });
+
+describe("agent V3 boundaries", () => {
+  it("agent-v3 obeys the same provider/persistence boundary as agent and agent-v2", () => {
+    const bad = violations(
+      join(SRC, "agent-v3"),
+      /@\/ai\/(clientGeneration|providers)|@\/storage\/|from ["']\.\.\/\.\.\/storage/,
+    );
+    expect(bad, "agent-v3 boundary").toEqual([]);
+  });
+
+  it("the editor, domain and services never import any agent engine", () => {
+    for (const dir of ["editor", "domain", "services"]) {
+      const bad = violations(join(SRC, dir), /@\/agent(-v2|-v3)?[/"']/);
+      expect(bad, `${dir} must not import the agent`).toEqual([]);
+    }
+  });
+
+  it("the production UI uses the V3 engine, never the V2 pipeline", () => {
+    const panel = readFileSync(join(SRC, "components/agent/AgentPanel.tsx"), "utf8");
+    expect(panel).not.toMatch(/agent-v2\/pipeline|runPipeline/);
+    expect(panel).toMatch(/@\/agent-v3\/run/);
+  });
+
+  it("there is exactly one canonical Creative Director system prompt", () => {
+    const offenders = sourceFiles(SRC).filter((file) =>
+      readFileSync(file, "utf8").includes("CREATIVE_DIRECTOR_SYSTEM_PROMPT"),
+    );
+    expect(offenders.map((file) => relative(SRC, file)).sort()).toEqual([
+      "agent-v3/director/creativeDirector.ts",
+      "agent-v3/director/systemPrompt.ts",
+    ]);
+  });
+});
