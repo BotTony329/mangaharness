@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { panelLayers } from "@/canvas/hitStack";
+import { pagePanelTree, panelLayers } from "@/canvas/hitStack";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import {
@@ -184,6 +184,100 @@ export function LayersPanel({ panelId }: { panelId: ID }) {
       <p className="mt-1 text-[9px] leading-3 text-zinc-600">
         Drag to reorder. Alt-click on canvas cycles through overlapping layers.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The page-level object navigator: Page → Panel → Objects.
+ *
+ * Panels covered by their own content are unreachable on the canvas — the
+ * hit-test lands on the background/character/bubble on top. This tree is the
+ * always-reliable way to select the PANEL itself (Camera / Stage / panel
+ * settings) without touching the canvas.
+ *
+ * Selection goes through the SAME `select()` the canvas uses — one source of
+ * truth, so canvas highlight, inspector routing and this tree can never
+ * disagree. Hierarchy is derived from the document (`pagePanelTree`); nothing
+ * here persists or duplicates structure.
+ */
+export function PageLayersTree() {
+  const doc = useEditorStore((s) => s.doc);
+  const currentPageId = useEditorStore((s) => s.currentPageId);
+  const selection = useEditorStore((s) => s.selection);
+  const select = useEditorStore((s) => s.select);
+  /** Collapsed panels are view state, not document state. */
+  const [collapsed, setCollapsed] = useState<Set<ID>>(new Set());
+
+  if (!doc || !currentPageId) return null;
+  const tree = pagePanelTree(doc, currentPageId);
+  if (tree.length === 0) return null;
+
+  const toggle = (panelId: ID) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(panelId)) next.delete(panelId);
+      else next.add(panelId);
+      return next;
+    });
+
+  return (
+    <div>
+      <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Page</p>
+      <ul className="overflow-hidden rounded border border-zinc-800">
+        {tree.map((node) => {
+          const panelSelected = selection.panelId === node.panelId && !selection.itemId;
+          const isCollapsed = collapsed.has(node.panelId);
+          return (
+            <li key={node.panelId}>
+              <div
+                className={`flex items-center gap-1 px-1 py-1 ${
+                  panelSelected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg-hover)]"
+                }`}
+              >
+                <button
+                  aria-label={isCollapsed ? `Expand panel ${node.panelNumber}` : `Collapse panel ${node.panelNumber}`}
+                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-[9px] text-zinc-500 hover:text-zinc-200"
+                  onClick={() => toggle(node.panelId)}
+                >
+                  {isCollapsed ? "▸" : "▾"}
+                </button>
+                <button
+                  className="min-w-0 flex-1 text-left"
+                  title="Select this panel (Camera / Stage controls)"
+                  onClick={() => select({ panelId: node.panelId })}
+                >
+                  <span className={`block truncate text-[11px] ${panelSelected ? "text-zinc-100" : "text-zinc-300"}`}>
+                    Panel {node.panelNumber}
+                  </span>
+                </button>
+              </div>
+              {!isCollapsed && node.children.length > 0 && (
+                <ul>
+                  {node.children.map((layer) => {
+                    const active = selection.itemId === layer.itemId;
+                    return (
+                      <li key={layer.itemId}>
+                        <button
+                          className={`block w-full py-0.5 pl-8 pr-1 text-left ${
+                            active ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg-hover)]"
+                          }`}
+                          onClick={() => select({ itemId: layer.itemId, panelId: node.panelId })}
+                        >
+                          <span className={`block truncate text-[11px] ${layer.hidden ? "text-zinc-600 line-through" : "text-zinc-200"}`}>
+                            {layer.label}
+                          </span>
+                          <span className="block truncate text-[9px] text-zinc-500">{layer.kind}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

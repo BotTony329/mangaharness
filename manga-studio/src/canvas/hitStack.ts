@@ -378,3 +378,28 @@ export function panelLayers(doc: ProjectDocument, panelId: ID): HitStackEntry[] 
     .reverse()
     .map((entry, depth) => ({ ...entry, depth }));
 }
+
+export interface PanelTreeNode {
+  panelId: ID;
+  /** 1-based panel number on the page, in layout order. */
+  panelNumber: number;
+  /** The panel's contents, topmost first — the same rows the Layers list shows. */
+  children: HitStackEntry[];
+}
+
+/**
+ * Page → Panel → Objects, derived from the document alone.
+ *
+ * This is the hierarchy the Layers tree navigates. It is a PROJECTION, never
+ * persisted: reload a project and the same tree falls out of
+ * pages→panels→itemIds, so there is no second structure to keep in sync.
+ */
+export function pagePanelTree(doc: ProjectDocument, pageId: ID): PanelTreeNode[] {
+  const page = doc.pages[pageId];
+  if (!page) return [];
+  return page.panelIds.map((panelId, index) => ({
+    panelId,
+    panelNumber: index + 1,
+    children: panelLayers(doc, panelId),
+  }));
+}

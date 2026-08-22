@@ -15,7 +15,7 @@ import {
 import { applyCharacterStateToInstance } from "@/characters/stateRuntime";
 import { SOCKET_DRAG_TYPE, encodeSocketDrag } from "@/characters/sockets";
 import { PanelStageControls } from "./PanelStageControls";
-import { LayersPanel } from "./LayersPanel";
+import { LayersPanel, PageLayersTree } from "./LayersPanel";
 import { RelationshipEditor } from "./RelationshipEditor";
 import { InteractionControls } from "./InteractionControls";
 import { useUiStore } from "@/editor/uiStore";
@@ -84,6 +84,9 @@ export function InspectorPanel() {
         <div className="border-t border-zinc-800 p-3">
           <LayersPanel panelId={item.panelId} />
         </div>
+        <div className="border-t border-zinc-800 p-3">
+          <PageLayersTree />
+        </div>
       </>
     );
   }
@@ -97,17 +100,19 @@ export function InspectorPanel() {
         <p className="text-[10px] leading-4 text-zinc-600">
           Drag assets from the library into this panel, or use + Bubble / + Effect in the toolbar.
         </p>
+        <PageLayersTree />
       </div>
     );
   }
   return (
-    <Hint>
-      Select a panel or an object on the canvas.
-      <br />
-      <br />
-      Drag any library asset into a panel — the panel is a viewport: only what&apos;s inside its frame renders, and every
-      placement is an independent, non-destructive instance.
-    </Hint>
+    <div className="space-y-4 p-3">
+      <Hint>
+        Select a panel or an object — on the canvas, or here:
+      </Hint>
+      {/* Panels buried under their own content are unreachable on the canvas;
+          this tree is the always-reliable way to select them. */}
+      <PageLayersTree />
+    </div>
   );
 }
 
