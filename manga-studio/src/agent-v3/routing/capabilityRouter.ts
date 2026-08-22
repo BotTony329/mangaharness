@@ -14,15 +14,22 @@
  */
 
 import type { AgentPlan } from "@/agent/tools/schemas";
-import type { CreativeTaskMap, CameraIntent } from "../contract/creativeTaskMap";
+import type { CreativeTaskMap } from "../contract/creativeTaskMap";
 import type { Resolution } from "../resolution/entityResolver";
+import { resolveCameraIntent, type NormalizedCamera } from "./cameraSemantics";
 
 type Step = AgentPlan["steps"][number];
 
 /** Camera words that must reach GENERATION when the viewpoint is redrawn. */
-function cameraForGeneration(camera: CameraIntent | undefined): string | undefined {
-  if (!camera?.requiresRedraw && camera?.angle !== "low" && camera?.angle !== "high") return undefined;
-  return [camera.angle && `${camera.angle} angle`, camera.dramaticIntent].filter(Boolean).join(", ");
+function cameraForGeneration(camera: NormalizedCamera | undefined): string | undefined {
+  if (!camera?.requiresRedraw) return undefined;
+  return camera.generationHint;
+}
+
+export interface CompiledPlan {
+  plan: AgentPlan;
+  /** Soft-normalization notes (unknown creative camera words etc.). */
+  warnings: string[];
 }
 
 function stateInstruction(action: string | undefined, poseDetails: string[], camera?: string): string | undefined {
@@ -30,10 +37,12 @@ function stateInstruction(action: string | undefined, poseDetails: string[], cam
   return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
-export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): AgentPlan {
+export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): CompiledPlan {
   const steps: Step[] = [];
   const defaultPanel = map.target.panel;
-  const camera = cameraForGeneration(map.cameraIntent);
+  const camera = resolveCameraIntent(map.cameraIntent);
+  const warnings = [...(camera?.warnings ?? [])];
+  const cameraHint = cameraForGeneration(camera);
 
   // ── EnsureCharacter: create only what the director said is new ──
   for (const binding of resolution.participants.values()) {
@@ -83,7 +92,7 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Ag
           characterName: beat.actor,
           ...(actorId ? { characterId: actorId } : {}),
           kind: "pose",
-          instruction: stateInstruction(beat.action, beat.poseDetails, camera),
+          instruction: stateInstruction(beat.action, beat.poseDetails, cameraHint),
         },
         reason: "The state this beat actually needs",
       });
@@ -156,14 +165,14 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Ag
   }
 
   // ── SetCameraIntent (staging; redraw already happened upstream) ──
-  if (map.cameraIntent && (map.cameraIntent.shot || map.cameraIntent.angle || map.cameraIntent.lens)) {
+  if (camera && (camera.shot || camera.angle || camera.lens)) {
     steps.push({
       tool: "set_camera",
       args: {
         panel: map.target.panel ?? map.beats[0]?.panel ?? 1,
-        shot: map.cameraIntent.shot,
-        angle: map.cameraIntent.angle,
-        lens: map.cameraIntent.lens,
+        shot: camera.shot,
+        angle: camera.angle,
+        lens: camera.lens,
       },
       reason: "Camera intent",
     });
@@ -184,7 +193,7 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Ag
     });
   }
 
-  return { summary: map.summary, targetScope: undefined, steps };
+  return { plan: { summary: map.summary, targetScope: undefined, steps }, warnings };
 }
 
 /** Names this run may create — the generation-boundary authorization. */

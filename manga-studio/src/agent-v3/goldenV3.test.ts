@@ -80,7 +80,7 @@ async function runMap(raw: unknown) {
   const pageId = useEditorStore.getState().currentPageId;
   const map = taskMap(raw);
   const resolution = resolveTaskMap(map, before);
-  const plan = compileTaskMap(map, resolution);
+  const { plan } = compileTaskMap(map, resolution);
   const names = creationAuthorization(resolution);
   const fingerprints = panelScopeFingerprints(before);
   const summary = await executePlan(plan, () => {}, {
@@ -231,7 +231,7 @@ describe("golden V3: Creative Task Map → deterministic harness", () => {
     const poseGeneration = plan.steps.find(
       (s) => s.tool === "generate_character_asset" && s.args.kind === "pose",
     );
-    expect(String(poseGeneration?.args.instruction)).toContain("low angle");
+    expect(String(poseGeneration?.args.instruction)).toContain("low");
     expect(String(poseGeneration?.args.instruction)).toContain("heroic tension");
     expect(plan.steps.some((s) => s.tool === "set_camera")).toBe(true);
   });

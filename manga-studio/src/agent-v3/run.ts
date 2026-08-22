@@ -87,8 +87,9 @@ export async function runCreativeDirection(
     return { kind: "blocked", reason: `Could not place: ${resolution.unresolved.join(", ")}` };
   }
 
-  const plan = compileTaskMap(map, resolution);
+  const { plan, warnings } = compileTaskMap(map, resolution);
   sink.plan?.(plan);
+  for (const warning of warnings) sink.status?.(warning);
   const names = creationAuthorization(resolution);
   const guards: RunGuards = { creationAuthorized: names.length > 0, authorizedCreationNames: names };
   const generationCount = plan.steps.filter((s) => s.tool.startsWith("generate_")).length;

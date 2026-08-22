@@ -55,9 +55,14 @@ export const beatSchema = z.object({
 });
 
 export const cameraIntentSchema = z.object({
-  shot: z.enum(["close-up", "medium", "full", "wide"]).optional(),
-  angle: z.enum(["high", "eye-level", "low"]).optional(),
-  lens: z.enum(["wide", "normal", "tele"]).optional(),
+  /**
+   * CREATIVE vocabulary, not editor enums. The director speaks in creative
+   * intent ("dramatic", "intimate", "compressed"); translation to editor
+   * shot/angle/lens happens exactly once, in agent-v3/routing/cameraSemantics.
+   */
+  shot: z.string().max(40).optional(),
+  angle: z.string().max(40).optional(),
+  lens: z.string().max(40).optional(),
   /** Free-text dramatic intent ("motion", "tension") — never compiled away. */
   dramaticIntent: z.string().max(120).optional(),
   /**
