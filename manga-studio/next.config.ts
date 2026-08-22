@@ -36,6 +36,17 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // sharp resolves its libvips binaries through a runtime-computed
+  // `@img/sharp-<platform>` require that the output tracer cannot follow, so
+  // without this the serverless bundle ships without them and every API route
+  // that touches image processing dies at require-time. Vercel runs glibc
+  // x64, so only that pair needs to travel.
+  outputFileTracingIncludes: {
+    "/api/**": [
+      "./node_modules/@img/sharp-linux-x64/**",
+      "./node_modules/@img/sharp-libvips-linux-x64/**",
+    ],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
