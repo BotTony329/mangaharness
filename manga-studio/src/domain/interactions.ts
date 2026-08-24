@@ -666,9 +666,26 @@ export function buildInteractionRenderRequest(
   });
 
   const zone = participants.find((p) => p.zone)?.zone;
+  /**
+   * A zone is a promise about the picture, not a label: the driver-seat means
+   * hands on the steering wheel. Without this the model draws a person
+   * floating in a car-shaped space.
+   */
+  const ZONE_ACTION: Record<string, string> = {
+    "driver-seat": "hands on the steering wheel",
+    "passenger-seat": "seated beside the driver",
+    chair: "seated on the chair",
+    desk: "seated at the desk",
+    bed: "lying on the bed",
+    doorway: "standing in the doorway",
+  };
   const interactionConstraints = [
     `${interactionLabel(interaction.type)}: ${names.join(" and ")}.`,
-    ...(zone ? [`The character occupies the ${zone} zone of the scene, body and perspective matching it.`] : []),
+    ...(zone
+      ? [
+          `The character occupies the ${zone} zone of the scene${ZONE_ACTION[zone] ? `, ${ZONE_ACTION[zone]},` : ""} body and perspective matching it.`,
+        ]
+      : []),
     ...describeInteractionParameters(interaction.parameters).map((part) => `Interaction detail — ${part}.`),
     "All participants occupy the same scene, at a consistent scale, from one viewpoint, with consistent lighting.",
   ];

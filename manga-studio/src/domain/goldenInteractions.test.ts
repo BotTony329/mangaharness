@@ -207,6 +207,8 @@ describe("Golden CASE 3 — CAR, character drives a scene", () => {
     const request = buildInteractionRenderRequest(created.doc, interaction, {});
     expect(request.participantReferenceAssetIds).toEqual([s.mikaRefId, s.carId]);
     expect(request.interactionConstraints.join(" ")).toContain("driver-seat");
+    // The zone is a promise about the picture: driver-seat ⇒ steering wheel.
+    expect(request.interactionConstraints.join(" ")).toContain("steering wheel");
 
     // Moving the character to another seat is a different drawing.
     const moved = updateInteraction(created.doc, created.interactionId, {
