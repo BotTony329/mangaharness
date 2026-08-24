@@ -25,7 +25,7 @@ import { puppetForInstance } from "@/domain/puppetOps";
 import { executeInteraction } from "@/services/interaction";
 import { resolveIdentityReferences, type IdentityReference } from "@/characters/identityReference";
 import { IdentityReferenceRepair } from "./IdentityReferenceRepair";
-import { INTERACTION_LABELS, evaluateInteractionCapability } from "@/domain/interactions";
+import { INTERACTION_LABELS, evaluateInteractionCapability, interactionLabel } from "@/domain/interactions";
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
 import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -40,7 +40,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   const selection = useEditorStore((s) => s.selection);
   const [showMore, setShowMore] = useState(false);
   const [pending, setPending] = useState<InteractionType | null>(null);
-  const [busy, setBusy] = useState<InteractionType | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Set when a joint action stopped because somebody has no reference image. */
   const [repair, setRepair] = useState<{ action: string; references: IdentityReference[] } | null>(null);
@@ -60,6 +60,33 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     .map((id) => doc.items[id])
     .filter((candidate): candidate is AssetInstance => candidate?.kind === "asset");
   const preselected = alsoSelected.map((candidate) => characterOf(doc, candidate)).filter(Boolean) as ID[];
+
+  /**
+   * A shift-selected PROP or BACKGROUND is also a partner — the v0.2 contract.
+   * What the creator can DO with it comes from its declared affordances/zones,
+   * never from a name guess ("ramen" → eat would be exactly that).
+   */
+  const partnerAssetItem = alsoSelected.find((candidate) => !characterOf(doc, candidate));
+  const partnerAsset = partnerAssetItem ? doc.assets[partnerAssetItem.sourceAssetId] : undefined;
+  const partnerKind =
+    partnerAsset?.category === "prop" ? ("object" as const) : partnerAsset?.category === "background" ? ("scene" as const) : null;
+
+  /** Verbs for an object/scene partner, in the creator's words. */
+  const assetVerbs: string[] = (() => {
+    if (!partnerAsset || !partnerKind) return [];
+    if (partnerKind === "object") return partnerAsset.metadata?.affordances?.length ? partnerAsset.metadata.affordances : ["hold"];
+    const zones = partnerAsset.metadata?.zones ?? [];
+    const zoneVerbs: Record<string, string> = {
+      "driver-seat": "drive",
+      "passenger-seat": "ride in",
+      chair: "sit on",
+      doorway: "stand in",
+      desk: "sit at",
+      bed: "lie on",
+    };
+    const verbs = zones.map((zone) => zoneVerbs[zone]).filter(Boolean) as string[];
+    return verbs.length > 0 ? verbs : ["enter"];
+  })();
 
   const start = async (type: InteractionType, partnerCharacterId?: ID) => {
     const partnerId = partnerCharacterId ?? preselected[0];
@@ -106,6 +133,38 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         panelId: item.panelId,
         participantIds: [subject, partnerId],
         type,
+      });
+      if (outcome.placedItemId) {
+        useEditorStore.getState().select({ itemId: outcome.placedItemId, panelId: item.panelId });
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The interaction could not be created");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const startAsset = async (verb: string) => {
+    if (!partnerAsset || !partnerKind) return;
+    setBusy(verb);
+    setError(null);
+    setRepair(null);
+    try {
+      /**
+       * Same ONE execution path as character pairs — the service resolves the
+       * strategy (objects and scenes always mean GENERATE) and carries the
+       * asset's own image as a reference, so the bowl of ramen in the render
+       * is THIS bowl, not a re-invented one.
+       */
+      const outcome = await executeInteraction({
+        panelId: item.panelId,
+        participantIds: [subject],
+        participants: [
+          { id: subject, kind: "character", role: "initiator" },
+          { id: partnerAsset.id, kind: partnerKind, role: "target" },
+        ],
+        type: verb,
+        source: "manual",
       });
       if (outcome.placedItemId) {
         useEditorStore.getState().select({ itemId: outcome.placedItemId, panelId: item.panelId });
@@ -168,14 +227,15 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     );
   };
 
-  if (partners.length === 0 && preselected.length === 0) {
+  if (partners.length === 0 && preselected.length === 0 && assetVerbs.length === 0) {
     return (
       <div className="rounded-lg p-2.5" style={{ background: "var(--bg-elevated)" }}>
         <p className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
           Interactions
         </p>
         <p className="text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
-          Place another character in this panel, then pick an action here — or shift-click both on canvas.
+          Place another character in this panel, then pick an action here — or shift-click both on canvas. A prop or
+          background works too: shift-click it together with the character.
         </p>
       </div>
     );
@@ -192,19 +252,54 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         )}
       </div>
 
+      {/* Object / scene partner: verbs come from the asset's own affordances. */}
+      {partnerAsset && assetVerbs.length > 0 && (
+        <div className="mb-1.5">
+          <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            {doc.characters[subject]?.name} + {partnerAsset.name}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {assetVerbs.map((verb) => (
+              <button
+                key={verb}
+                disabled={busy !== null}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors disabled:opacity-40"
+                style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+                onClick={() => void startAsset(verb)}
+                title={`${interactionLabel(verb)} — needs one AI generation`}
+              >
+                {interactionLabel(verb)}
+                {busy === verb ? (
+                  <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" style={{ color: "var(--accent-text)" }} />
+                ) : (
+                  <span className="flex items-center gap-0.5 text-[8px]" style={{ color: "var(--accent-text)" }}>
+                    <GenerateIcon size={8} strokeWidth={2.5} />
+                    Generate
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {preselected.length > 0 && (
         <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
           Pick an action for {doc.characters[subject]?.name} and {doc.characters[preselected[0]]?.name}.
         </p>
       )}
-      <div className="flex flex-wrap gap-1">{QUICK.map(button)}</div>
-      {showMore && <div className="mt-1 flex flex-wrap gap-1">{MORE.map(button)}</div>}
-      <button
-        className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300"
-        onClick={() => setShowMore((open) => !open)}
-      >
-        {showMore ? "Less" : "More…"}
-      </button>
+      {(partners.length > 0 || preselected.length > 0) && (
+        <>
+          <div className="flex flex-wrap gap-1">{QUICK.map(button)}</div>
+          {showMore && <div className="mt-1 flex flex-wrap gap-1">{MORE.map(button)}</div>}
+          <button
+            className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+            onClick={() => setShowMore((open) => !open)}
+          >
+            {showMore ? "Less" : "More…"}
+          </button>
+        </>
+      )}
 
       {repair && (
         <div className="mt-2">

@@ -18,6 +18,7 @@ import { PanelStageControls } from "./PanelStageControls";
 import { LayersPanel, PageLayersTree } from "./LayersPanel";
 import { RelationshipEditor } from "./RelationshipEditor";
 import { InteractionControls } from "./InteractionControls";
+import { InteractionEditor } from "./InteractionEditor";
 import { useUiStore } from "@/editor/uiStore";
 import {
   DeleteIcon,
@@ -143,9 +144,10 @@ const OBJECT_TABS: { id: ItemTab; label: string }[] = [
 ];
 
 /**
- * The pair banner. Renders only when two character actors are selected, and
- * routes into exactly the same `InteractionControls` the single-selection path
- * uses — one surface, two ways in.
+ * The pair banner. Renders when the selected actor is paired with a second
+ * character OR a prop/background, and routes into exactly the same
+ * `InteractionControls` the single-selection path uses — one surface, two
+ * ways in.
  */
 function MultiSelectInteractions({ item }: { item: PanelItem }) {
   const doc = useEditorStore((state) => state.doc);
@@ -157,10 +159,15 @@ function MultiSelectInteractions({ item }: { item: PanelItem }) {
     .find((candidate): candidate is AssetInstance => candidate?.kind === "asset");
   if (!partnerItem) return null;
 
-  const nameOf = (candidate: AssetInstance) => doc.characters[characterIdOfInstance(doc, candidate) ?? ""]?.name;
+  // A character partner introduces themselves; a prop/background falls back to
+  // its library name, so "Mika + Ramen bowl" reads just like "Mika + Ren".
+  const nameOf = (candidate: AssetInstance) =>
+    doc.characters[characterIdOfInstance(doc, candidate) ?? ""]?.name ??
+    doc.assets[candidate.sourceAssetId]?.name;
   const a = nameOf(item);
   const b = nameOf(partnerItem);
-  if (!a || !b) return null;
+  // The banner belongs to a character; a prop selected alone has nothing to act.
+  if (!a || !b || !characterIdOfInstance(doc, item)) return null;
 
   return (
     <div className="border-b p-3" style={{ borderColor: "var(--border-subtle)" }}>
@@ -419,6 +426,10 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
                   already offers them, and showing the same buttons twice makes
                   the creator wonder whether they do different things. */}
               {!pairSelected && <InteractionControls item={item} />}
+              {/* Existing interactions are editable in place — type, direction,
+                  and in Advanced mode the full semantics — never delete-and-
+                  recreate to change "hug" into "hug from behind". */}
+              <InteractionEditor item={item} />
               {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
             </>
           ) : (

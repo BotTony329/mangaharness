@@ -383,6 +383,43 @@ export function placeInteractionRender(interactionId: ID, assetId: ID): ID | und
 }
 
 
+/**
+ * Re-draw an existing interaction after its semantics were edited.
+ *
+ * Editing direction/hand/zone changes the cache key, so the old composite can
+ * never silently stand in for the new meaning. The superseded composite is
+ * HIDDEN, not deleted — undo and layer-visibility recovery both keep working.
+ * A cache hit that is already on the page is left alone (no duplicate instance).
+ */
+export async function rerenderInteraction(interactionId: ID): Promise<RenderOutcome> {
+  const doc = useEditorStore.getState().doc;
+  const interaction = doc?.interactions[interactionId];
+  if (!doc || !interaction) throw new Error("That interaction no longer exists");
+
+  const priorAssetIds = new Set(
+    Object.values(doc.interactionRenders)
+      .filter((render) => render.interactionId === interactionId)
+      .map((render) => render.generatedAssetId),
+  );
+  const outcome = await renderInteraction(interactionId);
+
+  const panelItemIds = useEditorStore.getState().doc?.panels[interaction.panelId]?.itemIds ?? [];
+  const items = panelItemIds
+    .map((id) => useEditorStore.getState().doc?.items[id])
+    .filter((item): item is AssetInstance => item?.kind === "asset");
+  const alreadyPlaced = items.some((item) => item.sourceAssetId === outcome.assetId && item.visible !== false);
+
+  if (!alreadyPlaced) {
+    for (const item of items) {
+      if (item.sourceAssetId !== outcome.assetId && priorAssetIds.has(item.sourceAssetId) && item.visible !== false) {
+        useEditorStore.getState().dispatch({ type: "set-instance-props", instanceId: item.id, patch: { visible: false } });
+      }
+    }
+    placeInteractionRender(interactionId, outcome.assetId);
+  }
+  return outcome;
+}
+
 function needsAnchor(type: string): boolean {
   return type === "hold_hands" || type === "high_five" || type === "hand_object";
 }
