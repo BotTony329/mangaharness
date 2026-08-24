@@ -25,12 +25,14 @@ import { assetRenderUrl } from "@/assets/renderSource";
 import { resolveCharacterIdentityReference, resolveIdentityReferences } from "@/characters/identityReference";
 import { stateFromInstance } from "@/characters/state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
-import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
+import type { AssetInstance, ID, InteractionParameters, InteractionParticipant, InteractionType, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { puppetForInstance } from "@/domain/puppetOps";
+import { resolveInteraction, type InteractionResolution } from "./interactionResolver";
 import {
   interactionLabel,
-  buildMultiCharacterRequest,
+  buildInteractionRenderRequest,
+  interactionParticipants,
   evaluateInteractionCapability,
   findInteractionRender,
   interactionCacheKey,
@@ -40,9 +42,14 @@ import {
 
 export interface InteractionRequest {
   panelId: ID;
-  /** Character ids, subject first. */
+  /** Character ids, subject first (legacy character-only shorthand). */
   participantIds: ID[];
-  type: InteractionType;
+  /** Full participant list when objects/scenes take part (v0.2). */
+  participants?: InteractionParticipant[];
+  type: InteractionType | (string & {});
+  /** Editable semantics (direction, hand, custom instruction…). */
+  parameters?: InteractionParameters;
+  source?: "manual" | "agent" | "preset";
   /** Expressions to apply per participant, when the request named any. */
   expressions?: Record<ID, string>;
 }
@@ -83,12 +90,27 @@ function outfitOf(doc: ProjectDocument, panelId: ID, characterId: ID): string {
  */
 export function planInteraction(doc: ProjectDocument, request: InteractionRequest): InteractionCapabilityResult {
   return evaluateInteractionCapability({
-    type: request.type,
+    type: request.type as InteractionType,
     participantIds: request.participantIds,
     puppets: request.participantIds.map((characterId) => {
       const item = instanceFor(doc, request.panelId, characterId);
       return item ? puppetForInstance(doc, item) : undefined;
     }),
+  });
+}
+
+/**
+ * v0.2 strategy verdict for any participant mix. COMPOSE/TRANSFORM keep the
+ * v0.1 local paths; GENERATE means one interaction-aware render with every
+ * participant's reference — never overlapping sprites.
+ */
+export function planInteractionStrategy(doc: ProjectDocument, request: InteractionRequest): InteractionResolution {
+  return resolveInteraction(doc, {
+    panelId: request.panelId,
+    type: request.type,
+    parameters: request.parameters,
+    participants: request.participants,
+    participantIds: request.participantIds,
   });
 }
 
@@ -106,16 +128,24 @@ export async function executeInteraction(request: InteractionRequest): Promise<I
     return current;
   };
 
-  const capability = planInteraction(doc(), request);
+  const resolution = planInteractionStrategy(doc(), request);
+  const capability = resolution.capability ?? planInteraction(doc(), request);
+  const locallySupported = resolution.strategy !== "GENERATE";
+  const participants =
+    request.participants ??
+    request.participantIds.map((id, index) => ({ id, kind: "character" as const, role: index === 0 ? "initiator" : "target" }));
   const created = store().dispatch({
     type: "create-interaction",
     input: {
       panelId: request.panelId,
       participantIds: request.participantIds,
+      participants,
       type: request.type,
       roles: { subject: request.participantIds[0], target: request.participantIds[1] },
-      renderMode: capability.supportedLocally ? "synchronized" : "composite",
-      status: capability.supportedLocally ? "active" : "planned",
+      parameters: request.parameters,
+      source: request.source,
+      renderMode: locallySupported ? "synchronized" : "composite",
+      status: locallySupported ? "active" : "planned",
     },
   });
   const interactionId = created.createdId;
@@ -137,7 +167,7 @@ export async function executeInteraction(request: InteractionRequest): Promise<I
   }
 
   // ── Locally representable: shared anchor, no provider ──
-  if (capability.supportedLocally) {
+  if (locallySupported) {
     if (capability.mode === "LOCAL_PUPPET" && needsAnchor(request.type)) {
       const [a, b] = request.participantIds.map((id) => instanceFor(doc(), request.panelId, id));
       if (a && b) {
@@ -191,14 +221,17 @@ export async function renderInteraction(
   };
   const interaction = doc().interactions[interactionId];
   if (!interaction) throw new Error("That interaction no longer exists");
+  const participants = interactionParticipants(interaction);
   const participantIds = interaction.participantIds;
   const panelId = interaction.panelId;
 
   const style = getStyleGenerationContext(doc());
   const cacheKey = interactionCacheKey({
     participantCharacterIds: participantIds,
+    participantKeys: participants.map((participant) => `${participant.kind}:${participant.id}`),
     type: interaction.type,
     roles: interaction.roles,
+    parameters: interaction.parameters,
     outfits: participantIds.map((id) => outfitOf(doc(), panelId, id)),
     view: "front",
     styleProfileId: style.profile.id,
@@ -229,7 +262,7 @@ export async function renderInteraction(
     }
   }
 
-  const model = buildMultiCharacterRequest(doc(), interaction, {
+  const model = buildInteractionRenderRequest(doc(), interaction, {
     styleProfileId: style.profile.id,
     outfits: Object.fromEntries(participantIds.map((id) => [id, outfitOf(doc(), panelId, id)])),
   });
@@ -242,7 +275,7 @@ export async function renderInteraction(
   const referenceUrls = model.participantReferenceAssetIds
     .map((id) => assetRenderUrl(doc().assets[id]))
     .filter((url): url is string => Boolean(url));
-  if (referenceUrls.length !== participantIds.length) {
+  if (referenceUrls.length !== participants.length) {
     /**
      * Name who is missing what. The old message named nobody, so a creator
      * looking at two characters had no idea which one to fix or how.
@@ -258,9 +291,9 @@ export async function renderInteraction(
     );
   }
 
-  /** Distinct references, or the model is being asked to draw one person twice. */
+  /** Distinct references, or the model is being asked to draw one thing twice. */
   if (new Set(referenceUrls).size !== referenceUrls.length) {
-    throw new Error("Both characters resolved to the same reference image, so their identities could not be kept apart.");
+    throw new Error("Two participants resolved to the same reference image, so their identities could not be kept apart.");
   }
 
   /**
@@ -295,7 +328,11 @@ export async function renderInteraction(
     referenceUrls,
   });
 
-  const names = participantIds.map((id) => doc().characters[id]?.name ?? id);
+  const names = participants.map((participant) =>
+    participant.kind === "character"
+      ? (doc().characters[participant.id]?.name ?? participant.id)
+      : (doc().assets[participant.id]?.name ?? participant.id),
+  );
   const assetId = await registerGeneratedAsset({
     result,
     assetType: "character",
@@ -346,6 +383,6 @@ export function placeInteractionRender(interactionId: ID, assetId: ID): ID | und
 }
 
 
-function needsAnchor(type: InteractionType): boolean {
+function needsAnchor(type: string): boolean {
   return type === "hold_hands" || type === "high_five" || type === "hand_object";
 }

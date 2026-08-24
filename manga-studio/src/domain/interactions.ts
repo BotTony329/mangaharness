@@ -580,3 +580,106 @@ function interactionConstraintsFor(type: string, names: string[]): string[] {
       return [`${first} and ${second} ${interactionLabel(type).toLowerCase()}.`, ...shared];
   }
 }
+
+// ─── Mixed-participant render contract (v0.2) ───────────────────────────────
+
+export interface InteractionRenderRequest {
+  /** One reference image per participant, in participant order. Never merged. */
+  participantReferenceAssetIds: ID[];
+  /** Character ids among the participants (provenance for joint renders). */
+  participantCharacterIds: ID[];
+  interactionType: string;
+  roles?: Record<string, ID>;
+  identityConstraints: string[];
+  outfitConstraints: string[];
+  interactionConstraints: string[];
+}
+
+/**
+ * Sentence form of the editable parameters — "from behind, high intensity,
+ * right hand on the grip". Included in the prompt AND the cache key, so an
+ * edited interaction is regenerated, never served stale from cache.
+ */
+export function describeInteractionParameters(parameters?: InteractionParameters): string[] {
+  if (!parameters) return [];
+  const parts: string[] = [];
+  if (parameters.direction) parts.push(`direction: ${parameters.direction}`);
+  if (parameters.facing) parts.push(`facing: ${parameters.facing}`);
+  if (parameters.pose) parts.push(`pose: ${parameters.pose}`);
+  if (parameters.hand && parameters.hand !== "auto") parts.push(`using ${parameters.hand} hand${parameters.hand === "both" ? "s" : ""}`);
+  if (parameters.contact?.length) parts.push(`contact: ${parameters.contact.join(", ")}`);
+  if (parameters.intensity !== undefined) parts.push(`intensity ${Math.round(parameters.intensity * 100)}%`);
+  if (parameters.distance !== undefined) parts.push(`distance ${Math.round(parameters.distance * 100)}%`);
+  if (parameters.customInstruction) parts.push(parameters.customInstruction);
+  return parts;
+}
+
+/**
+ * Build the joint-generation request for ANY participant mix.
+ *
+ * Characters contribute their canonical identity reference; objects and scenes
+ * contribute their library image. Every participant's picture travels — nobody
+ * is demoted to a text description the model would re-invent.
+ */
+export function buildInteractionRenderRequest(
+  doc: ProjectDocument,
+  interaction: CharacterInteraction,
+  context: { styleProfileId?: ID; outfits?: Record<ID, string> },
+): InteractionRenderRequest {
+  const participants = interactionParticipants(interaction);
+  const referenceAssetIds: ID[] = [];
+  const characterIds: ID[] = [];
+  const identityConstraints: string[] = [];
+  const outfitConstraints: string[] = [];
+  const names: string[] = [];
+
+  participants.forEach((participant, index) => {
+    if (participant.kind === "character") {
+      const resolved = resolveCharacterIdentityReference(doc, participant.id);
+      if (resolved.status !== "resolved" || !resolved.assetId) {
+        throw new Error(resolved.reason ?? `${resolved.characterName} has no usable reference image yet.`);
+      }
+      referenceAssetIds.push(resolved.assetId);
+      characterIds.push(participant.id);
+      const name = doc.characters[participant.id]?.name ?? participant.id;
+      names.push(name);
+      identityConstraints.push(
+        `Preserve ${name}'s exact face, hairstyle and proportions from reference image ${index + 1}. Do not blend their features with anything else.`,
+      );
+      const outfit = context.outfits?.[participant.id];
+      outfitConstraints.push(
+        outfit
+          ? `${name} wears ${outfit}, unchanged.`
+          : `Keep ${name}'s outfit exactly as shown in reference image ${index + 1}.`,
+      );
+      return;
+    }
+    const asset = doc.assets[participant.id];
+    if (!asset) throw new Error("An interaction participant is missing from the library.");
+    referenceAssetIds.push(participant.id);
+    names.push(asset.name);
+    identityConstraints.push(
+      participant.kind === "object"
+        ? `Reference image ${index + 1} is the object "${asset.name}": keep its exact appearance in the interaction.`
+        : `Reference image ${index + 1} is the scene "${asset.name}": match its perspective, lighting and layout.`,
+    );
+  });
+
+  const zone = participants.find((p) => p.zone)?.zone;
+  const interactionConstraints = [
+    `${interactionLabel(interaction.type)}: ${names.join(" and ")}.`,
+    ...(zone ? [`The character occupies the ${zone} zone of the scene, body and perspective matching it.`] : []),
+    ...describeInteractionParameters(interaction.parameters).map((part) => `Interaction detail — ${part}.`),
+    "All participants occupy the same scene, at a consistent scale, from one viewpoint, with consistent lighting.",
+  ];
+
+  return {
+    participantReferenceAssetIds: referenceAssetIds,
+    participantCharacterIds: characterIds,
+    interactionType: interaction.type,
+    roles: interaction.roles,
+    identityConstraints,
+    outfitConstraints,
+    interactionConstraints,
+  };
+}
