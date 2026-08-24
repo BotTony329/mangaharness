@@ -70,8 +70,17 @@ export async function generateAssetImage(
   const backgroundProvider = backgroundConfig ? createBackgroundRemovalProvider(backgroundConfig) : undefined;
   trace?.("adapter_created", { provider: provider.id, referenceImage: provider.capabilities.supportsReferenceImage });
 
-  // References are only sent when the provider actually supports them —
-  // the UI must never pretend identity preservation happens when it can't.
+  // Capability validation BEFORE any provider call: a caller that explicitly
+  // supplied references must not be silently downgraded to a non-identity
+  // generation — fail loudly instead of pretending (UI capability gates are
+  // only the first layer; this is the authoritative one).
+  if ((input.referenceUrls?.length ?? 0) > 0 && !provider.capabilities.supportsReferenceImage) {
+    throw new ProviderError("Selected model does not support reference images", 400, {
+      stage: "capability_validation",
+      provider: provider.id,
+      model: provider.model,
+    });
+  }
   const wantsReferences = provider.capabilities.supportsReferenceImage;
   const validatedUrls = wantsReferences ? (input.referenceUrls ?? []).filter(isAllowedReferenceUrl) : [];
   trace?.("reference_processing_start", { requested: input.referenceUrls?.length ?? 0, supported: wantsReferences });
