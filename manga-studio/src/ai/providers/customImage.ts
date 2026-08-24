@@ -42,6 +42,12 @@ export function createCustomImageProvider(config: ProviderConfig): ImageGenerati
       supportsReferenceImage: custom.referenceMode !== "none",
       supportsTransparentBackground: false,
       supportsImageEditing: custom.referenceMode !== "none",
+      // Custom APIs declare their transport implicitly: URL mode or base64 template vars.
+      reference: {
+        supported: custom.referenceMode !== "none",
+        transport: custom.referenceMode === "url" ? "url" : custom.referenceMode === "base64" ? "json-inline-base64" : "none",
+        endpointMode: "same-endpoint",
+      },
       referenceImage: custom.referenceMode !== "none",
       imageVariation: custom.referenceMode !== "none",
       transparentOutput: false,

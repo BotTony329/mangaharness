@@ -105,6 +105,7 @@ function imageProvider(editImage: ImageGenerationProvider["editImage"]): ImageGe
       supportsReferenceImage: true,
       supportsTransparentBackground: false,
       supportsImageEditing: true,
+      reference: { supported: true, transport: "provider-native", endpointMode: "same-endpoint" },
       referenceImage: true,
       imageVariation: true,
       transparentOutput: false,

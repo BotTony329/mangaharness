@@ -38,7 +38,7 @@ describe("capabilitiesForModel", () => {
     const caps = capabilitiesForModel("some-gateway-model");
     expect(caps.responseFormat).toBe(true);
     expect(caps.background).toBe(false);
-    expect(caps.referenceImages).toBe(false);
+    expect(caps.reference.supported).toBe(false);
     expect(caps.allowedSizes).toBeUndefined();
   });
 });

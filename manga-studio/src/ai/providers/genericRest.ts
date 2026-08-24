@@ -41,7 +41,7 @@ export function buildImagePayload(
   model: string,
   capabilities: ImageModelCapabilities,
 ): Record<string, unknown> {
-  if (request.referenceImages?.length && !capabilities.referenceImages) {
+  if (request.referenceImages?.length && !capabilities.reference.supported) {
     throw new ProviderError("Selected model does not support reference images", 400, {
       provider: "OpenAI-compatible",
       model,
@@ -69,6 +69,34 @@ export function buildImagePayload(
     payload.response_format = "b64_json";
   }
   return payload;
+}
+
+/**
+ * Reference-conditioned request for gpt-image: multipart/form-data on
+ * /images/edits with each reference as an `image[]` file part. Only keys the
+ * model supports on edits are included — still no response_format.
+ */
+export function buildEditsFormData(
+  request: Pick<ImageGenerationRequest, "prompt" | "width" | "height" | "transparentBackground" | "referenceImages">,
+  model: string,
+  capabilities: ImageModelCapabilities,
+): FormData {
+  const max = capabilities.reference.maxImages ?? 1;
+  const references = (request.referenceImages ?? []).slice(0, max);
+  if (references.length === 0) throw new ProviderError("Reference edit requires at least one image", 400);
+  const form = new FormData();
+  if (model) form.set("model", model);
+  form.set("prompt", request.prompt);
+  const size = snapSize(request.width, request.height, capabilities);
+  if (size) form.set("size", size);
+  if (request.transparentBackground && capabilities.background) {
+    form.set("background", "transparent");
+    form.set("output_format", "png");
+  }
+  for (const [index, ref] of references.entries()) {
+    form.append("image[]", new Blob([new Uint8Array(ref.data)], { type: ref.mimeType }), `reference-${index}.png`);
+  }
+  return form;
 }
 
 /** Normalize OpenAI-shaped responses: b64_json inline, or a URL to download. */
@@ -102,10 +130,11 @@ export function createGenericRestProvider(config: OpenAICompatibleConfig): Image
     model: config.model,
     capabilities: {
       textToImage: modelCapabilities.textToImage,
-      supportsReferenceImage: modelCapabilities.referenceImages,
+      supportsReferenceImage: modelCapabilities.reference.supported,
       supportsTransparentBackground: modelCapabilities.background,
       supportsImageEditing: modelCapabilities.imageEditing,
-      referenceImage: modelCapabilities.referenceImages,
+      reference: modelCapabilities.reference,
+      referenceImage: modelCapabilities.reference.supported,
       imageVariation: modelCapabilities.imageEditing,
       transparentOutput: modelCapabilities.background,
       asyncGeneration: false,
@@ -121,23 +150,33 @@ export function createGenericRestProvider(config: OpenAICompatibleConfig): Image
     },
 
     async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
-      const payload = buildImagePayload(request, config.model, modelCapabilities);
+      // Reference transport contract: gpt-image references travel as multipart
+      // files on the edits endpoint; without references the plain generations
+      // JSON path is used. The core layer never learns which.
+      const withReferences = (request.referenceImages?.length ?? 0) > 0;
+      const editsMode = withReferences && modelCapabilities.reference.endpointMode === "edit";
+      const body = editsMode
+        ? buildEditsFormData(request, config.model, modelCapabilities)
+        : JSON.stringify(buildImagePayload(request, config.model, modelCapabilities));
+      const endpoint = editsMode ? "/images/edits" : "/images/generations";
       request.trace?.("outbound_request_start", {
         provider: "generic-rest",
         operation: "generate_image",
-        endpointPath: "/images/generations",
+        endpointPath: endpoint,
         model: config.model,
+        referenceAttached: withReferences,
         capabilityResponseFormat: modelCapabilities.responseFormat,
         capabilityBackground: modelCapabilities.background,
       });
       const started = Date.now();
-      const response = await boundedFetch(`${base}/images/generations`, {
+      const response = await boundedFetch(`${base}${endpoint}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
+          // FormData sets its own multipart boundary — never hand-set it.
+          ...(editsMode ? {} : { "Content-Type": "application/json" }),
         },
-        body: JSON.stringify(payload),
+        body,
       });
       request.trace?.("outbound_response_received", {
         provider: "generic-rest",

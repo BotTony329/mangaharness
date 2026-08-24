@@ -46,12 +46,36 @@ export interface ImageEditRequest {
   trace?: GenerationTrace;
 }
 
+/** How an adapter physically transports reference images to the provider. */
+export type ReferenceTransport =
+  | "none"
+  | "json-inline-base64"
+  | "multipart-file"
+  | "url"
+  | "provider-native";
+
+/**
+ * Reference-image capability contract. `supported: true` is a PROMISE: the
+ * adapter must really transmit the image (contract tests enforce it) — never
+ * a UI permission slip alone.
+ */
+export interface ReferenceImageCapability {
+  supported: boolean;
+  transport: ReferenceTransport;
+  maxImages?: number;
+  acceptedMimeTypes?: string[];
+  /** "edit" = references switch the call to the provider's edit endpoint. */
+  endpointMode?: "generation" | "edit" | "same-endpoint";
+}
+
 export interface ProviderCapabilities {
   textToImage: boolean;
   /** Canonical capability names used by the processing cascade. */
   supportsReferenceImage: boolean;
   supportsTransparentBackground: boolean;
   supportsImageEditing: boolean;
+  /** Reference transport contract — the binding behind supportsReferenceImage. */
+  reference: ReferenceImageCapability;
   /** Compatibility aliases retained for existing clients and stored tests. */
   referenceImage: boolean;
   imageVariation: boolean;

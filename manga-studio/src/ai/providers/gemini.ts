@@ -40,6 +40,8 @@ export function createGeminiProvider(config: GeminiConfig): ImageGenerationProvi
       supportsReferenceImage: true,
       supportsTransparentBackground: false,
       supportsImageEditing: true,
+      // Contract metadata only — the working inline_data path below is untouched.
+      reference: { supported: true, transport: "json-inline-base64", maxImages: 3, endpointMode: "same-endpoint" },
       referenceImage: true,
       imageVariation: true,
       // Gemini returns opaque images; we do not fake transparency.

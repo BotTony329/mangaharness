@@ -7,10 +7,12 @@
  * Adding a model = adding one registry entry. No adapter code changes.
  */
 
+import type { ReferenceImageCapability } from "./types";
+
 export interface ImageModelCapabilities {
   textToImage: boolean;
-  /** Accept reference/input images (identity-preserving generation). */
-  referenceImages: boolean;
+  /** Reference-image contract: supported + how the adapter must transport it. */
+  reference: ReferenceImageCapability;
   imageEditing: boolean;
   mask: boolean;
   /** May send a size parameter at all. */
@@ -28,9 +30,11 @@ export interface ImageModelCapabilities {
 }
 
 /** Conservative legacy default: how the pre-registry adapter behaved. */
+const NO_REFERENCE: ReferenceImageCapability = { supported: false, transport: "none", endpointMode: "generation" };
+
 const UNKNOWN_MODEL: ImageModelCapabilities = {
   textToImage: true,
-  referenceImages: false,
+  reference: NO_REFERENCE,
   imageEditing: false,
   mask: false,
   size: true,
@@ -52,9 +56,8 @@ const MODEL_FAMILIES: { match: RegExp; capabilities: ImageModelCapabilities }[] 
     match: /^gpt-image-/,
     capabilities: {
       textToImage: true,
-      // Reference input exists only on the edits endpoint, which this
-      // adapter does not implement — declare honestly, don't pretend.
-      referenceImages: false,
+      // gpt-image takes reference input on the multipart edits endpoint.
+      reference: { supported: true, transport: "multipart-file", maxImages: 3, endpointMode: "edit" },
       imageEditing: false,
       mask: false,
       size: true,
@@ -72,7 +75,7 @@ const MODEL_FAMILIES: { match: RegExp; capabilities: ImageModelCapabilities }[] 
     match: /^dall-e-3/,
     capabilities: {
       textToImage: true,
-      referenceImages: false,
+      reference: NO_REFERENCE,
       imageEditing: false,
       mask: false,
       size: true,
@@ -89,7 +92,7 @@ const MODEL_FAMILIES: { match: RegExp; capabilities: ImageModelCapabilities }[] 
     match: /^dall-e-2/,
     capabilities: {
       textToImage: true,
-      referenceImages: false,
+      reference: NO_REFERENCE,
       imageEditing: false,
       mask: false,
       size: true,

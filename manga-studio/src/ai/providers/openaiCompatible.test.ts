@@ -66,8 +66,8 @@ describe("buildImagePayload — capability gating", () => {
     expect(() =>
       buildImagePayload(
         { ...BASE_REQUEST, referenceImages: [{ mimeType: "image/png", data: Buffer.from("x") }] },
-        "gpt-image-1",
-        capabilitiesForModel("gpt-image-1"),
+        "dall-e-3",
+        capabilitiesForModel("dall-e-3"),
       ),
     ).toThrowError(/does not support reference images/);
   });
