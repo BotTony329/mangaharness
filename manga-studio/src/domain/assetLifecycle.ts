@@ -113,6 +113,7 @@ export function deleteAsset(doc: ProjectDocument, assetId: ID, mode: DeleteAsset
     if (dependent.provenance?.generatedFromAssetIds) dependent.provenance.generatedFromAssetIds = dependent.provenance.generatedFromAssetIds.filter((id) => id !== assetId);
   }
   delete next.assets[assetId];
+  pruneOrphanInteractions(next);
   for (const panelId of affectedPanels) syncPanelScene(next, panelId);
   pruneCharacterStates(next);
   touch(next);
@@ -186,6 +187,7 @@ export function deleteCharacter(doc: ProjectDocument, characterId: ID, mode: Del
   for (const item of Object.values(next.items)) {
     if (item.kind === "asset" && item.characterState?.characterId === characterId) delete item.characterState;
   }
+  pruneOrphanInteractions(next);
   for (const panelId of Object.keys(next.panels)) syncPanelScene(next, panelId);
   pruneCharacterStates(next);
   touch(next);
@@ -244,10 +246,46 @@ export function replaceAssetReferences(doc: ProjectDocument, oldAssetId: ID, new
     if (dependent.metadata?.referenceAssetIds) dependent.metadata.referenceAssetIds = replaceId(dependent.metadata.referenceAssetIds, oldAssetId, newAssetId);
     if (dependent.provenance?.generatedFromAssetIds) dependent.provenance.generatedFromAssetIds = replaceId(dependent.provenance.generatedFromAssetIds, oldAssetId, newAssetId);
   }
+  // Interactions point at library assets for object/scene participants —
+  // repoint them too, or a replaced prop would orphan every interaction using it.
+  for (const interaction of Object.values(next.interactions ?? {})) {
+    if (!interaction.participants) continue;
+    interaction.participants = interaction.participants.map((participant) =>
+      participant.kind !== "character" && participant.id === oldAssetId
+        ? { ...participant, id: newAssetId }
+        : participant,
+    );
+  }
   delete next.assets[oldAssetId];
   for (const panelId of Object.keys(next.panels)) syncPanelScene(next, panelId);
   touch(next);
   return next;
+}
+
+/**
+ * An interaction dies with any of its participants.
+ *
+ * Deleting a character or a prop/background must not leave an interaction
+ * pointing at something that no longer exists — an orphan would keep offering
+ * a "Redraw" that can only fail, and its cache entries would be unmatchable
+ * dead weight. The render ledger entries are pruned with it (and any entry
+ * whose generated image itself was deleted).
+ */
+function pruneOrphanInteractions(doc: ProjectDocument): void {
+  for (const interaction of Object.values(doc.interactions ?? {})) {
+    const participants =
+      interaction.participants ??
+      interaction.participantIds.map((id) => ({ id, kind: "character" as const }));
+    const orphaned = participants.some((participant) =>
+      participant.kind === "character" ? !doc.characters[participant.id] : !doc.assets[participant.id],
+    );
+    if (orphaned) delete doc.interactions[interaction.id];
+  }
+  for (const render of Object.values(doc.interactionRenders ?? {})) {
+    if (!doc.interactions[render.interactionId] || !doc.assets[render.generatedAssetId]) {
+      delete doc.interactionRenders[render.id];
+    }
+  }
 }
 
 function replaceId(ids: ID[], oldAssetId: ID, newAssetId: ID): ID[] {

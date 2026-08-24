@@ -3,6 +3,7 @@ import { createProjectDocument } from "./factory";
 import { addAsset, addCharacter } from "./libraryOps";
 import { placeAsset, removeItem } from "./itemOps";
 import { addWorkspaceItem } from "./workspaceOps";
+import { createInteraction, recordInteractionRender } from "./interactions";
 import {
   AssetInUseError,
   deleteAsset,
@@ -110,5 +111,69 @@ describe("asset lifecycle", () => {
     expect(deleteAll.characters[removed.characterId]).toBeUndefined();
     expect(deleteAll.assets[removed.referenceId]).toBeUndefined();
     expect(deleteAll.assets[removed.walkingId]).toBeUndefined();
+  });
+
+  it("deleting a character removes their interactions and render ledger entries", () => {
+    const seeded = characterProject();
+    const second = addCharacter(seeded.doc, "Ren");
+    let doc = second.doc;
+    const panelId = Object.keys(doc.panels)[0];
+    const created = createInteraction(doc, {
+      panelId,
+      participantIds: [seeded.characterId, second.characterId],
+      type: "hug",
+    });
+    doc = created.doc;
+    const rendered = recordInteractionRender(doc, {
+      interactionId: created.interactionId,
+      participantCharacterIds: [seeded.characterId, second.characterId],
+      participantReferenceAssetIds: [seeded.referenceId],
+      generatedAssetId: seeded.walkingId,
+      cacheKey: "test-cache-key",
+    });
+    doc = rendered.doc;
+
+    const deleted = deleteCharacter(doc, second.characterId, "keep-assets");
+    expect(deleted.interactions[created.interactionId]).toBeUndefined();
+    expect(deleted.interactionRenders[rendered.renderId]).toBeUndefined();
+  });
+
+  it("deleting a prop removes object interactions that used it", () => {
+    const seeded = characterProject();
+    let doc = seeded.doc;
+    const panelId = Object.keys(doc.panels)[0];
+    const bowl = addAsset(doc, { category: "prop", name: "Ramen bowl", storageUrl: "ramen.png", width: 100, height: 100 });
+    doc = bowl.doc;
+    const created = createInteraction(doc, {
+      panelId,
+      participantIds: [seeded.characterId],
+      participants: [
+        { id: seeded.characterId, kind: "character", role: "initiator" },
+        { id: bowl.assetId, kind: "object", role: "target" },
+      ],
+      type: "eat",
+    });
+    doc = created.doc;
+
+    const deleted = deleteAsset(doc, bowl.assetId, "cascade");
+    expect(deleted.interactions[created.interactionId]).toBeUndefined();
+  });
+
+  it("interactions between surviving participants are kept", () => {
+    const seeded = characterProject();
+    const second = addCharacter(seeded.doc, "Ren");
+    let doc = second.doc;
+    const panelId = Object.keys(doc.panels)[0];
+    const created = createInteraction(doc, {
+      panelId,
+      participantIds: [seeded.characterId, second.characterId],
+      type: "hug",
+    });
+    doc = created.doc;
+
+    // Deleting an unrelated asset leaves the interaction intact.
+    const unrelated = addAsset(doc, { category: "prop", name: "Bag", storageUrl: "bag.png", width: 10, height: 10 });
+    const deleted = deleteAsset(unrelated.doc, unrelated.assetId, "if-unused");
+    expect(deleted.interactions[created.interactionId]).toBeDefined();
   });
 });
