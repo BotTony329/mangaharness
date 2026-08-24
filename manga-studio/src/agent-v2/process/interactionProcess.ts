@@ -1,12 +1,32 @@
 "use client";
 
-import type { ID, InteractionType } from "@/domain/types";
+import type { ID, InteractionParameters, InteractionType, ProjectDocument } from "@/domain/types";
 import { requireCharacter } from "@/agent/resolver";
-import { executeInteraction } from "@/services/interaction";
-import { charactersInAsset } from "@/domain/interactions";
+import { executeInteraction, rerenderInteraction } from "@/services/interaction";
+import {
+  charactersInAsset,
+  interactionLabel,
+  interactionParticipants,
+  interactionsInPanel,
+} from "@/domain/interactions";
 import type { RunContext } from "../types";
-import type { InteractionArgs } from "../types";
+import type { InteractionArgs, UpdateInteractionArgs } from "../types";
 import { resolveOrGenerateState } from "./characterProcess";
+
+/**
+ * A library prop/background by name. Interactions with objects and scenes are
+ * declared against the LIBRARY asset (not a placed instance), matching the
+ * Inspector's creation path.
+ */
+function requireLibraryAsset(doc: ProjectDocument, name: string) {
+  const asset = Object.values(doc.assets).find(
+    (candidate) =>
+      (candidate.category === "prop" || candidate.category === "background") &&
+      candidate.name.trim().toLowerCase() === name.trim().toLowerCase(),
+  );
+  if (!asset) throw new Error(`No prop or background named "${name}" exists in the library`);
+  return asset;
+}
 
 /**
  * Fallback Composition — an explicit product behaviour, not a hidden rescue.
@@ -21,7 +41,11 @@ export async function approximateInteraction(ctx: RunContext, args: InteractionA
   const panelId = ctx.panelIdByNumber(args.panel);
   for (const who of [
     { characterName: args.subjectCharacterName, characterId: args.subjectCharacterId },
-    { characterName: args.targetCharacterName, characterId: args.targetCharacterId },
+    // An object/scene target has no reusable character asset to fall back to;
+    // the approximation places only the actors it actually has.
+    ...(args.targetCharacterName || args.targetCharacterId
+      ? [{ characterName: args.targetCharacterName ?? "", characterId: args.targetCharacterId }]
+      : []),
   ]) {
     const { asset } = await resolveOrGenerateState(ctx, 
       { characterName: who.characterName, characterId: who.characterId, generateIfMissing: false },
@@ -43,12 +67,14 @@ export async function approximateInteraction(ctx: RunContext, args: InteractionA
  */
 export async function doCreateInteraction(ctx: RunContext, args: {
   panel: number;
-  interaction: InteractionType;
+  interaction: InteractionType | (string & {});
   subjectCharacterName: string;
   subjectCharacterId?: ID;
-  targetCharacterName: string;
+  targetCharacterName?: string;
   targetCharacterId?: ID;
+  targetAssetName?: string;
   expressions?: Record<string, string>;
+  parameters?: InteractionParameters;
 }): Promise<void> {
   const panelId = ctx.panelIdByNumber(args.panel);
   const doc = ctx.currentDoc();
@@ -56,11 +82,22 @@ export async function doCreateInteraction(ctx: RunContext, args: {
     characterId: args.subjectCharacterId,
     characterName: args.subjectCharacterName,
   });
-  const target = requireCharacter(doc, {
-    characterId: args.targetCharacterId,
-    characterName: args.targetCharacterName,
-  });
-  if (subject.id === target.id) throw new Error("An interaction needs two different characters");
+
+  /**
+   * The target is a character OR a library prop/background — one or the other,
+   * never neither. An object/scene target joins by asset id, and its own image
+   * travels as a reference so the render uses THIS ramen bowl, not an
+   * invented one.
+   */
+  const targetAsset = args.targetAssetName ? requireLibraryAsset(doc, args.targetAssetName) : undefined;
+  const target = !targetAsset
+    ? requireCharacter(doc, {
+        characterId: args.targetCharacterId,
+        characterName: args.targetCharacterName ?? "",
+      })
+    : undefined;
+  if (!targetAsset && !target) throw new Error("An interaction needs a target character or a target asset");
+  if (target && subject.id === target.id) throw new Error("An interaction needs two different characters");
 
   // Expressions arrive keyed by NAME; resolve each through the same grounding
   // resolver so "Yuri" cannot quietly become someone else here either.
@@ -72,15 +109,23 @@ export async function doCreateInteraction(ctx: RunContext, args: {
 
   const outcome = await executeInteraction({
     panelId,
-    participantIds: [subject.id, target.id],
+    participantIds: target ? [subject.id, target.id] : [subject.id],
+    participants: [
+      { id: subject.id, kind: "character", role: "initiator" },
+      target
+        ? { id: target.id, kind: "character" as const, role: "target" }
+        : { id: targetAsset!.id, kind: targetAsset!.category === "background" ? ("scene" as const) : ("object" as const), role: "target" },
+    ],
     type: args.interaction,
     expressions,
+    parameters: args.parameters,
+    source: "agent",
   });
 
   ctx.lastLanguageAction = outcome.reusedCache
-    ? `Reused an existing ${args.interaction.replace(/_/g, " ")} render`
+    ? `Reused an existing ${interactionLabel(args.interaction)} render`
     : outcome.generationCalls > 0
-      ? `Drawn once using both ${subject.name} and ${target.name} as references`
+      ? `Drawn once using ${[subject.name, target?.name ?? targetAsset?.name].filter(Boolean).join(" and ")} as references`
       : `Arranged locally — no generation`;
 
   /**
@@ -89,11 +134,61 @@ export async function doCreateInteraction(ctx: RunContext, args: {
    */
   if (outcome.assetId) {
     const participants = charactersInAsset(ctx.currentDoc(), outcome.assetId);
-    for (const id of [subject.id, target.id]) {
+    for (const id of [subject.id, ...(target ? [target.id] : [])]) {
       if (!participants.includes(id)) {
         throw new Error(`The generated interaction does not contain ${ctx.currentDoc().characters[id]?.name ?? id}`);
       }
     }
+  }
+}
+
+/**
+ * Edit an interaction that already exists — the Agent-side twin of the
+ * Inspector editor. Finds the interaction by panel + subject + current type
+ * (target name disambiguates when the subject has several of the same verb),
+ * applies the patch through the domain command, then re-draws through the
+ * same service when the interaction is a composite render.
+ */
+export async function doUpdateInteraction(ctx: RunContext, args: UpdateInteractionArgs): Promise<void> {
+  const panelId = ctx.panelIdByNumber(args.panel);
+  const doc = ctx.currentDoc();
+  const subject = requireCharacter(doc, {
+    characterId: args.subjectCharacterId,
+    characterName: args.subjectCharacterName,
+  });
+  const target = args.targetCharacterName || args.targetCharacterId
+    ? requireCharacter(doc, { characterId: args.targetCharacterId, characterName: args.targetCharacterName ?? "" })
+    : undefined;
+  const targetAsset = args.targetAssetName ? requireLibraryAsset(doc, args.targetAssetName) : undefined;
+
+  const matches = interactionsInPanel(doc, panelId, subject.id).filter((interaction) => {
+    if (interaction.type !== args.interaction) return false;
+    const participants = interactionParticipants(interaction);
+    if (target && !participants.some((p) => p.kind === "character" && p.id === target.id)) return false;
+    if (targetAsset && !participants.some((p) => p.kind !== "character" && p.id === targetAsset.id)) return false;
+    return true;
+  });
+  if (matches.length === 0) {
+    throw new Error(
+      `No "${interactionLabel(args.interaction)}" interaction with ${subject.name} exists in panel ${args.panel} — create it first, then edit it.`,
+    );
+  }
+  const interaction = matches[0];
+
+  ctx.dispatch({
+    type: "update-interaction",
+    interactionId: interaction.id,
+    patch: {
+      ...(args.newInteraction ? { type: args.newInteraction } : {}),
+      ...(args.parameters ? { parameters: { ...interaction.parameters, ...args.parameters } } : {}),
+    },
+  });
+
+  if (interaction.renderMode === "composite") {
+    await rerenderInteraction(interaction.id);
+    ctx.lastLanguageAction = `Redrawn as ${interactionLabel(args.newInteraction ?? interaction.type)} with the new settings`;
+  } else {
+    ctx.lastLanguageAction = `Updated the ${interactionLabel(interaction.type)} interaction — arranged locally`;
   }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { type CompositionIssue } from "@/domain/compositionValidation";
-import type { ID, InteractionType } from "@/domain/types";
+import type { ID, InteractionParameters, InteractionType } from "@/domain/types";
 import { type FallbackUse, type RunStatus, type StepFailure } from "@/agent/stepPolicy";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
@@ -60,11 +60,27 @@ export const DENY_ALL_CREATION: RunGuards = { creationAuthorized: false, authori
 
 export type InteractionArgs = {
   panel: number;
-  interaction: InteractionType;
+  interaction: InteractionType | (string & {});
   subjectCharacterName: string;
   subjectCharacterId?: ID;
-  targetCharacterName: string;
+  /** Optional: an object/scene target names a library asset instead. */
+  targetCharacterName?: string;
   targetCharacterId?: ID;
+  targetAssetName?: string;
+  parameters?: InteractionParameters;
+};
+
+export type UpdateInteractionArgs = {
+  panel: number;
+  subjectCharacterName: string;
+  subjectCharacterId?: ID;
+  /** Current type, used to find the interaction. */
+  interaction: string;
+  targetCharacterName?: string;
+  targetCharacterId?: ID;
+  targetAssetName?: string;
+  newInteraction?: string;
+  parameters?: InteractionParameters;
 };
 
 /**

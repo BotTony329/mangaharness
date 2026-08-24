@@ -31,7 +31,7 @@ import {
   doSetPuppetExpression,
   doSetPuppetJoint,
 } from "./process/cameraProcess";
-import { approximateInteraction, doCreateInteraction } from "./process/interactionProcess";
+import { approximateInteraction, doCreateInteraction, doUpdateInteraction } from "./process/interactionProcess";
 import { doEditAssetRegion } from "./process/localEditProcess";
 import { validatePlanResult, validateSequencePostConditions } from "./validation";
 
@@ -104,7 +104,9 @@ export function describeStep(step: AgentPlan["steps"][number]): string {
     case "generate_manga_effect":
       return `Generate manga ${args.category}: ${String(args.description).slice(0, 40)}`;
     case "create_interaction":
-      return `${args.subjectCharacterName} + ${args.targetCharacterName}: ${String(args.interaction).replace(/_/g, " ")} in panel ${args.panel}`;
+      return `${args.subjectCharacterName} + ${args.targetCharacterName ?? args.targetAssetName}: ${String(args.interaction).replace(/_/g, " ")} in panel ${args.panel}`;
+    case "update_interaction":
+      return `Update ${args.subjectCharacterName}'s ${String(args.interaction).replace(/_/g, " ")} in panel ${args.panel}`;
     case "attach_bubble":
       return `Add ${args.bubbleType} for ${args.characterName} in panel ${args.panel}`;
     case "set_character_pose_rig": {
@@ -329,6 +331,8 @@ export async function executeStep(ctx: RunContext, step: AgentPlan["steps"][numb
       return doSetPuppetJoint(ctx, args);
     case "create_interaction":
       return doCreateInteraction(ctx, args);
+    case "update_interaction":
+      return doUpdateInteraction(ctx, args);
     case "place_manga_effect":
       return doPlaceMangaEffect(ctx, args);
     case "generate_manga_effect":

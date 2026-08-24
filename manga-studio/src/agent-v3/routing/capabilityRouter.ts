@@ -112,6 +112,7 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
             subjectCharacterName: beat.actor,
             targetCharacterName: beat.target,
             expressions: beat.expression ? { [beat.actor]: beat.expression } : undefined,
+            parameters: interaction.parameters,
           },
           reason: "Coordinated interaction",
         });

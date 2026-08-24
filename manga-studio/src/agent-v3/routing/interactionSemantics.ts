@@ -12,7 +12,7 @@
  * throws the raw creative text away.
  */
 
-import type { InteractionType } from "@/domain/types";
+import type { InteractionParameters, InteractionType } from "@/domain/types";
 
 const INTERACTION_MAP: Record<string, InteractionType> = {
   beside: "beside",
@@ -80,21 +80,43 @@ const INTERACTION_MAP: Record<string, InteractionType> = {
 
 export interface ResolvedInteraction {
   /** Editor-executable type, or undefined when the wording has no mapping. */
-  type?: InteractionType;
+  type?: InteractionType | (string & {});
+  /** Editable semantics extracted from the wording ("hug from behind"). */
+  parameters?: InteractionParameters;
   /** The director's original wording — always preserved for fallbacks. */
   raw: string;
   warning?: string;
 }
 
+/** Verbs that name a first-class custom interaction rather than a soft fallback. */
+const CUSTOM_VERBS = new Set([
+  "eat", "eats", "eating", "drink", "drinks", "drinking", "drive", "drives", "driving",
+  "ride", "rides", "riding", "carry", "carries", "carrying", "hold", "holds", "holding",
+  "sit", "sits", "sitting", "read", "reads", "reading", "wear", "wears", "wearing",
+  "kiss", "kisses", "kissing", "push", "pushes", "pushing", "pull", "pulls", "pulling",
+  "chase", "chases", "chasing", "fight", "fights", "fighting", "carry on back", "piggyback",
+]);
+
+const DIRECTION_PATTERN = /\bfrom (behind|the front|the side|the left|the right|above|below)\b/iu;
+
 export function resolveInteraction(raw: string | undefined): ResolvedInteraction | undefined {
   if (!raw) return undefined;
   const key = raw.trim().toLowerCase();
+  /**
+   * "hug from behind" is a hug with a direction, not an unknown wording: the
+   * direction is editable semantics (v0.2), so it is extracted into parameters
+   * instead of killing the mapping.
+   */
+  const direction = key.match(DIRECTION_PATTERN)?.[0];
+  const withoutDirection = direction ? key.replace(DIRECTION_PATTERN, "").trim() : key;
   // Directors attach prepositions to the verb ("argues with", "leans on"…);
   // try the full wording, then the wording minus a trailing preposition.
-  const candidates = [key, key.replace(/\s+(with|to|at|against|on|onto|toward|towards)$/u, "")];
+  const candidates = [withoutDirection, withoutDirection.replace(/\s+(with|to|at|against|on|onto|toward|towards)$/u, "")];
+  const parameters: InteractionParameters | undefined = direction ? { direction } : undefined;
   for (const candidate of candidates) {
     const type = INTERACTION_MAP[candidate];
-    if (type) return { type, raw };
+    if (type) return { type, parameters, raw };
+    if (CUSTOM_VERBS.has(candidate)) return { type: candidate, parameters, raw };
   }
   return { raw, warning: `Unsupported interaction intent "${raw}"; falling back to placement + scene relationship.` };
 }

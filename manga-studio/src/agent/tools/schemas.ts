@@ -23,6 +23,22 @@ const panelIndex = z.number().int().min(1).max(12).describe("1-based panel numbe
  */
 const characterId = z.string().min(1).max(64).optional();
 
+/**
+ * Editable interaction semantics (v0.2). The same fields the Inspector
+ * exposes; every one is optional and omitted fields stay unchanged.
+ */
+const interactionParameters = z
+  .object({
+    direction: z.string().max(60).describe("e.g. 'from behind', 'from the side'"),
+    facing: z.string().max(60),
+    hand: z.enum(["auto", "left", "right", "both"]),
+    intensity: z.number().min(0).max(1),
+    distance: z.number().min(0).max(1),
+    customInstruction: z.string().max(200),
+  })
+  .partial()
+  .optional();
+
 export const toolSchemas = {
   create_character: z.object({
     name: z.string().min(1).max(80),
@@ -280,30 +296,50 @@ export const toolSchemas = {
   }),
 
   /**
-   * Coordinated multi-character action. NOT two independent pose requests:
+   * Coordinated multi-participant action. NOT two independent pose requests:
    * the interaction owns the geometry between the participants, and a tightly
-   * coupled one is drawn once with both identity references.
+   * coupled one is drawn once with every participant's reference.
+   *
+   * `interaction` is a verb, not a closed enum: known types render with known
+   * semantics, and a custom verb ("eat", "drive") is a first-class interaction
+   * too. The target may be a character OR a library prop/background asset.
    */
   create_interaction: z.object({
     panel: panelIndex,
-    interaction: z.enum([
-      "beside",
-      "face_to_face",
-      "look_at",
-      "hold_hands",
-      "hug",
-      "high_five",
-      "hand_object",
-      "lean_on",
-      "walk_together",
-      "sit_together",
-    ]),
+    interaction: z
+      .string()
+      .min(1)
+      .max(60)
+      .describe(
+        "beside|face_to_face|look_at|hold_hands|hug|high_five|hand_object|lean_on|walk_together|sit_together, or a custom verb like 'eat' or 'drive'",
+      ),
     subjectCharacterName: z.string().min(1).max(80),
     subjectCharacterId: characterId,
-    targetCharacterName: z.string().min(1).max(80),
+    targetCharacterName: z.string().min(1).max(80).optional(),
     targetCharacterId: characterId,
+    /** Library prop/background name when the target is an object or a scene. */
+    targetAssetName: z.string().min(1).max(80).optional(),
     /** Expression per participant, e.g. {"Yuri":"smile"}. */
     expressions: z.record(z.string().max(80), z.string().max(60)).optional(),
+    parameters: interactionParameters,
+  }),
+
+  /**
+   * Edit an interaction that already exists — the Agent-side twin of the
+   * Inspector's editor, so "hug" → "hug from behind" is one step, never a
+   * delete-and-recreate.
+   */
+  update_interaction: z.object({
+    panel: panelIndex,
+    subjectCharacterName: z.string().min(1).max(80),
+    subjectCharacterId: characterId,
+    /** The interaction's current type, used to find it (e.g. "hug"). */
+    interaction: z.string().min(1).max(60),
+    targetCharacterName: z.string().min(1).max(80).optional(),
+    targetAssetName: z.string().min(1).max(80).optional(),
+    /** Rename the action itself (e.g. "hug" → "carry"). */
+    newInteraction: z.string().min(1).max(60).optional(),
+    parameters: interactionParameters,
   }),
 
   attach_bubble: z.object({
@@ -417,6 +453,7 @@ const PANEL_TOOLS = new Set<ToolName>([
   "place_manga_effect",
   "generate_manga_effect",
   "create_interaction",
+  "update_interaction",
 ]);
 
 /**
@@ -522,7 +559,8 @@ Available tools (call only these, with exactly these argument shapes):
 - attach_bubble {panel, characterName, bubbleType, text} — add dialogue that BELONGS to a character, so the tail keeps pointing at them when they move. Prefer this over add_speech_bubble whenever a speaker is known.
 - place_manga_effect {panel, query, category?, targetCharacterName?, text?} — search the Manga Language Library and place the best existing match. ALWAYS try this before generating an effect: the library already contains bubbles, speed/focus lines, tones, emotion marks and SFX, plus everything the creator uploaded or generated earlier. Naming a character attaches the effect so it follows them.
 - generate_manga_effect {description, category, name?, panel?, targetCharacterName?} — create a NEW manga-language asset with AI and add it to the library. Plan this ONLY when the library genuinely has no suitable asset; the runtime rejects it when a match already exists. Say in the step reason what is missing.
-- create_interaction {panel, interaction, subjectCharacterName, targetCharacterName, expressions?} — make two characters do something together (hug, hold hands, look at, walk together…). ALWAYS use this for a multi-character action. Never plan two separate pose or generation steps to fake one: an interaction owns the geometry between the participants, and a hug is drawn once using both characters as references. Expressions may be set for each participant in the same step.
+- create_interaction {panel, interaction, subjectCharacterName, targetCharacterName?|targetAssetName?, expressions?, parameters?} — make participants do something together (hug, hold hands, look at, walk together…). ALWAYS use this for a multi-participant action. Never plan two separate pose or generation steps to fake one: an interaction owns the geometry between the participants, and a hug is drawn once using both characters as references. The target may be a character OR a library prop/background named in targetAssetName ("Mika eats the ramen bowl"). Custom verbs are welcome ("eat", "drive"). parameters set editable semantics: direction ("from behind"), hand, intensity, distance, customInstruction. Expressions may be set for each participant in the same step.
+- update_interaction {panel, subjectCharacterName, interaction, targetCharacterName?|targetAssetName?, newInteraction?, parameters?} — edit an interaction that ALREADY exists in the panel: change its action (newInteraction) or its semantics (parameters, e.g. direction "from behind"). Use this instead of remove+create when the creator asks to CHANGE an interaction.
 - remove_items {panel, kind?} — remove items from a panel (only when the user asked for replacement/clearing).
 - edit_asset_region {panel, characterName?|assetName?, instruction} — locally re-render part of an existing placed asset (recolour, repair, small costume/detail change). The original asset is preserved; the edited variation replaces it in that panel. Not for pose/expression changes — use set_character_slot for those.
 `.trim();
