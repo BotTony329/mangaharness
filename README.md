@@ -4,6 +4,8 @@ A local-first, bring-your-own-key manga creation harness: characters, panels,
 camera, dialogue, tone, interactions and a natural-language Manga Agent — all
 in one editor that runs entirely on your machine.
 
+**[🌐 Website](https://kumanga-website.vercel.app/)** · **[Try the live studio](https://mangaharness.vercel.app)** · MIT license
+
 Created and maintained by **[BotTony329](https://github.com/BotTony329)**.
 
 ## Quick Start
