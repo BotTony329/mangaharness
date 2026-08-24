@@ -27,7 +27,7 @@ import { resolveIdentityReferences, type IdentityReference } from "@/characters/
 import { IdentityReferenceRepair } from "./IdentityReferenceRepair";
 import { INTERACTION_LABELS, evaluateInteractionCapability, interactionLabel } from "@/domain/interactions";
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
-import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/domain/types";
+import type { AssetInstance, ID, InteractionType, ProjectDocument, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { characterIdOfInstance } from "@/characters/identity";
 
@@ -62,30 +62,26 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   const preselected = alsoSelected.map((candidate) => characterOf(doc, candidate)).filter(Boolean) as ID[];
 
   /**
-   * A shift-selected PROP or BACKGROUND is also a partner — the v0.2 contract.
+   * A PROP or BACKGROUND in the panel is also a partner — the v0.2 contract.
    * What the creator can DO with it comes from its declared affordances/zones,
-   * never from a name guess ("ramen" → eat would be exactly that).
+   * never from a name guess ("ramen" → eat would be exactly that). A
+   * shift-selected asset wins; otherwise every prop/background in the panel is
+   * offered directly, so a lone character in a scene is never a dead end.
    */
-  const partnerAssetItem = alsoSelected.find((candidate) => !characterOf(doc, candidate));
-  const partnerAsset = partnerAssetItem ? doc.assets[partnerAssetItem.sourceAssetId] : undefined;
-  const partnerKind =
-    partnerAsset?.category === "prop" ? ("object" as const) : partnerAsset?.category === "background" ? ("scene" as const) : null;
-
-  /** Verbs for an object/scene partner, in the creator's words. */
-  const assetVerbs: string[] = (() => {
-    if (!partnerAsset || !partnerKind) return [];
-    if (partnerKind === "object") return partnerAsset.metadata?.affordances?.length ? partnerAsset.metadata.affordances : ["hold"];
-    const zones = partnerAsset.metadata?.zones ?? [];
-    const zoneVerbs: Record<string, string> = {
-      "driver-seat": "drive",
-      "passenger-seat": "ride in",
-      chair: "sit on",
-      doorway: "stand in",
-      desk: "sit at",
-      bed: "lie on",
-    };
-    const verbs = zones.map((zone) => zoneVerbs[zone]).filter(Boolean) as string[];
-    return verbs.length > 0 ? verbs : ["enter"];
+  const assetPartners = (() => {
+    const seen = new Set<ID>();
+    const items = [...alsoSelected, ...(doc.panels[item.panelId]?.itemIds ?? []).map((id) => doc.items[id])];
+    const partners: { assetId: ID; name: string; kind: "object" | "scene"; verbs: string[] }[] = [];
+    for (const candidate of items) {
+      if (candidate?.kind !== "asset" || candidate.id === item.id || characterOf(doc, candidate)) continue;
+      const asset = doc.assets[candidate.sourceAssetId];
+      if (!asset || seen.has(asset.id)) continue;
+      const kind = asset.category === "prop" ? ("object" as const) : asset.category === "background" ? ("scene" as const) : null;
+      if (!kind) continue;
+      seen.add(asset.id);
+      partners.push({ assetId: asset.id, name: asset.name, kind, verbs: verbsFor(asset, kind) });
+    }
+    return partners;
   })();
 
   const start = async (type: InteractionType, partnerCharacterId?: ID) => {
@@ -144,9 +140,8 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     }
   };
 
-  const startAsset = async (verb: string) => {
-    if (!partnerAsset || !partnerKind) return;
-    setBusy(verb);
+  const startAsset = async (verb: string, partner: { assetId: ID; kind: "object" | "scene" }) => {
+    setBusy(`${partner.assetId}:${verb}`);
     setError(null);
     setRepair(null);
     try {
@@ -161,7 +156,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         participantIds: [subject],
         participants: [
           { id: subject, kind: "character", role: "initiator" },
-          { id: partnerAsset.id, kind: partnerKind, role: "target" },
+          { id: partner.assetId, kind: partner.kind, role: "target" },
         ],
         type: verb,
         source: "manual",
@@ -227,7 +222,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
     );
   };
 
-  if (partners.length === 0 && preselected.length === 0 && assetVerbs.length === 0) {
+  if (partners.length === 0 && preselected.length === 0 && assetPartners.length === 0) {
     return (
       <div className="rounded-lg p-2.5" style={{ background: "var(--bg-elevated)" }}>
         <p className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
@@ -252,24 +247,25 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         )}
       </div>
 
-      {/* Object / scene partner: verbs come from the asset's own affordances. */}
-      {partnerAsset && assetVerbs.length > 0 && (
-        <div className="mb-1.5">
+      {/* Object / scene partners in this panel: verbs come from each asset's
+          own affordances/zones, never from a name guess. */}
+      {assetPartners.map((partner) => (
+        <div className="mb-1.5" key={partner.assetId}>
           <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
-            {doc.characters[subject]?.name} + {partnerAsset.name}
+            {doc.characters[subject]?.name} + {partner.name}
           </p>
           <div className="flex flex-wrap gap-1">
-            {assetVerbs.map((verb) => (
+            {partner.verbs.map((verb) => (
               <button
                 key={verb}
                 disabled={busy !== null}
                 className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors disabled:opacity-40"
                 style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
-                onClick={() => void startAsset(verb)}
+                onClick={() => void startAsset(verb, partner)}
                 title={`${interactionLabel(verb)} — needs one AI generation`}
               >
                 {interactionLabel(verb)}
-                {busy === verb ? (
+                {busy === `${partner.assetId}:${verb}` ? (
                   <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" style={{ color: "var(--accent-text)" }} />
                 ) : (
                   <span className="flex items-center gap-0.5 text-[8px]" style={{ color: "var(--accent-text)" }}>
@@ -281,7 +277,7 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
             ))}
           </div>
         </div>
-      )}
+      ))}
 
       {preselected.length > 0 && (
         <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
@@ -344,6 +340,22 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   );
 }
 
+
+/** The partner's placed instance in this panel, when they have one. */
+function verbsFor(asset: SourceAsset, kind: "object" | "scene"): string[] {
+  if (kind === "object") return asset.metadata?.affordances?.length ? asset.metadata.affordances : ["hold"];
+  const zones = asset.metadata?.zones ?? [];
+  const zoneVerbs: Record<string, string> = {
+    "driver-seat": "drive",
+    "passenger-seat": "ride in",
+    chair: "sit on",
+    doorway: "stand in",
+    desk: "sit at",
+    bed: "lie on",
+  };
+  const verbs = zones.map((zone) => zoneVerbs[zone]).filter(Boolean) as string[];
+  return verbs.length > 0 ? verbs : ["enter"];
+}
 
 /** The partner's placed instance in this panel, when they have one. */
 function partnerItemFor(doc: ProjectDocument, characterId: ID, panelId: ID) {
