@@ -52,6 +52,12 @@ export interface InteractionRequest {
   source?: "manual" | "agent" | "preset";
   /** Expressions to apply per participant, when the request named any. */
   expressions?: Record<ID, string>;
+  /**
+   * Default hides the participant sprites once the composite lands. "Keep
+   * originals" stages nothing off — the creator manages visibility themselves.
+   * Never destructive either way.
+   */
+  keepOriginals?: boolean;
 }
 
 export interface InteractionOutcome {
@@ -186,7 +192,7 @@ export async function executeInteraction(request: InteractionRequest): Promise<I
 
   // ── Joint render ──
   const render = await renderInteraction(interactionId, request.expressions);
-  const placedItemId = placeInteractionRender(interactionId, render.assetId);
+  const placedItemId = placeInteractionRender(interactionId, render.assetId, { keepOriginals: request.keepOriginals });
   return {
     interactionId,
     capability,
@@ -344,7 +350,14 @@ export async function renderInteraction(
     category: "character",
     name: `${names.join(" + ")} · ${interactionLabel(interaction.type)}`,
     prompt,
-    metadata: styleMetadata(style),
+    // The asset itself knows what it IS: which interaction, which words,
+    // which references — not just which style.
+    metadata: {
+      ...styleMetadata(style),
+      interactionId,
+      interactionPrompt: interaction.parameters?.customInstruction,
+      referenceAssetIds: model.participantReferenceAssetIds,
+    },
   });
 
   // Provenance: the system must know this image contains BOTH characters.
@@ -370,16 +383,22 @@ export async function renderInteraction(
  * so undo and "discard this interaction" both restore the panel exactly as it
  * was — and so a creator can bring one back by clicking the eye in Layers.
  */
-export function placeInteractionRender(interactionId: ID, assetId: ID): ID | undefined {
+export function placeInteractionRender(
+  interactionId: ID,
+  assetId: ID,
+  options?: { keepOriginals?: boolean },
+): ID | undefined {
   const doc = useEditorStore.getState().doc;
   const interaction = doc?.interactions[interactionId];
   if (!doc || !interaction) return undefined;
-  for (const characterId of interaction.participantIds) {
-    const item = instanceFor(useEditorStore.getState().doc!, interaction.panelId, characterId);
-    if (!item) continue;
-    useEditorStore
-      .getState()
-      .dispatch({ type: "set-instance-props", instanceId: item.id, patch: { visible: false } });
+  if (!options?.keepOriginals) {
+    for (const characterId of interaction.participantIds) {
+      const item = instanceFor(useEditorStore.getState().doc!, interaction.panelId, characterId);
+      if (!item) continue;
+      useEditorStore
+        .getState()
+        .dispatch({ type: "set-instance-props", instanceId: item.id, patch: { visible: false } });
+    }
   }
   const placed = useEditorStore
     .getState()
@@ -420,7 +439,13 @@ export async function rerenderInteraction(interactionId: ID): Promise<RenderOutc
         useEditorStore.getState().dispatch({ type: "set-instance-props", instanceId: item.id, patch: { visible: false } });
       }
     }
-    placeInteractionRender(interactionId, outcome.assetId);
+    // If the creator deliberately re-showed the originals (or kept them at
+    // creation), a redraw must not stage them off again.
+    const originalsVisible = interaction.participantIds.some((characterId) => {
+      const placed = instanceFor(doc, interaction.panelId, characterId);
+      return placed?.visible !== false;
+    });
+    placeInteractionRender(interactionId, outcome.assetId, { keepOriginals: originalsVisible });
   }
   return outcome;
 }

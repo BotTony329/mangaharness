@@ -96,6 +96,8 @@ function InteractionRow({
   const [open, setOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** Draft of the free-text prompt; committed on Regenerate or blur. */
+  const [promptDraft, setPromptDraft] = useState(interaction.parameters?.customInstruction ?? "");
 
   const participants = interactionParticipants(interaction);
   const others = participants.filter((_, index) => index > 0);
@@ -135,6 +137,12 @@ function InteractionRow({
   };
 
   const regenerate = async () => {
+    // Commit the draft prompt first: editing then hitting Regenerate must not
+    // redraw with the previous wording.
+    const committed = promptDraft.trim();
+    if (committed !== (interaction.parameters?.customInstruction ?? "")) {
+      patchParameters("customInstruction", committed || undefined);
+    }
     setBusy(true);
     onError(null);
     try {
@@ -171,6 +179,29 @@ function InteractionRow({
       }
     }
     store.dispatch({ type: "remove-interaction", interactionId: interaction.id });
+  };
+
+  /**
+   * Show/Hide the original participant sprites. Hiding is staging, never
+   * deletion — undo and the Layers eye both restore them.
+   */
+  const originals = (doc.panels[interaction.panelId]?.itemIds ?? [])
+    .map((id) => doc.items[id])
+    .filter(
+      (candidate): candidate is AssetInstance =>
+        candidate?.kind === "asset" &&
+        interaction.participantIds.includes(characterIdOfInstance(doc, candidate) ?? ""),
+    );
+  const originalsVisible = originals.some((candidate) => candidate.visible !== false);
+  const toggleOriginals = () => {
+    const store = useEditorStore.getState();
+    for (const candidate of originals) {
+      store.dispatch({
+        type: "set-instance-props",
+        instanceId: candidate.id,
+        patch: { visible: !originalsVisible },
+      });
+    }
   };
 
   const field = (label: string, control: React.ReactNode) => (
@@ -212,7 +243,10 @@ function InteractionRow({
         </span>
         <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-muted)" }}>
           — {names}
-          {parameters.direction ? ` · ${parameters.direction}` : ""}
+          {parameters.customInstruction
+            ? ` · “${parameters.customInstruction.length > 48 ? `${parameters.customInstruction.slice(0, 48)}…` : parameters.customInstruction}”`
+            : ""}
+          {!parameters.customInstruction && parameters.direction ? ` · ${parameters.direction}` : ""}
           {sceneParticipants[0]?.zone ? ` · ${sceneParticipants[0].zone}` : ""}
         </span>
         <span className="text-[9px] text-zinc-500">{open ? "▾" : "▸"}</span>
@@ -220,71 +254,60 @@ function InteractionRow({
 
       {open && (
         <div className="mt-2 space-y-1.5 border-t pt-2" style={{ borderColor: "var(--border-subtle)" }}>
-          {field(
-            "Interaction",
-            <select
-              className="w-full rounded-md px-1.5 py-1 text-[10px]"
+          {/* The creator's own words are the source of truth; structured fields
+              below are provenance, not the primary interface. */}
+          <label className="block">
+            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              Describe the interaction
+            </span>
+            <textarea
+              className="mt-0.5 w-full rounded-md px-1.5 py-1 text-[10px] leading-4"
               style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
-              value={interaction.type}
-              onChange={(event) =>
-                useEditorStore.getState().dispatch({
-                  type: "update-interaction",
-                  interactionId: interaction.id,
-                  patch: { type: event.target.value },
-                })
-              }
+              rows={2}
+              placeholder={`e.g. "${names.split(" + ")[0] ?? "She"} is entering the scene from the left"`}
+              value={promptDraft}
+              onChange={(event) => setPromptDraft(event.target.value)}
+              onBlur={() => patchParameters("customInstruction", promptDraft.trim() || undefined)}
+            />
+          </label>
+
+          <div className="flex gap-1.5 pt-0.5">
+            {strategy === "GENERATE" ? (
+              <button
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-1 rounded-md py-1 text-[10px] disabled:opacity-40"
+                style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
+                onClick={() => void regenerate()}
+                title="Draw this interaction with its current prompt"
+              >
+                {busy ? (
+                  <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" />
+                ) : (
+                  <GenerateIcon size={10} strokeWidth={2.5} />
+                )}
+                Regenerate
+              </button>
+            ) : (
+              <p className="flex-1 py-1 text-center text-[9px]" style={{ color: "var(--success)" }}>
+                Instant — arranged live, no image to regenerate
+              </p>
+            )}
+            <button
+              className="rounded-md px-2 py-1 text-[10px] transition-colors hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)" }}
+              onClick={toggleOriginals}
+              title="Show or hide the original participant artwork (never deletes)"
             >
-              {INTERACTION_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {INTERACTION_LABELS[type]}
-                </option>
-              ))}
-              {!isKnownType && <option value={interaction.type}>{interactionLabel(interaction.type)}</option>}
-            </select>,
-          )}
-
-          {field(
-            participants.some((p) => p.kind !== "character") ? "Target" : "With",
-            <p className="px-1.5 py-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
-              {names}
-            </p>,
-          )}
-
-          {field("Direction", select(parameters.direction, DIRECTIONS, (value) => patchParameters("direction", value)))}
-
-          {/* The defining knob of an object/scene interaction stays in the simple view. */}
-          {objectParticipants.map((participant) => {
-            const index = participants.indexOf(participant);
-            return (
-              <div key={`socket-${participant.id}`}>
-                {field(
-                  `${participantName(doc, "object", participant.id)} · Socket`,
-                  select(
-                    participant.socket,
-                    [...new Set([...OBJECT_SOCKETS, ...(doc.assets[participant.id]?.metadata?.affordances ?? [])])],
-                    (value) => patchParticipant(index, "socket", value),
-                  ),
-                )}
-              </div>
-            );
-          })}
-          {sceneParticipants.map((participant) => {
-            const index = participants.indexOf(participant);
-            return (
-              <div key={`zone-${participant.id}`}>
-                {field(
-                  "Zone",
-                  select(
-                    participant.zone,
-                    [...new Set([...SCENE_ZONES, ...(doc.assets[participant.id]?.metadata?.zones ?? [])])],
-                    (value) => patchParticipant(index, "zone", value),
-                  ),
-                )}
-              </div>
-            );
-          })}
-          {objectParticipants.length > 0 &&
-            field("Hand", select(parameters.hand, HANDS, (value) => patchParameters("hand", value)))}
+              {originalsVisible ? "Hide Originals" : "Show Originals"}
+            </button>
+            <button
+              className="rounded-md px-2 py-1 text-[10px] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+              style={{ color: "var(--text-secondary)" }}
+              onClick={remove}
+            >
+              Delete
+            </button>
+          </div>
 
           <button
             className="text-[10px] text-zinc-500 hover:text-zinc-300"
@@ -295,7 +318,61 @@ function InteractionRow({
 
           {showAdvanced && (
             <div className="space-y-1.5">
+              {field(
+                "Action type",
+                <select
+                  className="w-full rounded-md px-1.5 py-1 text-[10px]"
+                  style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+                  value={interaction.type}
+                  onChange={(event) =>
+                    useEditorStore.getState().dispatch({
+                      type: "update-interaction",
+                      interactionId: interaction.id,
+                      patch: { type: event.target.value },
+                    })
+                  }
+                >
+                  {INTERACTION_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {INTERACTION_LABELS[type]}
+                    </option>
+                  ))}
+                  {!isKnownType && <option value={interaction.type}>{interactionLabel(interaction.type)}</option>}
+                </select>,
+              )}
+              {field("Direction", select(parameters.direction, DIRECTIONS, (value) => patchParameters("direction", value)))}
               {field("Facing", select(parameters.facing, FACINGS, (value) => patchParameters("facing", value)))}
+              {field("Hand", select(parameters.hand, HANDS, (value) => patchParameters("hand", value)))}
+              {objectParticipants.map((participant) => {
+                const index = participants.indexOf(participant);
+                return (
+                  <div key={`socket-${participant.id}`}>
+                    {field(
+                      `${participantName(doc, "object", participant.id)} · Socket`,
+                      select(
+                        participant.socket,
+                        [...new Set([...OBJECT_SOCKETS, ...(doc.assets[participant.id]?.metadata?.affordances ?? [])])],
+                        (value) => patchParticipant(index, "socket", value),
+                      ),
+                    )}
+                  </div>
+                );
+              })}
+              {sceneParticipants.map((participant) => {
+                const index = participants.indexOf(participant);
+                return (
+                  <div key={`zone-${participant.id}`}>
+                    {field(
+                      "Zone",
+                      select(
+                        participant.zone,
+                        [...new Set([...SCENE_ZONES, ...(doc.assets[participant.id]?.metadata?.zones ?? [])])],
+                        (value) => patchParticipant(index, "zone", value),
+                      ),
+                    )}
+                  </div>
+                );
+              })}
               {(["distance", "intensity"] as const).map((param) => (
                 <div key={param}>
                   {field(
@@ -311,8 +388,6 @@ function InteractionRow({
                   )}
                 </div>
               ))}
-              {objectParticipants.length === 0 &&
-                field("Hand", select(parameters.hand, HANDS, (value) => patchParameters("hand", value)))}
               {field(
                 "Contact",
                 <input
@@ -326,48 +401,8 @@ function InteractionRow({
                   }}
                 />,
               )}
-              {field(
-                "Custom Instruction",
-                <input
-                  className="w-full rounded-md px-1.5 py-1 text-[10px]"
-                  style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
-                  placeholder="e.g. she is laughing while being lifted"
-                  defaultValue={parameters.customInstruction ?? ""}
-                  onBlur={(event) => patchParameters("customInstruction", event.target.value.trim() || undefined)}
-                />,
-              )}
             </div>
           )}
-
-          <div className="flex gap-1.5 pt-1">
-            {strategy === "GENERATE" ? (
-              <button
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-1 rounded-md py-1 text-[10px] disabled:opacity-40"
-                style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
-                onClick={() => void regenerate()}
-                title="Draw this interaction with its current settings"
-              >
-                {busy ? (
-                  <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" />
-                ) : (
-                  <GenerateIcon size={10} strokeWidth={2.5} />
-                )}
-                Regenerate Interaction
-              </button>
-            ) : (
-              <p className="flex-1 py-1 text-center text-[9px]" style={{ color: "var(--success)" }}>
-                Instant — arranged live, no image to regenerate
-              </p>
-            )}
-            <button
-              className="rounded-md px-2 py-1 text-[10px] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-              style={{ color: "var(--text-secondary)" }}
-              onClick={remove}
-            >
-              Delete
-            </button>
-          </div>
         </div>
       )}
     </div>

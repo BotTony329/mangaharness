@@ -112,7 +112,10 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
             subjectCharacterName: beat.actor,
             targetCharacterName: beat.target,
             expressions: beat.expression ? { [beat.actor]: beat.expression } : undefined,
-            parameters: interaction.parameters,
+            // The director's exact wording reaches the render prompt; the mapped
+            // type and extracted direction are supporting structure, not a
+            // replacement for what was actually asked.
+            parameters: { ...interaction.parameters, customInstruction: beat.interaction },
           },
           reason: "Coordinated interaction",
         });

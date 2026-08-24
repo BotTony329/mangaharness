@@ -25,7 +25,7 @@ import { puppetForInstance } from "@/domain/puppetOps";
 import { executeInteraction } from "@/services/interaction";
 import { resolveIdentityReferences, type IdentityReference } from "@/characters/identityReference";
 import { IdentityReferenceRepair } from "./IdentityReferenceRepair";
-import { INTERACTION_LABELS, evaluateInteractionCapability, interactionLabel } from "@/domain/interactions";
+import { INTERACTION_LABELS, evaluateInteractionCapability, interactionLabel, interactionTypeFromPhrase } from "@/domain/interactions";
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
 import type { AssetInstance, ID, InteractionType, ProjectDocument, SourceAsset } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -44,6 +44,10 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   const [error, setError] = useState<string | null>(null);
   /** Set when a joint action stopped because somebody has no reference image. */
   const [repair, setRepair] = useState<{ action: string; references: IdentityReference[] } | null>(null);
+  const [description, setDescription] = useState("");
+  const [partnerKey, setPartnerKey] = useState<string | null>(null);
+  const [keepOriginals, setKeepOriginals] = useState(false);
+  const [showCreateAdvanced, setShowCreateAdvanced] = useState(false);
 
   const subject = characterOf(doc, item);
   if (!subject) return null;
@@ -172,6 +176,67 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
   };
 
   /**
+   * Free-text first (v0.2 UX convergence): the creator describes the action in
+   * their own words; the structured type is DERIVED from the sentence, never
+   * asked for. The sentence itself leads the generation prompt.
+   */
+  type FreePartner =
+    | { key: string; label: string; characterId: ID }
+    | { key: string; label: string; assetId: ID; kind: "object" | "scene" };
+  /** A shift-selected partner is the only candidate; otherwise every actor,
+      prop and background in the panel is on offer. */
+  const freeCandidates: FreePartner[] = (() => {
+    const characterIds = alsoSelected.length > 0 ? preselected.slice(0, 1) : partners.map((p) => p.characterId);
+    const characters: FreePartner[] = characterIds.map((id) => ({
+      key: `c:${id}`,
+      label: doc.characters[id]?.name ?? id,
+      characterId: id,
+    }));
+    const assets: FreePartner[] = assetPartners
+      .filter((partner) => alsoSelected.length === 0 || alsoSelected.some((c) => c.sourceAssetId === partner.assetId))
+      .map((partner) => ({ key: `a:${partner.assetId}`, label: partner.name, assetId: partner.assetId, kind: partner.kind }));
+    return [...characters, ...assets];
+  })();
+  const chosen = freeCandidates.find((candidate) => candidate.key === partnerKey) ?? freeCandidates[0];
+
+  const describe = async () => {
+    const text = description.trim();
+    if (!text || !chosen) return;
+    setBusy("custom");
+    setError(null);
+    setRepair(null);
+    try {
+      const participants =
+        "characterId" in chosen
+          ? [
+              { id: subject, kind: "character" as const, role: "initiator" },
+              { id: chosen.characterId, kind: "character" as const, role: "target" },
+            ]
+          : [
+              { id: subject, kind: "character" as const, role: "initiator" },
+              { id: chosen.assetId, kind: chosen.kind, role: "target" },
+            ];
+      const outcome = await executeInteraction({
+        panelId: item.panelId,
+        participantIds: participants.map((p) => p.id).filter((id) => doc.characters[id]),
+        participants,
+        type: interactionTypeFromPhrase(text) ?? text.split(/\s+/).slice(0, 3).join(" ").toLowerCase(),
+        parameters: { customInstruction: text },
+        source: "manual",
+        keepOriginals,
+      });
+      setDescription("");
+      if (outcome.placedItemId) {
+        useEditorStore.getState().select({ itemId: outcome.placedItemId, panelId: item.panelId });
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The interaction could not be created");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
    * Instant or Generate, decided by the SAME evaluator the service uses.
    *
    * A creator must be able to see the cost before clicking. "Instant" means the
@@ -247,8 +312,70 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
         )}
       </div>
 
-      {/* Object / scene partners in this panel: verbs come from each asset's
-          own affordances/zones, never from a name guess. */}
+      {/* Free-text first: describe the action, pick who it's with, generate.
+          Structured types below are quick actions, not the entry fee. */}
+      {freeCandidates.length > 0 && (
+        <div className="mb-2">
+          <p className="mb-1 text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+            With
+          </p>
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {freeCandidates.map((candidate) => (
+              <button
+                key={candidate.key}
+                className="rounded-md px-2 py-0.5 text-[10px] transition-colors"
+                style={
+                  chosen?.key === candidate.key
+                    ? { background: "var(--accent-soft)", color: "var(--accent-text)" }
+                    : { background: "var(--bg-app)", color: "var(--text-secondary)" }
+                }
+                onClick={() => setPartnerKey(candidate.key)}
+              >
+                {candidate.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="w-full rounded-md px-2 py-1.5 text-[11px] leading-4"
+            style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+            rows={2}
+            placeholder={`Describe the interaction… e.g. "${doc.characters[subject]?.name ?? "She"} is entering the scene from the left"`}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          <button
+            className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+            onClick={() => setShowCreateAdvanced((value) => !value)}
+          >
+            {showCreateAdvanced ? "Advanced ▾" : "Advanced ▸"}
+          </button>
+          {showCreateAdvanced && (
+            <label className="mt-1 flex items-center gap-1.5 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              <input
+                type="checkbox"
+                checked={keepOriginals}
+                onChange={(event) => setKeepOriginals(event.target.checked)}
+              />
+              Keep originals visible (default: originals are hidden, never deleted)
+            </label>
+          )}
+          <button
+            disabled={!description.trim() || busy !== null}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-[11px] font-medium transition-colors disabled:opacity-40"
+            style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
+            onClick={() => void describe()}
+          >
+            {busy === "custom" ? (
+              <SpinnerIcon size={11} strokeWidth={2} className="animate-spin" />
+            ) : (
+              <GenerateIcon size={11} strokeWidth={2.5} />
+            )}
+            Generate Interaction
+          </button>
+        </div>
+      )}
+
+      {/* Quick actions — presets, secondary to describing it yourself. */}
       {assetPartners.map((partner) => (
         <div className="mb-1.5" key={partner.assetId}>
           <p className="mb-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
@@ -286,6 +413,9 @@ export function InteractionControls({ item }: { item: AssetInstance }) {
       )}
       {(partners.length > 0 || preselected.length > 0) && (
         <>
+          <p className="mb-1 mt-1 text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+            Quick actions
+          </p>
           <div className="flex flex-wrap gap-1">{QUICK.map(button)}</div>
           {showMore && <div className="mt-1 flex flex-wrap gap-1">{MORE.map(button)}</div>}
           <button

@@ -188,6 +188,43 @@ describe("Golden CASE 2 — RAMEN, character eats an object", () => {
   });
 });
 
+describe("Free-text interaction — the creator's words lead the prompt", () => {
+  it("custom instruction becomes the first constraint, structure stays supporting", () => {
+    const s = studio();
+    const created = createInteraction(s.doc, {
+      panelId: s.panelId,
+      participantIds: [s.mikaId],
+      participants: [
+        { id: s.mikaId, kind: "character", role: "initiator" },
+        { id: s.ramenId, kind: "object", role: "target" },
+      ],
+      type: "eat",
+      parameters: { customInstruction: "Mika holds the ramen bowl with both hands and lifts it toward her face.", hand: "both" },
+      source: "manual",
+    });
+    const interaction = created.doc.interactions[created.interactionId];
+    const request = buildInteractionRenderRequest(created.doc, interaction, {});
+
+    // The sentence leads verbatim; the hand parameter supports, not duplicates.
+    expect(request.interactionConstraints[0]).toBe(
+      "Mika holds the ramen bowl with both hands and lifts it toward her face.",
+    );
+    expect(request.interactionConstraints.join(" ")).toContain("using both hands");
+    expect(request.interactionConstraints.join(" ")).not.toContain("Eat:");
+    expect(request.participantReferenceAssetIds).toEqual([s.mikaRefId, s.ramenId]);
+
+    // Editing the prompt busts the cache — a reworded interaction is a new drawing.
+    const edited = updateInteraction(created.doc, created.interactionId, {
+      parameters: { ...interaction.parameters, customInstruction: "Mika slurps the noodles, eyes closed." },
+    });
+    expect(keyOf(edited, created.interactionId)).not.toBe(keyOf(created.doc, created.interactionId));
+
+    // Persistence round-trip keeps the prompt.
+    const reloaded = deserializeProject(serializeProject(edited));
+    expect(reloaded.interactions[created.interactionId].parameters?.customInstruction).toContain("slurps");
+  });
+});
+
 describe("Golden CASE 3 — CAR, character drives a scene", () => {
   it("carries the driver-seat zone into the render request and the cache identity", () => {
     const s = studio();

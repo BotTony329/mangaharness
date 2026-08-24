@@ -679,14 +679,24 @@ export function buildInteractionRenderRequest(
     bed: "lying on the bed",
     doorway: "standing in the doorway",
   };
+  /**
+   * The creator's own words lead the prompt when present: "Yuri is entering
+   * the street from the left" carries more staging truth than any enum label.
+   * The structured label and parameters stay as supporting details, never as a
+   * replacement for the described action.
+   */
+  const custom = interaction.parameters?.customInstruction?.trim();
+  const supportingParameters = custom
+    ? { ...interaction.parameters, customInstruction: undefined }
+    : interaction.parameters;
   const interactionConstraints = [
-    `${interactionLabel(interaction.type)}: ${names.join(" and ")}.`,
+    custom ?? `${interactionLabel(interaction.type)}: ${names.join(" and ")}.`,
     ...(zone
       ? [
           `The character occupies the ${zone} zone of the scene${ZONE_ACTION[zone] ? `, ${ZONE_ACTION[zone]},` : ""} body and perspective matching it.`,
         ]
       : []),
-    ...describeInteractionParameters(interaction.parameters).map((part) => `Interaction detail — ${part}.`),
+    ...describeInteractionParameters(supportingParameters).map((part) => `Interaction detail — ${part}.`),
     "All participants occupy the same scene, at a consistent scale, from one viewpoint, with consistent lighting.",
   ];
 

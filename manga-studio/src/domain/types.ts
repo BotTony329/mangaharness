@@ -60,6 +60,10 @@ export interface AssetGenerationMetadata {
   affordances?: string[];
   /** Where a character can be IN this asset (scenes) — "driver-seat", "doorway". */
   zones?: string[];
+  /** The interaction this image was generated FOR (composite renders). */
+  interactionId?: ID;
+  /** The creator's own words that drove the interaction render. */
+  interactionPrompt?: string;
   characterId?: ID;
   pose?: string;
   expression?: string;
