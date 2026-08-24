@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * Existing interactions, editable.
+ * Existing interactions — browsable and editable from the Interactions tab.
  *
- * Creating an interaction was never the hard part — CHANGING one was. A hug
- * from behind is a different picture from a hug from the front, and until now
- * the only way to get there was delete-and-recreate. This surface edits the
- * interaction's semantics in place (type, direction, and in Advanced mode the
- * full parameter set), then re-draws through the same service the Agent uses.
+ * The tab leads with what EXISTS ("Hug — Yuri", "Drive — Car Interior"), not
+ * with creation buttons. Clicking a row opens its editor in place: action,
+ * direction, and an Advanced disclosure for the full semantics. Object and
+ * scene interactions surface their defining field in the simple view (Hand for
+ * an object, Zone for a scene), because that is the knob a creator reaches for.
  *
- * Simple mode stays two questions: WHAT are they doing, and FROM WHERE.
- * Everything else (facing, hand, intensity, sockets, zones, free instructions)
- * lives behind Advanced mode, matching the rest of the Inspector.
+ * The list answers for BOTH ways an interaction can be selected:
+ *   - a character instance is selected → their interactions;
+ *   - a composite render is selected (which is exactly what happens right
+ *     after a hug is drawn) → the interaction that produced it.
+ * Without the second path, creating an interaction left the creator staring at
+ * an image with no way to edit what it meant.
  */
 
 import { useState } from "react";
@@ -28,7 +31,6 @@ import { planInteractionStrategy, rerenderInteraction } from "@/services/interac
 import { GenerateIcon, SpinnerIcon } from "../ui/icons";
 import type { AssetInstance, CharacterInteraction, ID, InteractionParameters, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
-import { useUiStore } from "@/editor/uiStore";
 import { characterIdOfInstance } from "@/characters/identity";
 
 const DIRECTIONS = ["from the front", "from behind", "from the side", "from the left", "from the right"];
@@ -41,34 +43,110 @@ function participantName(doc: ProjectDocument, kind: string, id: ID): string {
     : (doc.assets[id]?.name ?? "Something");
 }
 
+/** Every interaction this selection should surface, deduplicated. */
+export function interactionsForItem(doc: ProjectDocument, item: AssetInstance): CharacterInteraction[] {
+  const found = new Map<ID, CharacterInteraction>();
+  const subject = item.kind === "asset" ? characterIdOfInstance(doc, item) : undefined;
+  if (subject) {
+    for (const interaction of interactionsInPanel(doc, item.panelId, subject)) found.set(interaction.id, interaction);
+  }
+  // A selected composite render stands for the interaction that produced it.
+  if (item.kind === "asset") {
+    const viaRender = Object.values(doc.interactionRenders ?? {})
+      .filter((render) => render.generatedAssetId === item.sourceAssetId)
+      .map((render) => doc.interactions[render.interactionId])
+      .filter((interaction): interaction is CharacterInteraction => Boolean(interaction));
+    for (const interaction of viaRender) found.set(interaction.id, interaction);
+  }
+  return [...found.values()];
+}
+
 export function InteractionEditor({ item }: { item: AssetInstance }) {
   const doc = useEditorStore((s) => s.doc)!;
-  const advanced = useUiStore((s) => s.advancedMode);
-  const [busyId, setBusyId] = useState<ID | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const subject = characterIdOfInstance(doc, item);
-  if (!subject) return null;
-
-  const interactions = interactionsInPanel(doc, item.panelId, subject);
+  const interactions = interactionsForItem(doc, item);
   if (interactions.length === 0) return null;
 
-  const patch = (interactionId: ID, parameters: InteractionParameters) =>
-    useEditorStore.getState().dispatch({ type: "update-interaction", interactionId, patch: { parameters } });
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--accent-text)" }}>
+        Interactions
+      </p>
+      {interactions.map((interaction) => (
+        <InteractionRow key={interaction.id} interaction={interaction} onError={setError} />
+      ))}
+      {error && (
+        <p className="rounded-md p-1.5 text-[10px]" style={{ background: "var(--danger-soft)", color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
-  const redraw = async (interactionId: ID) => {
-    setBusyId(interactionId);
-    setError(null);
+function InteractionRow({
+  interaction,
+  onError,
+}: {
+  interaction: CharacterInteraction;
+  onError: (message: string | null) => void;
+}) {
+  const doc = useEditorStore((s) => s.doc)!;
+  const [open, setOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const participants = interactionParticipants(interaction);
+  const others = participants.filter((_, index) => index > 0);
+  const names = others.map((participant) => participantName(doc, participant.kind, participant.id)).join(" + ");
+  const parameters = interaction.parameters ?? {};
+  const isKnownType = (INTERACTION_TYPES as string[]).includes(interaction.type);
+  const objectParticipants = participants.filter((p) => p.kind === "object");
+  const sceneParticipants = participants.filter((p) => p.kind === "scene");
+
+  /** The same verdict the create path uses, so the cost label never lies. */
+  const strategy = planInteractionStrategy(doc, {
+    panelId: interaction.panelId,
+    participantIds: interaction.participantIds,
+    participants,
+    type: interaction.type,
+    parameters: interaction.parameters,
+  }).strategy;
+
+  const patchParameters = (key: keyof InteractionParameters, value: unknown) => {
+    const next = { ...parameters, [key]: value === "" || value === undefined ? undefined : value };
+    useEditorStore.getState().dispatch({
+      type: "update-interaction",
+      interactionId: interaction.id,
+      patch: { parameters: next },
+    });
+  };
+
+  const patchParticipant = (index: number, key: "socket" | "zone", value: string | undefined) => {
+    const nextParticipants = participants.map((entry, entryIndex) =>
+      entryIndex === index ? { ...entry, [key]: value } : entry,
+    );
+    useEditorStore.getState().dispatch({
+      type: "update-interaction",
+      interactionId: interaction.id,
+      patch: { participants: nextParticipants },
+    });
+  };
+
+  const regenerate = async () => {
+    setBusy(true);
+    onError(null);
     try {
-      await rerenderInteraction(interactionId);
+      await rerenderInteraction(interaction.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The interaction could not be redrawn");
+      onError(caught instanceof Error ? caught.message : "The interaction could not be redrawn");
     } finally {
-      setBusyId(null);
+      setBusy(false);
     }
   };
 
-  const remove = (interaction: CharacterInteraction) => {
+  const remove = () => {
     /**
      * Deleting the interaction returns the panel to how it looked before:
      * the composite hides, the participant sprites come back. Everything is a
@@ -76,7 +154,7 @@ export function InteractionEditor({ item }: { item: AssetInstance }) {
      */
     const store = useEditorStore.getState();
     const renderAssetIds = new Set(
-      Object.values(doc.interactionRenders)
+      Object.values(doc.interactionRenders ?? {})
         .filter((render) => render.interactionId === interaction.id)
         .map((render) => render.generatedAssetId),
     );
@@ -95,67 +173,14 @@ export function InteractionEditor({ item }: { item: AssetInstance }) {
     store.dispatch({ type: "remove-interaction", interactionId: interaction.id });
   };
 
-  return (
-    <div className="space-y-1.5">
-      {interactions.map((interaction) => (
-        <InteractionRow
-          key={interaction.id}
-          interaction={interaction}
-          busy={busyId === interaction.id}
-          anyBusy={busyId !== null}
-          advanced={advanced}
-          onPatch={patch}
-          onRedraw={redraw}
-          onRemove={remove}
-        />
-      ))}
-      {error && (
-        <p className="rounded-md p-1.5 text-[10px]" style={{ background: "var(--danger-soft)", color: "var(--danger)" }}>
-          {error}
-        </p>
-      )}
-    </div>
+  const field = (label: string, control: React.ReactNode) => (
+    <label className="block">
+      <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </span>
+      <div className="mt-0.5">{control}</div>
+    </label>
   );
-}
-
-function InteractionRow({
-  interaction,
-  busy,
-  anyBusy,
-  advanced,
-  onPatch,
-  onRedraw,
-  onRemove,
-}: {
-  interaction: CharacterInteraction;
-  busy: boolean;
-  anyBusy: boolean;
-  advanced: boolean;
-  onPatch: (interactionId: ID, parameters: InteractionParameters) => void;
-  onRedraw: (interactionId: ID) => Promise<void>;
-  onRemove: (interaction: CharacterInteraction) => void;
-}) {
-  const doc = useEditorStore((s) => s.doc)!;
-  const [open, setOpen] = useState(false);
-
-  const participants = interactionParticipants(interaction);
-  const names = participants.map((participant) => participantName(doc, participant.kind, participant.id)).join(" + ");
-  const parameters = interaction.parameters ?? {};
-  const isKnownType = (INTERACTION_TYPES as string[]).includes(interaction.type);
-
-  /** The same verdict the create path uses, so the cost label never lies. */
-  const strategy = planInteractionStrategy(doc, {
-    panelId: interaction.panelId,
-    participantIds: interaction.participantIds,
-    participants,
-    type: interaction.type,
-    parameters: interaction.parameters,
-  }).strategy;
-
-  const setParameter = (key: keyof InteractionParameters, value: unknown) => {
-    const next = { ...parameters, [key]: value === "" || value === undefined ? undefined : value };
-    onPatch(interaction.id, next);
-  };
 
   const select = (
     value: string | undefined,
@@ -180,57 +205,25 @@ function InteractionRow({
 
   return (
     <div className="rounded-lg p-2" style={{ background: "var(--bg-elevated)" }}>
-      <div className="flex items-center gap-1.5">
-        <button
-          className="flex flex-1 items-baseline gap-1.5 text-left"
-          onClick={() => setOpen((value) => !value)}
-          title={open ? "Collapse" : "Edit this interaction"}
-        >
-          <span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
-            {interactionLabel(interaction.type)}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-muted)" }}>
-            {names}
-            {parameters.direction ? ` · ${parameters.direction}` : ""}
-          </span>
-        </button>
-        {strategy === "GENERATE" ? (
-          <button
-            disabled={anyBusy}
-            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] disabled:opacity-40"
-            style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
-            onClick={() => void onRedraw(interaction.id)}
-            title="Draw this interaction with its current settings"
-          >
-            {busy ? (
-              <SpinnerIcon size={9} strokeWidth={2} className="animate-spin" />
-            ) : (
-              <GenerateIcon size={9} strokeWidth={2.5} />
-            )}
-            Redraw
-          </button>
-        ) : (
-          <span className="text-[8px]" style={{ color: "var(--success)" }}>
-            Instant
-          </span>
-        )}
-        <button
-          className="px-1 text-[10px] text-zinc-500 hover:text-[var(--danger)]"
-          title="Remove this interaction"
-          onClick={() => onRemove(interaction)}
-        >
-          ×
-        </button>
-      </div>
+      {/* List row: the interaction in one glance, click to edit. */}
+      <button className="flex w-full items-baseline gap-1.5 text-left" onClick={() => setOpen((value) => !value)}>
+        <span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
+          {interactionLabel(interaction.type)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-muted)" }}>
+          — {names}
+          {parameters.direction ? ` · ${parameters.direction}` : ""}
+          {sceneParticipants[0]?.zone ? ` · ${sceneParticipants[0].zone}` : ""}
+        </span>
+        <span className="text-[9px] text-zinc-500">{open ? "▾" : "▸"}</span>
+      </button>
 
       {open && (
         <div className="mt-2 space-y-1.5 border-t pt-2" style={{ borderColor: "var(--border-subtle)" }}>
-          <label className="block">
-            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Action
-            </span>
+          {field(
+            "Interaction",
             <select
-              className="mt-0.5 w-full rounded-md px-1.5 py-1 text-[10px]"
+              className="w-full rounded-md px-1.5 py-1 text-[10px]"
               style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
               value={interaction.type}
               onChange={(event) =>
@@ -247,99 +240,134 @@ function InteractionRow({
                 </option>
               ))}
               {!isKnownType && <option value={interaction.type}>{interactionLabel(interaction.type)}</option>}
-            </select>
-          </label>
+            </select>,
+          )}
 
-          <label className="block">
-            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Direction
-            </span>
-            <div className="mt-0.5">
-              {select(parameters.direction, DIRECTIONS, (value) => setParameter("direction", value))}
-            </div>
-          </label>
+          {field(
+            participants.some((p) => p.kind !== "character") ? "Target" : "With",
+            <p className="px-1.5 py-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              {names}
+            </p>,
+          )}
 
-          {advanced && (
-            <>
-              <label className="block">
-                <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                  Facing
-                </span>
-                <div className="mt-0.5">
-                  {select(parameters.facing, FACINGS, (value) => setParameter("facing", value))}
+          {field("Direction", select(parameters.direction, DIRECTIONS, (value) => patchParameters("direction", value)))}
+
+          {/* The defining knob of an object/scene interaction stays in the simple view. */}
+          {objectParticipants.map((participant) => {
+            const index = participants.indexOf(participant);
+            return (
+              <div key={`socket-${participant.id}`}>
+                {field(
+                  `${participantName(doc, "object", participant.id)} · Socket`,
+                  select(
+                    participant.socket,
+                    [...new Set([...OBJECT_SOCKETS, ...(doc.assets[participant.id]?.metadata?.affordances ?? [])])],
+                    (value) => patchParticipant(index, "socket", value),
+                  ),
+                )}
+              </div>
+            );
+          })}
+          {sceneParticipants.map((participant) => {
+            const index = participants.indexOf(participant);
+            return (
+              <div key={`zone-${participant.id}`}>
+                {field(
+                  "Zone",
+                  select(
+                    participant.zone,
+                    [...new Set([...SCENE_ZONES, ...(doc.assets[participant.id]?.metadata?.zones ?? [])])],
+                    (value) => patchParticipant(index, "zone", value),
+                  ),
+                )}
+              </div>
+            );
+          })}
+          {objectParticipants.length > 0 &&
+            field("Hand", select(parameters.hand, HANDS, (value) => patchParameters("hand", value)))}
+
+          <button
+            className="text-[10px] text-zinc-500 hover:text-zinc-300"
+            onClick={() => setShowAdvanced((value) => !value)}
+          >
+            {showAdvanced ? "Advanced ▾" : "Advanced ▸"}
+          </button>
+
+          {showAdvanced && (
+            <div className="space-y-1.5">
+              {field("Facing", select(parameters.facing, FACINGS, (value) => patchParameters("facing", value)))}
+              {(["distance", "intensity"] as const).map((param) => (
+                <div key={param}>
+                  {field(
+                    `${param} ${parameters[param] !== undefined ? `${Math.round((parameters[param] ?? 0) * 100)}%` : ""}`,
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      className="w-full"
+                      value={Math.round((parameters[param] ?? 0.5) * 100)}
+                      onChange={(event) => patchParameters(param, Number(event.target.value) / 100)}
+                    />,
+                  )}
                 </div>
-              </label>
-
-              <label className="block">
-                <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                  Hand
-                </span>
-                <div className="mt-0.5">{select(parameters.hand, HANDS, (value) => setParameter("hand", value))}</div>
-              </label>
-
-              {(["intensity", "distance"] as const).map((key) => (
-                <label className="block" key={key}>
-                  <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                    {key} {parameters[key] !== undefined ? `${Math.round((parameters[key] ?? 0) * 100)}%` : ""}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    className="mt-0.5 w-full"
-                    value={Math.round((parameters[key] ?? 0.5) * 100)}
-                    onChange={(event) => setParameter(key, Number(event.target.value) / 100)}
-                  />
-                </label>
               ))}
-
-              {participants.map((participant, index) => {
-                if (participant.kind === "character") return null;
-                const asset = doc.assets[participant.id];
-                const key = participant.kind === "object" ? "socket" : "zone";
-                const declared = asset?.metadata?.[participant.kind === "object" ? "affordances" : "zones"] ?? [];
-                const options = [...new Set([...(participant.kind === "object" ? OBJECT_SOCKETS : SCENE_ZONES), ...declared])];
-                return (
-                  <label className="block" key={`${participant.id}-${index}`}>
-                    <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                      {participantName(doc, participant.kind, participant.id)} {key}
-                    </span>
-                    <div className="mt-0.5">
-                      {select(participant[key], options, (value) => {
-                        const nextParticipants = participants.map((entry, entryIndex) =>
-                          entryIndex === index ? { ...entry, [key]: value } : entry,
-                        );
-                        useEditorStore.getState().dispatch({
-                          type: "update-interaction",
-                          interactionId: interaction.id,
-                          patch: { participants: nextParticipants },
-                        });
-                      })}
-                    </div>
-                  </label>
-                );
-              })}
-
-              <label className="block">
-                <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-                  Extra instruction
-                </span>
+              {objectParticipants.length === 0 &&
+                field("Hand", select(parameters.hand, HANDS, (value) => patchParameters("hand", value)))}
+              {field(
+                "Contact",
                 <input
-                  className="mt-0.5 w-full rounded-md px-1.5 py-1 text-[10px]"
+                  className="w-full rounded-md px-1.5 py-1 text-[10px]"
+                  style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+                  placeholder="e.g. shoulder, hand"
+                  defaultValue={(parameters.contact ?? []).join(", ")}
+                  onBlur={(event) => {
+                    const parts = event.target.value.split(",").map((part) => part.trim()).filter(Boolean);
+                    patchParameters("contact", parts.length > 0 ? parts : undefined);
+                  }}
+                />,
+              )}
+              {field(
+                "Custom Instruction",
+                <input
+                  className="w-full rounded-md px-1.5 py-1 text-[10px]"
                   style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
                   placeholder="e.g. she is laughing while being lifted"
                   defaultValue={parameters.customInstruction ?? ""}
-                  onBlur={(event) => setParameter("customInstruction", event.target.value.trim() || undefined)}
-                />
-              </label>
-            </>
+                  onBlur={(event) => patchParameters("customInstruction", event.target.value.trim() || undefined)}
+                />,
+              )}
+            </div>
           )}
 
-          {strategy === "GENERATE" && (
-            <p className="text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>
-              Changes apply to the next Redraw.
-            </p>
-          )}
+          <div className="flex gap-1.5 pt-1">
+            {strategy === "GENERATE" ? (
+              <button
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-1 rounded-md py-1 text-[10px] disabled:opacity-40"
+                style={{ background: "var(--accent-soft)", color: "var(--accent-text)" }}
+                onClick={() => void regenerate()}
+                title="Draw this interaction with its current settings"
+              >
+                {busy ? (
+                  <SpinnerIcon size={10} strokeWidth={2} className="animate-spin" />
+                ) : (
+                  <GenerateIcon size={10} strokeWidth={2.5} />
+                )}
+                Regenerate Interaction
+              </button>
+            ) : (
+              <p className="flex-1 py-1 text-center text-[9px]" style={{ color: "var(--success)" }}>
+                Instant — arranged live, no image to regenerate
+              </p>
+            )}
+            <button
+              className="rounded-md px-2 py-1 text-[10px] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+              style={{ color: "var(--text-secondary)" }}
+              onClick={remove}
+            >
+              Delete
+            </button>
+          </div>
         </div>
       )}
     </div>

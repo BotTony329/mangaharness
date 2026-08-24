@@ -18,7 +18,7 @@ import { PanelStageControls } from "./PanelStageControls";
 import { LayersPanel, PageLayersTree } from "./LayersPanel";
 import { RelationshipEditor } from "./RelationshipEditor";
 import { InteractionControls } from "./InteractionControls";
-import { InteractionEditor } from "./InteractionEditor";
+import { InteractionEditor, interactionsForItem } from "./InteractionEditor";
 import { useUiStore } from "@/editor/uiStore";
 import {
   DeleteIcon,
@@ -179,10 +179,61 @@ function MultiSelectInteractions({ item }: { item: PanelItem }) {
   );
 }
 
+/**
+ * The Interactions tab, ordered by what the creator came for.
+ *
+ * Existing interactions lead — browsable rows that open into editors. Creation
+ * sits under "+ New Interaction": open by default only when there is nothing
+ * to edit yet, collapsed once the panel has interactions so the list stays
+ * primary. Preset buttons are untouched inside their card.
+ */
+function InteractionsTab({ item, pairSelected }: { item: AssetInstance; pairSelected: boolean }) {
+  const doc = useEditorStore((state) => state.doc)!;
+  const advanced = useUiStore((state) => state.advancedMode);
+  const hasInteractions = interactionsForItem(doc, item).length > 0;
+  const [newOpen, setNewOpen] = useState(!hasInteractions);
+  const isPuppet = isPuppetInstance(doc, item.id);
+
+  return (
+    <>
+      <InteractionEditor item={item} />
+      {/* With a PAIR selected the banner above already offers creation;
+          showing the same buttons twice would suggest they differ. */}
+      {!pairSelected && (
+        <div>
+          <button
+            className="flex items-center gap-1 text-[10px] font-medium text-zinc-500 hover:text-zinc-300"
+            onClick={() => setNewOpen((value) => !value)}
+          >
+            {newOpen ? "▾" : "▸"} New Interaction
+          </button>
+          {newOpen && (
+            <div className="mt-1.5">
+              <InteractionControls item={item} />
+            </div>
+          )}
+        </div>
+      )}
+      {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
+    </>
+  );
+}
+
+/**
+ * A composite render selected on canvas: its interactions are editable here.
+ * Only a plain prop/background with no interaction gets the old hint.
+ */
+function CompositeOrHint({ item, attachment }: { item: AssetInstance; attachment: unknown }) {
+  const doc = useEditorStore((state) => state.doc)!;
+  const interactions = interactionsForItem(doc, item);
+  if (interactions.length > 0) return <InteractionEditor item={item} />;
+  if (attachment) return null;
+  return <Hint>Scene relationships are for characters. This object can be attached to one from its layer menu.</Hint>;
+}
+
 function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }) {
   const dispatch = (command: DomainCommand) => useEditorStore.getState().dispatch(command);
   const doc = useEditorStore((state) => state.doc);
-  const advanced = useUiStore((state) => state.advancedMode);
   const [tab, setTab] = useState<ItemTab>("look");
   const id = item.id;
   /**
@@ -192,7 +243,6 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
     */
    const characterId = doc ? characterIdOfInstance(doc, item) : undefined;
    const isCharacter = Boolean(characterId);
-  const isPuppet = Boolean(doc && item.kind === "asset" && isPuppetInstance(doc, item.id));
   // Subscribed, not read from getState(): this must re-render when the creator
   // shift-clicks a second actor.
   const pairSelected = useEditorStore((state) => (state.selection.alsoItemIds ?? []).length > 0);
@@ -419,23 +469,11 @@ function ItemInspector({ item, asset }: { item: PanelItem; asset?: SourceAsset }
       {tab === "scene" && item.kind === "asset" && (
         <>
           {isCharacter ? (
-            <>
-              {/* Interactions sit with the actor, because that is where a
-                  creator is when they decide two characters should do
-                  something together. With a PAIR selected the banner above
-                  already offers them, and showing the same buttons twice makes
-                  the creator wonder whether they do different things. */}
-              {!pairSelected && <InteractionControls item={item} />}
-              {/* Existing interactions are editable in place — type, direction,
-                  and in Advanced mode the full semantics — never delete-and-
-                  recreate to change "hug" into "hug from behind". */}
-              <InteractionEditor item={item} />
-              {isPuppet ? <PuppetControls item={item} /> : advanced ? <PoseEditControls item={item} /> : null}
-            </>
+            <InteractionsTab item={item} pairSelected={pairSelected} />
           ) : (
-            !item.attachment && (
-              <Hint>Scene relationships are for characters. This object can be attached to one from its layer menu.</Hint>
-            )
+            // A selected composite render is still "a character doing something
+            // with someone" — show its interactions instead of a dead-end hint.
+            <CompositeOrHint item={item} attachment={item.attachment} />
           )}
         </>
       )}
