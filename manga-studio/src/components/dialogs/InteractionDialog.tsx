@@ -21,7 +21,7 @@
 
 import { useState } from "react";
 import { assetRenderUrl } from "@/assets/renderSource";
-import { INTERACTION_LABELS } from "@/domain/interactions";
+import { interactionLabel } from "@/domain/interactions";
 import { placeInteractionRender, renderInteraction } from "@/services/interaction";
 import type { ID } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -46,7 +46,7 @@ function InteractionDialogInner({ interactionId, onClose }: { interactionId: ID;
   if (!doc || !interaction) return null;
 
   const names = interaction.participantIds.map((id) => doc.characters[id]?.name ?? id);
-  const title = `${names.join(" + ")} · ${INTERACTION_LABELS[interaction.type]}`;
+  const title = `${names.join(" + ")} · ${interactionLabel(interaction.type)}`;
   const previewUrl = assetId ? assetRenderUrl(doc.assets[assetId]) : undefined;
 
   const generate = async () => {
@@ -77,11 +77,11 @@ function InteractionDialogInner({ interactionId, onClose }: { interactionId: ID;
         className="w-[440px] rounded-lg bg-[var(--bg-elevated)] p-4 text-sm shadow-2xl shadow-black/50"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2 className="mb-1 font-semibold text-zinc-100">Creating {INTERACTION_LABELS[interaction.type]}</h2>
+        <h2 className="mb-1 font-semibold text-zinc-100">Creating {interactionLabel(interaction.type)}</h2>
         <p className="mb-3 text-xs text-zinc-500">Using {names.join(" and ")}</p>
 
         <div className="mb-3 rounded-md bg-[var(--bg-elevated)] p-2 text-[11px] leading-4 text-zinc-400">
-          A {INTERACTION_LABELS[interaction.type].toLowerCase()} needs the characters to overlap and occlude each
+          A {interactionLabel(interaction.type).toLowerCase()} needs the characters to overlap and occlude each
           other, which cannot be produced by moving existing artwork. It is drawn once, using both characters as
           references so neither identity is blended into the other.
         </div>

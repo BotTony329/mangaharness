@@ -16,6 +16,7 @@ import {
   recordInteractionRender,
   removeInteraction,
   setInteractionAnchor,
+  updateInteraction,
   type CreateInteractionInput,
 } from "./interactions";
 import {
@@ -164,6 +165,7 @@ export type DomainCommand =
   | { type: "add-relationship"; characterAId: ID; characterBId: ID; relationshipType: RelationshipType; label?: string }
   | { type: "remove-relationship"; relationshipId: ID }
   | { type: "create-interaction"; input: CreateInteractionInput }
+  | { type: "update-interaction"; interactionId: ID; patch: Parameters<typeof updateInteraction>[2] }
   | { type: "remove-interaction"; interactionId: ID }
   | { type: "set-interaction-anchor"; interactionId: ID; anchor: InteractionAnchor }
   | { type: "record-interaction-render"; input: Omit<InteractionRender, "id" | "createdAt"> }
@@ -403,6 +405,8 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
     }
     case "remove-interaction":
       return { doc: removeInteraction(doc, command.interactionId) };
+    case "update-interaction":
+      return { doc: updateInteraction(doc, command.interactionId, command.patch) };
     case "set-interaction-anchor":
       return { doc: setInteractionAnchor(doc, command.interactionId, command.anchor) };
     case "record-interaction-render": {

@@ -267,6 +267,36 @@ const MIGRATIONS: Record<number, Migration> = {
     interactionRenders: doc.interactionRenders ?? {},
     schemaVersion: 12,
   }),
+  /**
+   * v12 → v13: interactions gain full participants (objects/scenes) and
+   * editable parameters. Backfill `participants` from the character-only
+   * `participantIds` — first is the initiator, the rest are targets, matching
+   * how createInteraction always wrote them.
+   */
+  12: (doc) => ({
+    ...doc,
+    interactions: Object.fromEntries(
+      Object.entries(doc.interactions ?? {}).map(([id, interaction]) => {
+        const record = interaction as {
+          participants?: unknown;
+          participantIds?: string[];
+        };
+        if (record.participants) return [id, interaction];
+        return [
+          id,
+          {
+            ...record,
+            participants: (record.participantIds ?? []).map((participantId, index) => ({
+              id: participantId,
+              kind: "character",
+              role: index === 0 ? "initiator" : "target",
+            })),
+          },
+        ];
+      }),
+    ),
+    schemaVersion: 13,
+  }),
 };
 
 function migrate(input: unknown): ProjectDocument {

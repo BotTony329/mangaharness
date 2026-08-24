@@ -53,6 +53,13 @@ export interface AssetGenerationMetadata {
   prompt?: string;
   negativePrompt?: string;
   referenceAssetIds?: ID[];
+  /**
+   * What a character can DO with this asset (objects) — "hold", "eat", "draw".
+   * Affordances are declared metadata, never name-based guesses.
+   */
+  affordances?: string[];
+  /** Where a character can be IN this asset (scenes) — "driver-seat", "doorway". */
+  zones?: string[];
   characterId?: ID;
   pose?: string;
   expression?: string;
@@ -839,6 +846,40 @@ export type InteractionType =
   | "sit_together";
 
 /**
+ * What a participant IS in an interaction. Character↔Character was v0.1;
+ * v0.2 admits objects (props) and scenes (backgrounds) as full participants —
+ * spatial overlap is not interaction.
+ */
+export type InteractionParticipantKind = "character" | "object" | "scene";
+
+export interface InteractionParticipant {
+  /** Character id for kind "character"; asset id for "object"/"scene". */
+  id: ID;
+  kind: InteractionParticipantKind;
+  /** Who they are in the action: "initiator", "target", "driver"… */
+  role?: string;
+  /** Local connection point (character sockets, object sockets). */
+  socket?: string;
+  /** Scene occupancy point (driver-seat, doorway…), scenes only. */
+  zone?: string;
+}
+
+/**
+ * Editable parameters of an interaction — all optional, all semantic.
+ * Semantic controls, not joints: a creator says "from behind", not a rotation.
+ */
+export interface InteractionParameters {
+  direction?: string;
+  intensity?: number;
+  distance?: number;
+  contact?: string[];
+  facing?: string;
+  pose?: string;
+  hand?: "left" | "right" | "both" | "auto";
+  customInstruction?: string;
+}
+
+/**
  * How an interaction is currently realised.
  *
  * `synchronized` keeps participants as independent instances held together by
@@ -863,11 +904,25 @@ export interface InteractionAnchor {
 export interface CharacterInteraction {
   id: ID;
   panelId: ID;
-  /** Character ids, in role order. */
+  /**
+   * Character-kind participants, in role order — a COMPATIBILITY MIRROR of
+   * `participants` for the v0.1 read paths (joint render, puppet solving).
+   * The domain ops keep it in sync; read `participants` for the full list.
+   */
   participantIds: ID[];
-  type: InteractionType;
+  /** Canonical participant list, including objects and scenes (v0.2+). */
+  participants?: InteractionParticipant[];
+  /**
+   * A known InteractionType, or a custom verb ("eat", "drive") — object and
+   * scene interactions rarely fit the character-only vocabulary.
+   */
+  type: InteractionType | (string & {});
   /** e.g. { subject: yuriId, target: mioId } — who does what to whom. */
   roles?: Record<string, ID>;
+  /** Semantic, editable parameters (direction, intensity, …). */
+  parameters?: InteractionParameters;
+  /** Where this intent came from — manual Inspector, Agent, or a preset. */
+  source?: "manual" | "agent" | "preset";
   anchors?: InteractionAnchor[];
   renderMode?: InteractionRenderMode;
   status?: InteractionStatus;
@@ -924,4 +979,4 @@ export interface ProjectDocument {
   generationHistory: GenerationRecord[];
 }
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;

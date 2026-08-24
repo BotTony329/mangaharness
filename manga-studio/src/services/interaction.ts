@@ -29,7 +29,7 @@ import type { AssetInstance, ID, InteractionType, ProjectDocument } from "@/doma
 import { useEditorStore } from "@/editor/store";
 import { puppetForInstance } from "@/domain/puppetOps";
 import {
-  INTERACTION_LABELS,
+  interactionLabel,
   buildMultiCharacterRequest,
   evaluateInteractionCapability,
   findInteractionRender,
@@ -300,7 +300,7 @@ export async function renderInteraction(
     result,
     assetType: "character",
     category: "character",
-    name: `${names.join(" + ")} · ${INTERACTION_LABELS[interaction.type]}`,
+    name: `${names.join(" + ")} · ${interactionLabel(interaction.type)}`,
     prompt,
     metadata: styleMetadata(style),
   });

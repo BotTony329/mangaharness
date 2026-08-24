@@ -26,6 +26,8 @@ import type {
   CharacterInteraction,
   ID,
   InteractionAnchor,
+  InteractionParameters,
+  InteractionParticipant,
   InteractionRender,
   InteractionRenderMode,
   InteractionType,
@@ -200,11 +202,41 @@ export function evaluateInteractionCapability(input: CapabilityInput): Interacti
 
 // ─── Document operations ────────────────────────────────────────────────────
 
+/**
+ * Minimal socket/zone vocabulary (v0.2). Semantic connection points, not a
+ * physics rig: enough to SAY "right_hand → handle" or "body → driver-seat".
+ * Creators may also type a custom socket/zone — these are suggestions.
+ */
+export const CHARACTER_SOCKETS = ["left_hand", "right_hand", "both_hands", "body", "back", "head"] as const;
+export const OBJECT_SOCKETS = ["handle", "grip", "container", "surface"] as const;
+export const SCENE_ZONES = ["driver-seat", "passenger-seat", "chair", "doorway", "desk", "bed"] as const;
+
+/** Creator-facing label: known types get a name, custom verbs are prettified. */
+export function interactionLabel(type: string): string {
+  return INTERACTION_LABELS[type as InteractionType] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Full participant list, tolerating pre-v13 documents. */
+export function interactionParticipants(interaction: CharacterInteraction): InteractionParticipant[] {
+  return (
+    interaction.participants ??
+    interaction.participantIds.map((id, index) => ({
+      id,
+      kind: "character" as const,
+      role: index === 0 ? "initiator" : "target",
+    }))
+  );
+}
+
 export interface CreateInteractionInput {
   panelId: ID;
   participantIds: ID[];
-  type: InteractionType;
+  /** Full participant list when objects/scenes take part (v0.2+). */
+  participants?: InteractionParticipant[];
+  type: InteractionType | (string & {});
   roles?: Record<string, ID>;
+  parameters?: InteractionParameters;
+  source?: CharacterInteraction["source"];
   renderMode?: InteractionRenderMode;
   anchors?: InteractionAnchor[];
   status?: CharacterInteraction["status"];
@@ -215,17 +247,35 @@ export function createInteraction(
   input: CreateInteractionInput,
 ): { doc: ProjectDocument; interactionId: ID } {
   if (!doc.panels[input.panelId]) throw new Error(`Unknown panel: ${input.panelId}`);
-  if (input.participantIds.length < 2) throw new Error("An interaction needs at least two participants");
-  for (const id of input.participantIds) {
-    if (!doc.characters[id]) throw new Error(`Unknown character: ${id}`);
+  const participants = input.participants ?? input.participantIds.map((id, index) => ({
+    id,
+    kind: "character" as const,
+    role: index === 0 ? "initiator" : "target",
+  }));
+  if (participants.length < 2) throw new Error("An interaction needs at least two participants");
+  for (const participant of participants) {
+    if (participant.kind === "character") {
+      if (!doc.characters[participant.id]) throw new Error(`Unknown character: ${participant.id}`);
+    } else {
+      // Objects and scenes participate as library assets (prop / background).
+      const asset = doc.assets[participant.id];
+      if (!asset) throw new Error(`Unknown asset: ${participant.id}`);
+      const expected = participant.kind === "object" ? "prop" : "background";
+      if (asset.category !== expected) {
+        throw new Error(`Asset "${asset.name}" is a ${asset.category}, not a ${expected}`);
+      }
+    }
   }
   const next = cloneDoc(doc);
   const interaction: CharacterInteraction = {
     id: newId(),
     panelId: input.panelId,
-    participantIds: [...input.participantIds],
+    participantIds: participants.filter((p) => p.kind === "character").map((p) => p.id),
+    participants,
     type: input.type,
     roles: input.roles,
+    parameters: input.parameters,
+    source: input.source,
     anchors: input.anchors,
     renderMode: input.renderMode,
     status: input.status ?? "planned",
@@ -234,6 +284,37 @@ export function createInteraction(
   next.interactions[interaction.id] = interaction;
   touch(next);
   return { doc: next, interactionId: interaction.id };
+}
+
+/**
+ * Edit an existing interaction's semantics. Editing parameters invalidates a
+ * composite render's reuse claim implicitly through the cache key, which now
+ * includes the parameters — no stale image survives an edit.
+ */
+export function updateInteraction(
+  doc: ProjectDocument,
+  interactionId: ID,
+  patch: {
+    type?: CharacterInteraction["type"];
+    parameters?: InteractionParameters;
+    participants?: InteractionParticipant[];
+    roles?: Record<string, ID>;
+  },
+): ProjectDocument {
+  const current = doc.interactions[interactionId];
+  if (!current) throw new Error(`Unknown interaction: ${interactionId}`);
+  const participants = patch.participants ?? current.participants;
+  const next = cloneDoc(doc);
+  const interaction = next.interactions[interactionId];
+  if (patch.type !== undefined) interaction.type = patch.type;
+  if (patch.parameters !== undefined) interaction.parameters = patch.parameters;
+  if (patch.roles !== undefined) interaction.roles = patch.roles;
+  if (participants !== undefined) {
+    interaction.participants = participants;
+    interaction.participantIds = participants.filter((p) => p.kind === "character").map((p) => p.id);
+  }
+  touch(next);
+  return next;
 }
 
 export function removeInteraction(doc: ProjectDocument, interactionId: ID): ProjectDocument {
@@ -316,7 +397,7 @@ export interface MultiCharacterGenerationRequest {
   participantCharacterIds: ID[];
   /** One identity reference per participant, in the same order. Never merged. */
   participantReferenceAssetIds: ID[];
-  interactionType: InteractionType;
+  interactionType: string;
   roles?: Record<string, ID>;
   cameraContext?: string[];
   styleProfileId?: ID;
@@ -336,8 +417,15 @@ export interface MultiCharacterGenerationRequest {
  */
 export function interactionCacheKey(input: {
   participantCharacterIds: ID[];
-  type: InteractionType;
+  /**
+   * All participants including objects/scenes, as "kind:id". "Yuri+ramen"
+   * must not share a character-only cache entry.
+   */
+  participantKeys?: string[];
+  type: string;
   roles?: Record<string, ID>;
+  /** Editable semantics — a from-behind hug is not the same drawing as a front hug. */
+  parameters?: InteractionParameters;
   outfits: string[];
   view: string;
   styleProfileId?: ID;
@@ -346,16 +434,22 @@ export function interactionCacheKey(input: {
   /** Expression per participant, keyed by character id. */
   expressions?: Record<ID, string>;
 }): string {
-  const participants = [...input.participantCharacterIds].sort();
+  const participants = [...(input.participantKeys ?? input.participantCharacterIds)].sort();
   const roles = Object.entries(input.roles ?? {})
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([role, id]) => `${role}:${id}`)
     .join(",");
   const outfits = [...input.outfits].map((outfit) => outfit.trim().toLowerCase()).sort();
+  const parameters = Object.entries(input.parameters ?? {})
+    .filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join("+") : value}`)
+    .join(",");
   return [
     `p=${participants.join("+")}`,
     `t=${input.type}`,
     `r=${roles}`,
+    `m=${parameters}`,
     `o=${outfits.join("+")}`,
     `v=${input.view.trim().toLowerCase()}`,
     `s=${input.styleProfileId ?? "default"}`,
@@ -463,7 +557,7 @@ export function buildMultiCharacterRequest(
   };
 }
 
-function interactionConstraintsFor(type: InteractionType, names: string[]): string[] {
+function interactionConstraintsFor(type: string, names: string[]): string[] {
   const [first, second] = names;
   const shared = [
     "Both characters occupy the same scene, at the same scale, from one consistent viewpoint.",
@@ -483,6 +577,6 @@ function interactionConstraintsFor(type: InteractionType, names: string[]): stri
     case "high_five":
       return [`${first} and ${second} high-five, palms meeting at one point.`, ...shared];
     default:
-      return [`${first} and ${second} ${INTERACTION_LABELS[type].toLowerCase()}.`, ...shared];
+      return [`${first} and ${second} ${interactionLabel(type).toLowerCase()}.`, ...shared];
   }
 }
