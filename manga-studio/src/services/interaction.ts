@@ -228,7 +228,12 @@ export async function renderInteraction(
   const style = getStyleGenerationContext(doc());
   const cacheKey = interactionCacheKey({
     participantCharacterIds: participantIds,
-    participantKeys: participants.map((participant) => `${participant.kind}:${participant.id}`),
+    // Socket/zone are part of the cache identity: "drive" in the driver-seat is
+    // a different drawing from "drive" standing at the doorway.
+    participantKeys: participants.map(
+      (participant) =>
+        `${participant.kind}:${participant.id}${participant.socket ? `@${participant.socket}` : ""}${participant.zone ? `#${participant.zone}` : ""}`,
+    ),
     type: interaction.type,
     roles: interaction.roles,
     parameters: interaction.parameters,
