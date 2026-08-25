@@ -660,7 +660,7 @@ export function buildInteractionRenderRequest(
     names.push(asset.name);
     identityConstraints.push(
       participant.kind === "object"
-        ? `Reference image ${index + 1} is the object "${asset.name}": preserve its recognizable appearance, shape and important visual properties.`
+        ? `Reference image ${index + 1} is the object "${asset.name}": preserve its recognizable visual identity — shape, proportions, colors, material, distinctive details and important markings. Do not replace, redesign, recolor, simplify or reinterpret it; only its orientation, perspective and partial occlusion may change as the interaction requires.`
         : `Reference image ${index + 1} is the scene "${asset.name}": preserve its environment, composition, architecture, lighting and visual style.`,
     );
   });
@@ -699,9 +699,11 @@ export function buildInteractionRenderRequest(
     ...describeInteractionParameters(supportingParameters).map((part) => `Interaction detail — ${part}.`),
     // Holding an object is contact geometry: hands meet the thing, fingers
     // wrap it, one occludes the other. Without naming it, models float the
-    // object next to open palms.
+    // object next to open palms — or draw a second copy of it.
     ...(participants.some((p) => p.kind === "object")
-      ? ["Ensure realistic hand contact, grip, overlap and occlusion between the character and the object."]
+      ? [
+          "Ensure realistic hand contact, grip, overlap and occlusion between the character and the object: the object physically aligns with the hands or body, does not float, is never detached, and appears exactly once.",
+        ]
       : []),
     "All participants occupy the same scene, at a consistent scale, from one viewpoint, with consistent lighting.",
   ];

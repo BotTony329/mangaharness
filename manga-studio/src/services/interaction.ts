@@ -335,10 +335,30 @@ export async function renderInteraction(
           aspect: profile === "SCENE_COMPOSITE" ? panelAspect(doc().panels[panelId]) : "portrait",
           cutout: profile === "CHARACTER_OBJECT_COMPOSITE",
         });
+  /**
+   * Identity+outfit lock for composites with an object or scene participant.
+   *
+   * The shared identity/outfit constraints above are part of the protected
+   * Character↔Character baseline and must stay byte-stable, so the stronger
+   * lock is APPENDED here, only for the profiles that showed outfit drift.
+   * Locked: face, hair, colors, outfit, accessories. Adaptable: pose,
+   * perspective, foreshortening, lighting, natural folds.
+   */
+  const characterNames = participants
+    .filter((p) => p.kind === "character")
+    .map((p) => doc().characters[p.id]?.name ?? p.id);
+  const fidelityLock =
+    profile === "CHARACTER_COMPOSITE"
+      ? []
+      : characterNames.map(
+          (name) =>
+            `${name}'s identity and outfit are locked: keep the exact face, hairstyle, hair color, body proportions, outfit design, outfit colors, clothing patterns, accessories and shoes from the reference image. Do not recolor, redesign, replace or remove any clothing or accessory. Only pose, perspective, foreshortening, lighting adaptation and natural clothing folds may change.`,
+        );
   const prompt = [
     promptLead,
     ...model.identityConstraints,
     ...model.outfitConstraints,
+    ...fidelityLock,
     ...expressionConstraints,
   ].join(" ");
 

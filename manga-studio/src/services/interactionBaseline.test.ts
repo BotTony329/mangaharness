@@ -164,7 +164,9 @@ describe("CASE B — Character↔Object joint generation", () => {
       "Mika holds the ramen bowl with both hands and lifts it toward her face.",
     );
     expect(request.prompt).toContain('the object "Ramen bowl"');
-    expect(request.prompt).toContain("preserve its recognizable appearance, shape and important visual properties");
+    expect(request.prompt).toContain(
+      "preserve its recognizable visual identity — shape, proportions, colors, material",
+    );
     expect(request.prompt).toContain("realistic hand contact, grip, overlap and occlusion");
 
     // The object must NOT be fought by single-character isolation wording.
@@ -254,5 +256,104 @@ describe("CASE C — Character↔Scene joint generation", () => {
     const registration = registerGeneratedAsset.mock.calls[0][0];
     expect(registration.assetType).toBe("background");
     expect(registration.category).toBe("background");
+  });
+});
+
+describe("CASE B2/B3 — Object fidelity, contact and character outfit lock", () => {
+  beforeEach(() => {
+    generateImage.mockReset();
+    registerGeneratedAsset.mockReset();
+    generateImage.mockResolvedValue({ url: "https://example.com/out.png" });
+    registerGeneratedAsset.mockResolvedValue("composite-asset-4");
+  });
+
+  async function objectPrompt(): Promise<string> {
+    const { doc: base, mikaId } = studioWithPair();
+    let doc = base;
+    const ramen = addAsset(doc, {
+      category: "prop",
+      name: "Ramen bowl",
+      storageUrl: "https://example.com/ramen.png",
+      width: 400,
+      height: 400,
+    });
+    doc = ramen.doc;
+    const created = createInteraction(doc, {
+      panelId: Object.keys(doc.panels)[0],
+      participantIds: [mikaId],
+      participants: [
+        { id: mikaId, kind: "character", role: "initiator" },
+        { id: ramen.assetId, kind: "object", role: "target" },
+      ],
+      type: "eat",
+      parameters: {
+        customInstruction: "Mika holds the ramen bowl with both hands and lifts it toward her face.",
+        hand: "both",
+      },
+      source: "manual",
+    });
+    useEditorStore.setState({ doc: created.doc } as never);
+    await renderInteraction(created.interactionId);
+    return generateImage.mock.calls[0][0].prompt;
+  }
+
+  it("CASE B2: object visual identity and contact are locked", async () => {
+    const prompt = await objectPrompt();
+    // Visual fidelity: shape, colors, details — never a different bowl.
+    expect(prompt).toContain("shape, proportions, colors, material, distinctive details");
+    expect(prompt).toContain("Do not replace, redesign, recolor, simplify or reinterpret");
+    // Contact fidelity: aligned, held, singular.
+    expect(prompt).toContain("realistic hand contact, grip, overlap and occlusion");
+    expect(prompt).toContain("does not float");
+    expect(prompt).toContain("appears exactly once");
+  });
+
+  it("CASE B3: the character's identity and outfit are locked in an object composite", async () => {
+    const prompt = await objectPrompt();
+    expect(prompt).toContain("Mika's identity and outfit are locked");
+    expect(prompt).toContain("outfit design, outfit colors, clothing patterns, accessories and shoes");
+    expect(prompt).toContain("Do not recolor, redesign, replace or remove any clothing or accessory");
+  });
+});
+
+describe("CASE C2 — Scene outfit lock", () => {
+  beforeEach(() => {
+    generateImage.mockReset();
+    registerGeneratedAsset.mockReset();
+    generateImage.mockResolvedValue({ url: "https://example.com/out.png" });
+    registerGeneratedAsset.mockResolvedValue("composite-asset-5");
+  });
+
+  it("the character's identity and outfit are locked in a scene composite", async () => {
+    const { doc: base, mikaId, panelId } = studioWithPair();
+    let doc = base;
+    const street = addAsset(doc, {
+      category: "background",
+      name: "Tokyo Street",
+      storageUrl: "https://example.com/street.png",
+      width: 1600,
+      height: 900,
+    });
+    doc = street.doc;
+    const created = createInteraction(doc, {
+      panelId,
+      participantIds: [mikaId],
+      participants: [
+        { id: mikaId, kind: "character", role: "initiator" },
+        { id: street.assetId, kind: "scene", role: "target" },
+      ],
+      type: "walk",
+      parameters: { customInstruction: "Mika is walking in the middle of this street, facing forward." },
+      source: "manual",
+    });
+    useEditorStore.setState({ doc: created.doc } as never);
+
+    await renderInteraction(created.interactionId);
+    const prompt = generateImage.mock.calls[0][0].prompt;
+    expect(prompt).toContain("Mika's identity and outfit are locked");
+    expect(prompt).toContain("outfit design, outfit colors, clothing patterns, accessories and shoes");
+    expect(prompt).toContain("Do not recolor, redesign, replace or remove any clothing or accessory");
+    // Adaptable list stays: pose and lighting may change, the outfit may not.
+    expect(prompt).toContain("Only pose, perspective, foreshortening, lighting adaptation");
   });
 });
