@@ -660,8 +660,8 @@ export function buildInteractionRenderRequest(
     names.push(asset.name);
     identityConstraints.push(
       participant.kind === "object"
-        ? `Reference image ${index + 1} is the object "${asset.name}": keep its exact appearance in the interaction.`
-        : `Reference image ${index + 1} is the scene "${asset.name}": match its perspective, lighting and layout.`,
+        ? `Reference image ${index + 1} is the object "${asset.name}": preserve its recognizable appearance, shape and important visual properties.`
+        : `Reference image ${index + 1} is the scene "${asset.name}": preserve its environment, composition, architecture, lighting and visual style.`,
     );
   });
 
@@ -697,6 +697,12 @@ export function buildInteractionRenderRequest(
         ]
       : []),
     ...describeInteractionParameters(supportingParameters).map((part) => `Interaction detail — ${part}.`),
+    // Holding an object is contact geometry: hands meet the thing, fingers
+    // wrap it, one occludes the other. Without naming it, models float the
+    // object next to open palms.
+    ...(participants.some((p) => p.kind === "object")
+      ? ["Ensure realistic hand contact, grip, overlap and occlusion between the character and the object."]
+      : []),
     "All participants occupy the same scene, at a consistent scale, from one viewpoint, with consistent lighting.",
   ];
 

@@ -20,7 +20,7 @@
  */
 
 import { generateImage, registerGeneratedAsset } from "@/services/generation";
-import { buildAssetPrompt } from "@/ai/promptTemplates";
+import { buildAssetPrompt, buildJointInteractionPrompt } from "@/ai/promptTemplates";
 import { assetRenderUrl } from "@/assets/renderSource";
 import { resolveCharacterIdentityReference, resolveIdentityReferences } from "@/characters/identityReference";
 import { stateFromInstance } from "@/characters/state";
@@ -277,6 +277,7 @@ export async function renderInteraction(
     styleProfileId: style.profile.id,
     outfits: Object.fromEntries(participantIds.map((id) => [id, outfitOf(doc(), panelId, id)])),
   });
+  const profile = compositionProfileOf(participants);
 
   /**
    * Every participant contributes their OWN reference image. `buildMultiCharacterRequest`
@@ -318,23 +319,41 @@ export async function renderInteraction(
     .filter(([characterId]) => participantIds.includes(characterId))
     .map(([characterId, expression]) => `${doc().characters[characterId]?.name ?? characterId} is ${expression}.`);
 
+  const promptLead =
+    profile === "CHARACTER_COMPOSITE"
+      ? // Protected baseline: the character branch of buildAssetPrompt, untouched.
+        buildAssetPrompt({
+          assetType: "character",
+          description: model.interactionConstraints.join(" "),
+          style: style.profile,
+          monochrome: isMonochromeStyle(style.profile),
+        })
+      : buildJointInteractionPrompt({
+          description: model.interactionConstraints.join(" "),
+          style: style.profile,
+          monochrome: isMonochromeStyle(style.profile),
+          aspect: profile === "SCENE_COMPOSITE" ? panelAspect(doc().panels[panelId]) : "portrait",
+          cutout: profile === "CHARACTER_OBJECT_COMPOSITE",
+        });
   const prompt = [
-    buildAssetPrompt({
-      assetType: "character",
-      description: model.interactionConstraints.join(" "),
-      style: style.profile,
-      monochrome: isMonochromeStyle(style.profile),
-    }),
+    promptLead,
     ...model.identityConstraints,
     ...model.outfitConstraints,
     ...expressionConstraints,
   ].join(" ");
 
+  /**
+   * A scene composite is an opaque environment picture, not a cutout: routing
+   * it as "background" is what switches OFF the white-background requirement,
+   * the transparency request and the background-removal pipeline server-side.
+   * Character and object composites keep the character cutout pipeline.
+   */
+  const sceneComposite = profile === "SCENE_COMPOSITE";
   const result = await generateImage({
-    assetType: "character",
+    assetType: sceneComposite ? "background" : "character",
     prompt,
     negativePrompt: style.profile.negativePrompt,
-    size: "portrait",
+    size: sceneComposite ? panelAspect(doc().panels[panelId]) : "portrait",
     expectMonochrome: isMonochromeStyle(style.profile),
     referenceUrls,
   });
@@ -346,8 +365,11 @@ export async function renderInteraction(
   );
   const assetId = await registerGeneratedAsset({
     result,
-    assetType: "character",
-    category: "character",
+    assetType: sceneComposite ? "background" : "character",
+    // A scene composite is opaque artwork: registering it as "character" would
+    // fail the transparency contract and make the placed instance render as
+    // nothing. Background category keeps the merged image compositable.
+    category: sceneComposite ? "background" : "character",
     name: `${names.join(" + ")} · ${interactionLabel(interaction.type)}`,
     prompt,
     // The asset itself knows what it IS: which interaction, which words,
@@ -452,4 +474,35 @@ export async function rerenderInteraction(interactionId: ID): Promise<RenderOutc
 
 function needsAnchor(type: string): boolean {
   return type === "hold_hands" || type === "high_five" || type === "hand_object";
+}
+
+/**
+ * The ONE place a participant mix chooses a generation profile. kind never
+ * selects a different pipeline — only different prompt/profile parameters for
+ * the same joint generation call.
+ *
+ *   CHARACTER_COMPOSITE        — protected baseline, char-only, unchanged.
+ *   CHARACTER_OBJECT_COMPOSITE — same cutout pipeline, contact-aware wording.
+ *   SCENE_COMPOSITE            — opaque scene picture, panel-matched aspect.
+ */
+export type InteractionCompositionProfile =
+  | "CHARACTER_COMPOSITE"
+  | "CHARACTER_OBJECT_COMPOSITE"
+  | "SCENE_COMPOSITE";
+
+export function compositionProfileOf(participants: InteractionParticipant[]): InteractionCompositionProfile {
+  if (participants.some((p) => p.kind === "scene")) return "SCENE_COMPOSITE";
+  if (participants.some((p) => p.kind === "object")) return "CHARACTER_OBJECT_COMPOSITE";
+  return "CHARACTER_COMPOSITE";
+}
+
+/** Scenes inherit the target panel's shape instead of a hardcoded aspect. */
+function panelAspect(panel: { points: { x: number; y: number }[] } | undefined): "portrait" | "landscape" | "square" {
+  if (!panel || panel.points.length === 0) return "landscape";
+  const xs = panel.points.map((p) => p.x);
+  const ys = panel.points.map((p) => p.y);
+  const ratio = (Math.max(...xs) - Math.min(...xs)) / Math.max(1, Math.max(...ys) - Math.min(...ys));
+  if (ratio >= 1.2) return "landscape";
+  if (ratio <= 0.8) return "portrait";
+  return "square";
 }

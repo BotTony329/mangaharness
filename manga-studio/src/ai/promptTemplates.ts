@@ -129,6 +129,45 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
     .join(" ");
 }
 
+/**
+ * Joint-interaction prompt for composites with an object or scene participant.
+ *
+ * The character-only composite deliberately keeps using `buildAssetPrompt`'s
+ * "character" branch untouched — that is the protected baseline. That branch's
+ * isolation wording ("isolated single character", "no scenery") contradicts
+ * what an object/scene composite must depict, so those mixes get their own
+ * lead sentence here instead of a forked service or provider path.
+ */
+export function buildJointInteractionPrompt(input: {
+  /** The interaction constraints, creator's free text leading. */
+  description: string;
+  style?: AssetPromptInput["style"];
+  monochrome?: boolean;
+  aspect?: "portrait" | "landscape" | "square";
+  /**
+   * Object composites are still cut out for panel compositing (white field).
+   * Scene composites are opaque: the environment IS the picture, so no white
+   * backdrop, no transparency request, no isolation wording.
+   */
+  cutout: boolean;
+}): string {
+  const backdrop = input.cutout
+    ? backgroundClause(foregroundAssetPolicy({ supportsNativeTransparency: undefined }), "character")
+    : "One continuous scene: every participant and the environment share the same lighting, perspective and art style, and the scene fills the entire frame.";
+  const language = input.monochrome
+    ? "Draw in clean monochrome black-and-white manga line art."
+    : "";
+  return [
+    `Joint interaction illustration: ${input.description}`,
+    language,
+    backdrop,
+    styleInstruction(input.style),
+    aspectHint(input.aspect ?? "portrait"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function styleInstruction(style: AssetPromptInput["style"]): string {
   if (!style) return LEGACY_STYLE;
   const properties = style.visualProperties
