@@ -45,12 +45,14 @@ const AGENT_PROTOCOLS = [
 
 const IMAGE_PROTOCOLS = [
   { id: "gemini", label: "Gemini Native", placeholder: "https://generativelanguage.googleapis.com" },
+  { id: "sdnext", label: "SD.Next", placeholder: "http://127.0.0.1:7860" },
   { id: "openai-compatible", label: "OpenAI-compatible", placeholder: "https://api.example.com/v1" },
   { id: "custom", label: "Custom JSON", placeholder: "https://example.com/v1/generate" },
 ];
 
 const BACKGROUND_PROTOCOLS = [
   { id: "remove-bg", label: "remove.bg", placeholder: "https://api.remove.bg/v1.0/removebg" },
+  { id: "sdnext", label: "SD.Next (rembg)", placeholder: "http://127.0.0.1:7860" },
   { id: "custom", label: "Custom JSON", placeholder: "https://example.com/cutout" },
 ];
 
@@ -108,6 +110,7 @@ export function AiSettingsDialog() {
           protocols={IMAGE_PROTOCOLS}
           summary={status?.image ?? null}
           onChanged={refresh}
+          supportsModelDiscovery
           footnote={
             status?.image?.configured
               ? (status.image.capabilities?.supportsReferenceImage ?? status.image.capabilities?.referenceImage)
@@ -222,9 +225,10 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
 
   const typeInfo = protocols.find((t) => t.id === providerType) ?? protocols[0];
   const configured = summary?.configured ?? false;
+  const isSdnext = providerType === "sdnext";
   const canSave = isCustom
     ? Boolean(customForm.endpoint && customForm.model && (configured || customForm.apiKey || customForm.authMode === "none"))
-    : Boolean((kind === "background" || model) && (configured || apiKey));
+    : Boolean((kind === "background" || model || isSdnext) && (configured || apiKey || isSdnext));
 
   const save = async () => {
     setBusy("save");
@@ -373,7 +377,13 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
                 className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 pr-9 font-mono text-xs"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder={configured ? "Configured — enter a new key to replace" : "sk-…"}
+                placeholder={
+                  configured
+                    ? "Configured — enter a new key to replace"
+                    : isSdnext
+                      ? "Optional for local instances (username:password or leave blank)"
+                      : "sk-…"
+                }
                 autoComplete="off"
               />
               <button
@@ -398,10 +408,10 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
                 className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-app)] px-2 py-1.5 font-mono text-xs"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder="model-name"
+                placeholder={isSdnext ? "Optional (checkpoint name / leave blank for current)" : "model-name"}
                 list={models.length > 0 ? `${kind}-models` : undefined}
               />
-              {supportsModelDiscovery && providerType === "openai-compatible" && configured && (
+              {supportsModelDiscovery && (providerType === "openai-compatible" || isSdnext) && configured && (
                 <button
                   className="shrink-0 rounded border border-zinc-700 bg-zinc-800 px-2 text-xs hover:bg-zinc-700"
                   onClick={fetchModels}
@@ -436,7 +446,7 @@ function ProviderCard({ kind, title, protocols, summary, onChanged, supportsMode
                 setProviderType(e.target.value);
                 setBaseUrl("");
                 setModels([]);
-                if (kind === "background") setModel("background-removal");
+                if (kind === "background") setModel(e.target.value === "sdnext" ? "u2net" : "background-removal");
               }}
             >
               {protocols.map((t) => (

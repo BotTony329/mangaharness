@@ -41,6 +41,16 @@ Character/prop results then enter an independent capability cascade: validate na
 - Synchronous request/response; 90 s timeout; bounded response reads.
 - Declares image editing and implements the second pass through the same `generateContent` surface. Gemini is not declared as native-alpha capable; returned bytes must still pass actual alpha validation.
 
+### SD.Next (`src/ai/providers/sdnext.ts`, `src/assets/providers/sdnext.ts`)
+
+- Protocol / standard: `sdnext` (defaults to `http://127.0.0.1:7860`).
+- **Text-to-Image**: Calls `/sdapi/v1/txt2img` with prompt, negative prompt, size, steps, sampler, and optional checkpoint overrides.
+- **Reference images supported**: Character reference images are sent via `/sdapi/v1/img2img` with `init_images` (base64) and denoising control for pose/expression consistency.
+- **Image editing**: Local generative editing and instructions routed to `/sdapi/v1/img2img`.
+- **Model discovery**: Live dynamic listing of installed checkpoint models via `GET /sdapi/v1/sd-models`.
+- **Background removal**: Integrates SD.Next's built-in `rembg` module via `POST /sdapi/v1/extra-single-image` (`rembg_model: u2net`).
+- **Authentication**: Supports unauthenticated local instances (no key required) or HTTP Basic Auth (`username:password`) when SD.Next is launched with `--auth`.
+
 ### Generic REST (`src/ai/providers/genericRest.ts`)
 
 - Any OpenAI-compatible `POST {base}/images/generations` endpoint (`response_format: b64_json`).

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listOpenAiCompatibleModels } from "@/agent/providers/openaiCompatible";
+import { listSdnextModels } from "@/ai/providers/sdnext";
 import { resolveProvider } from "@/server/providerSession";
 
 export const runtime = "nodejs";
 
 /**
- * Optional model discovery for OpenAI-compatible providers. Best-effort:
+ * Optional model discovery for OpenAI-compatible and SD.Next providers. Best-effort:
  * many gateways don't expose /models, and manual model input always works.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -16,6 +17,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const resolved = resolveProvider(request, kind);
   if (!resolved) return NextResponse.json({ error: "Not configured" }, { status: 503 });
+  if (resolved.config.providerType === "sdnext") {
+    try {
+      const models = await listSdnextModels(resolved.config);
+      return NextResponse.json({ models: models.slice(0, 200) });
+    } catch {
+      return NextResponse.json({ models: [] });
+    }
+  }
   if (resolved.config.providerType !== "openai-compatible") {
     return NextResponse.json({ models: [] });
   }

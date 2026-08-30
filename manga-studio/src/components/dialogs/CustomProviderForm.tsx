@@ -97,6 +97,19 @@ const PRESETS: Record<"agent" | "image" | "background", { label: string; apply: 
   ],
   image: [
     {
+      label: "SD.Next txt2img",
+      apply: (f) => ({
+        ...f,
+        endpoint: f.endpoint || "http://127.0.0.1:7860/sdapi/v1/txt2img",
+        authMode: "none",
+        requestTemplate:
+          '{\n  "prompt": "{{prompt}}",\n  "negative_prompt": "{{negativePrompt}}",\n  "width": {{width}},\n  "height": {{height}},\n  "steps": 20,\n  "cfg_scale": 7.0,\n  "sampler_name": "UniPC",\n  "save_images": false,\n  "send_images": true\n}',
+        responseType: "base64",
+        responsePath: "images[0]",
+        referenceMode: "none",
+      }),
+    },
+    {
       label: "OpenAI-style images",
       apply: (f) => ({
         ...f,
@@ -120,6 +133,19 @@ const PRESETS: Record<"agent" | "image" | "background", { label: string; apply: 
     },
   ],
   background: [
+    {
+      label: "SD.Next rembg",
+      apply: (f) => ({
+        ...f,
+        endpoint: f.endpoint || "http://127.0.0.1:7860/sdapi/v1/extra-single-image",
+        authMode: "none",
+        model: f.model || "u2net",
+        referenceMode: "base64",
+        requestTemplate: '{\n  "image": "{{referenceImage}}",\n  "rembg_model": "{{model}}"\n}',
+        responseType: "base64",
+        responsePath: "image",
+      }),
+    },
     {
       label: "JSON cutout API",
       apply: (f) => ({

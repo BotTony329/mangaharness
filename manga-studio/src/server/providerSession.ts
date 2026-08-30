@@ -28,8 +28,8 @@ export type ProviderKind = "agent" | "image" | "background";
 // conveniences layered on top, never the capability boundary.
 const agentTypes = ["custom", "openai-compatible", "anthropic-compatible", "gemini"] as const;
 // "generic-rest" is a legacy alias for openai-compatible image endpoints.
-const imageTypes = ["custom", "gemini", "openai-compatible", "generic-rest"] as const;
-const backgroundTypes = ["custom", "remove-bg"] as const;
+const imageTypes = ["custom", "gemini", "sdnext", "openai-compatible", "generic-rest"] as const;
+const backgroundTypes = ["custom", "remove-bg", "sdnext"] as const;
 
 export type AgentProviderType = (typeof agentTypes)[number];
 export type ImageProviderType = (typeof imageTypes)[number];
@@ -61,6 +61,7 @@ export const DEFAULT_BASE_URLS: Record<string, string> = {
   gemini: "https://generativelanguage.googleapis.com",
   "anthropic-compatible": "https://api.anthropic.com",
   "remove-bg": "https://api.remove.bg/v1.0/removebg",
+  sdnext: "http://127.0.0.1:7860",
 };
 
 // ─── Save payload validation ────────────────────────────────────────────────
@@ -71,7 +72,7 @@ export const configPayloadSchema = z.object({
   name: z.string().max(60).optional(),
   baseUrl: z.string().max(1024).optional(),
   /** Omitted on save = keep the previously stored key (replace-fields flow). */
-  apiKey: z.string().min(4).max(4096).optional(),
+  apiKey: z.string().max(4096).optional(),
   model: z.string().max(200).default(""),
   custom: customApiSchema.optional(),
 });
@@ -92,14 +93,15 @@ export function buildProviderConfig(payload: ConfigPayload, existing: ProviderCo
   assertSafeProviderUrl(baseUrl); // SSRF guard on every user-supplied endpoint
 
   const isCustom = payload.providerType === "custom";
+  const isSdnext = payload.providerType === "sdnext";
   if (isCustom) {
     if (!payload.custom) throw new Error("Custom API configuration is required");
     validateCustomApi(payload.custom, payload.kind === "background" ? "image" : payload.kind);
   }
 
   const apiKey = payload.apiKey ?? existing?.apiKey ?? "";
-  // Custom APIs with auth mode "none" legitimately have no key.
-  if (!apiKey && !(isCustom && payload.custom?.auth.mode === "none")) {
+  // Custom APIs with auth mode "none" and SD.Next instances (which can run without --auth) legitimately have no key.
+  if (!apiKey && !(isCustom && payload.custom?.auth.mode === "none") && !isSdnext) {
     throw new Error("API key is required");
   }
 
@@ -109,7 +111,7 @@ export function buildProviderConfig(payload: ConfigPayload, existing: ProviderCo
     name: payload.name?.trim() || undefined,
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
-    model: payload.model.trim() || (payload.kind === "background" ? "background-removal" : ""),
+    model: payload.model.trim() || (payload.kind === "background" ? (isSdnext ? "u2net" : "background-removal") : ""),
     custom: isCustom ? payload.custom : undefined,
   };
 
@@ -146,8 +148,8 @@ export function readSessionConfig(
   trace?.("credential_decrypted", { kind });
   try {
     const parsed = JSON.parse(opened) as ProviderConfig;
-    const hasCredential = Boolean(parsed.apiKey) || parsed.custom?.auth.mode === "none";
-    const valid = Boolean(parsed.kind === kind && hasCredential && parsed.baseUrl && parsed.model);
+    const hasCredential = Boolean(parsed.apiKey) || parsed.custom?.auth.mode === "none" || parsed.providerType === "sdnext";
+    const valid = Boolean(parsed.kind === kind && hasCredential && parsed.baseUrl && (parsed.model || parsed.providerType === "sdnext"));
     trace?.(valid ? "credential_deserialized" : "credential_validation_failed", {
       kind,
       providerType: valid ? parsed.providerType : undefined,
@@ -220,6 +222,15 @@ export function envImageConfig(): ProviderConfig | null {
       model: process.env.IMAGE_MODEL || "gemini-2.5-flash-image",
     };
   }
+  if (selected === "sdnext") {
+    return {
+      kind: "image",
+      providerType: "sdnext",
+      baseUrl: (process.env.IMAGE_API_BASE_URL || process.env.SDNEXT_BASE_URL || DEFAULT_BASE_URLS.sdnext).replace(/\/$/, ""),
+      apiKey: process.env.IMAGE_API_KEY || process.env.SDNEXT_API_KEY || "",
+      model: process.env.IMAGE_MODEL || process.env.SDNEXT_MODEL || "",
+    };
+  }
   const apiKey = process.env.IMAGE_API_KEY;
   const baseUrl = process.env.IMAGE_API_BASE_URL;
   if (!apiKey || !baseUrl) return null;
@@ -233,11 +244,21 @@ export function envImageConfig(): ProviderConfig | null {
 }
 
 export function envBackgroundConfig(): ProviderConfig | null {
+  const selected = process.env.BACKGROUND_REMOVAL_PROVIDER || "remove-bg";
+  if (selected === "sdnext") {
+    return {
+      kind: "background",
+      providerType: "sdnext",
+      baseUrl: (process.env.BACKGROUND_REMOVAL_API_BASE_URL || process.env.SDNEXT_BASE_URL || DEFAULT_BASE_URLS.sdnext).replace(/\/$/, ""),
+      apiKey: process.env.BACKGROUND_REMOVAL_API_KEY || process.env.SDNEXT_API_KEY || "",
+      model: process.env.BACKGROUND_REMOVAL_MODEL || "u2net",
+    };
+  }
   const apiKey = process.env.BACKGROUND_REMOVAL_API_KEY;
   if (!apiKey) return null;
   return {
     kind: "background",
-    providerType: process.env.BACKGROUND_REMOVAL_PROVIDER || "remove-bg",
+    providerType: selected,
     baseUrl: (process.env.BACKGROUND_REMOVAL_API_BASE_URL || DEFAULT_BASE_URLS["remove-bg"]).replace(/\/$/, ""),
     apiKey,
     model: process.env.BACKGROUND_REMOVAL_MODEL || "background-removal",
