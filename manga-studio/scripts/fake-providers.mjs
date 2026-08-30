@@ -148,6 +148,23 @@ const server = http.createServer((req, res) => {
     } else if (req.url?.startsWith("/v1beta/models/")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ name: "models/fake" }));
+    } else if (req.url === "/sdapi/v1/options") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ sd_model_checkpoint: "fake-checkpoint.safetensors" }));
+    } else if (req.url === "/sdapi/v1/sd-models") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify([
+          { title: "fake-model-1.safetensors [abc1234]", model_name: "fake-model-1" },
+          { title: "fake-model-2.safetensors", model_name: "fake-model-2" },
+        ]),
+      );
+    } else if (req.url === "/sdapi/v1/txt2img" || req.url === "/sdapi/v1/img2img") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ images: [TINY_PNG_B64], parameters: {}, info: "{}" }));
+    } else if (req.url === "/sdapi/v1/extra-single-image") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ image: TINY_PNG_B64, html_info: "" }));
     } else {
       res.writeHead(404);
       res.end("{}");

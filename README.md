@@ -89,7 +89,8 @@ standard, enter base URL + key + model, Test Connection, Save:
 
 | Surface | Supported standards |
 |---|---|
-| Image generation | Google Gemini (reference-image aware) · any OpenAI-compatible REST endpoint |
+| Image generation | SD.Next (`/sdapi/v1/txt2img`, `/sdapi/v1/img2img`, reference-image aware) · Google Gemini (reference-image aware) · any OpenAI-compatible REST endpoint |
+| Background removal | SD.Next (`/sdapi/v1/extra-single-image` rembg) · remove.bg · Custom JSON cutout API |
 | Manga Agent | OpenAI-compatible · Anthropic-compatible · Gemini |
 
 Credentials are AES-GCM-encrypted into HttpOnly session cookies — never

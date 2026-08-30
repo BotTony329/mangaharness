@@ -116,6 +116,44 @@ describe("buildProviderConfig", () => {
       model: "background-removal",
     });
   });
+
+  it("builds SD.Next image provider configuration with optional key and default URL", () => {
+    process.env.ALLOW_PRIVATE_NETWORKS = "1";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
+    const config = buildProviderConfig({
+      kind: "image",
+      providerType: "sdnext",
+      baseUrl: undefined,
+      apiKey: undefined,
+      model: "",
+    }, null);
+    expect(config).toMatchObject({
+      kind: "image",
+      providerType: "sdnext",
+      baseUrl: "http://127.0.0.1:7860",
+      apiKey: "",
+      model: "",
+    });
+  });
+
+  it("builds SD.Next background-removal configuration with u2net default", () => {
+    process.env.ALLOW_PRIVATE_NETWORKS = "1";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
+    const config = buildProviderConfig({
+      kind: "background",
+      providerType: "sdnext",
+      baseUrl: "http://127.0.0.1:7860",
+      apiKey: "",
+      model: "",
+    }, null);
+    expect(config).toMatchObject({
+      kind: "background",
+      providerType: "sdnext",
+      baseUrl: "http://127.0.0.1:7860",
+      apiKey: "",
+      model: "u2net",
+    });
+  });
 });
 
 describe("summaries never leak secrets", () => {

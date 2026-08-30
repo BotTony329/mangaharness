@@ -8,6 +8,7 @@ import type { ProviderConfig } from "@/server/providerSession";
 import { createCustomImageProvider } from "./providers/customImage";
 import { createGeminiProvider } from "./providers/gemini";
 import { createGenericRestProvider } from "./providers/genericRest";
+import { createSdnextProvider } from "./providers/sdnext";
 import type { ImageGenerationProvider } from "./types";
 
 export function createImageProvider(config: ProviderConfig): ImageGenerationProvider {
@@ -17,6 +18,8 @@ export function createImageProvider(config: ProviderConfig): ImageGenerationProv
       return createCustomImageProvider(config);
     case "gemini":
       return createGeminiProvider(config);
+    case "sdnext":
+      return createSdnextProvider(config);
     case "openai-compatible":
     case "generic-rest":
       return createGenericRestProvider(config);

@@ -42,8 +42,8 @@ This encrypts users' BYOK provider credentials into HttpOnly session cookies. It
 No AI keys go into Vercel. Each user opens **AI Settings** in the deployed app and connects their own providers:
 
 - **Manga Agent (LLM):** pick an API standard (OpenAI Compatible / Anthropic Compatible / Google Gemini), enter base URL, API key, and model — e.g. DeepSeek, Kimi/Moonshot, OpenRouter, Claude, Gemini, or any compatible gateway.
-- **Image Generation:** Google Gemini (supports reference images for character consistency) or any OpenAI-compatible image endpoint.
-- **Background Removal (optional):** remove.bg Quick Preset or any compatible JSON cutout endpoint through Custom API. This is tried only after native alpha and Image AI editing fail.
+- **Image Generation:** Google Gemini, SD.Next (`http://127.0.0.1:7860`), or any OpenAI-compatible image endpoint. (SD.Next and Gemini support reference images for character consistency).
+- **Background Removal (optional):** SD.Next (rembg), remove.bg Quick Preset, or any compatible JSON cutout endpoint through Custom API. This is tried only after native alpha and Image AI editing fail.
 
 Test Connection, Save — done. Credentials are encrypted per browser session; "Forget credentials" removes them. Replacing an endpoint/key/model later needs no redeploy and doesn't touch projects.
 
