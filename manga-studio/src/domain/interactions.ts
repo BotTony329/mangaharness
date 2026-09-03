@@ -431,6 +431,14 @@ export function interactionCacheKey(input: {
   styleProfileId?: ID;
   shot?: string;
   angle?: string;
+  /**
+   * Camera identity beyond shot/angle (v0.3 Phase 4). Absent means "no camera
+   * intent" and the key stays byte-identical to the v0.2 baseline; a Hug at
+   * eye level must never serve a Hug from overhead.
+   */
+  lens?: string;
+  yaw?: number;
+  perspective?: string;
   /** Expression per participant, keyed by character id. */
   expressions?: Record<ID, string>;
 }): string {
@@ -453,7 +461,7 @@ export function interactionCacheKey(input: {
     `o=${outfits.join("+")}`,
     `v=${input.view.trim().toLowerCase()}`,
     `s=${input.styleProfileId ?? "default"}`,
-    `c=${input.shot ?? "any"}/${input.angle ?? "any"}`,
+    `c=${input.shot ?? "any"}/${input.angle ?? "any"}${cameraSuffix(input)}`,
     // A smiling hug and a crying hug are not the same drawing, so they must not
     // share a cache entry.
     `e=${Object.entries(input.expressions ?? {})
@@ -463,9 +471,20 @@ export function interactionCacheKey(input: {
   ].join("|");
 }
 
+/**
+ * Lens/yaw/perspective ride inside the existing `c=` segment so no second
+ * cache is born; when all are absent the segment is byte-identical to v0.2.
+ */
+function cameraSuffix(input: { lens?: string; yaw?: number; perspective?: string }): string {
+  const parts: string[] = [];
+  if (input.lens !== undefined) parts.push(`l=${input.lens}`);
+  if (input.yaw !== undefined) parts.push(`y=${Math.round(input.yaw)}`);
+  if (input.perspective !== undefined) parts.push(`p=${input.perspective}`);
+  return parts.length > 0 ? `/${parts.join("/")}` : "";
+}
+
 /** An existing joint render for this exact configuration, or null. */
-export function findInteractionRender(doc: ProjectDocument, cacheKey: string): InteractionRender | null {
-  return (
+export function findInteractionRender(doc: ProjectDocument, cacheKey: string): InteractionRender | null {  return (
     Object.values(doc.interactionRenders ?? {}).find((render) => {
       if (render.cacheKey !== cacheKey) return false;
       // A render whose asset was deleted is not reusable.

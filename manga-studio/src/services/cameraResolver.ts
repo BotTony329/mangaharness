@@ -29,9 +29,15 @@
  * not a schema change made here.
  */
 
-import { cameraChangeRequiresRedraw, type CameraChangeKind } from "@/domain/staging";
+import {
+  cameraChangeRequiresRedraw,
+  cameraGenerationContext,
+  perspectiveGenerationContext,
+  shotGenerationContext,
+  type CameraChangeKind,
+} from "@/domain/staging";
 import { shotCoverage } from "@/domain/camera";
-import type { PanelCamera, ShotType } from "@/domain/types";
+import type { PanelCamera, PanelPerspective, ShotType } from "@/domain/types";
 
 export type CameraExecution = "LOCAL_TRANSFORM" | "GENERATIVE_REDRAW";
 
@@ -75,6 +81,25 @@ export function panelAspectFor(
   if (ratio >= 1.2) return "landscape";
   if (ratio <= 0.8) return "portrait";
   return "square";
+}
+
+/**
+ * The ONE shared camera vocabulary for every generation surface (Phase 4).
+ *
+ * Character camera, scene camera and interaction camera all compose the same
+ * domain sentences here instead of growing per-surface camera wording — a
+ * second vocabulary (interactionCameraPrompt.ts and friends) would let "low
+ * angle" drift into three different sentences depending on what is drawn.
+ *
+ * Shot wording is included only for non-wide shots: "wide" is the neutral
+ * establishing default and adds nothing.
+ */
+export function cameraContextForPanel(camera: PanelCamera, perspective?: PanelPerspective): string[] {
+  return [
+    ...cameraGenerationContext(camera),
+    ...perspectiveGenerationContext(perspective),
+    ...(camera.shot !== "wide" ? [shotGenerationContext(camera.shot)] : []),
+  ];
 }
 
 /**

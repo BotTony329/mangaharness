@@ -25,10 +25,11 @@ import { assetRenderUrl } from "@/assets/renderSource";
 import { resolveCharacterIdentityReference, resolveIdentityReferences } from "@/characters/identityReference";
 import { stateFromInstance } from "@/characters/state";
 import { getStyleGenerationContext, isMonochromeStyle, styleMetadata } from "@/styles/generation";
-import type { AssetInstance, ID, InteractionParameters, InteractionParticipant, InteractionType, ProjectDocument } from "@/domain/types";
+import type { AssetInstance, ID, InteractionParameters, InteractionParticipant, InteractionType, PanelCamera, PanelPerspective, ProjectDocument } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { puppetForInstance } from "@/domain/puppetOps";
 import { resolveInteraction, type InteractionResolution } from "./interactionResolver";
+import { cameraContextForPanel } from "./cameraResolver";
 import {
   interactionLabel,
   buildInteractionRenderRequest,
@@ -210,6 +211,21 @@ export interface RenderOutcome {
 }
 
 /**
+ * A shot-level camera riding on an existing interaction (v0.3 Phase 4).
+ *
+ * Strictly OPTIONAL: when absent, renderInteraction is byte-identical to the
+ * v0.2 baseline (prompt, references, cache key, profile, transparency,
+ * category, lifecycle all unchanged). When present, the camera sentences are
+ * APPENDED to the same joint prompt and the camera becomes part of the cache
+ * identity — one unified generated shot, never per-asset redraws overlaid.
+ */
+export interface InteractionCameraIntent {
+  camera: PanelCamera;
+  /** Active perspective rig, when the panel has one. */
+  perspective?: PanelPerspective;
+}
+
+/**
  * Draw (or reuse) the single image that shows an existing interaction.
  *
  * Split out from placement so the Inspector can preview the result before it
@@ -219,6 +235,7 @@ export interface RenderOutcome {
 export async function renderInteraction(
   interactionId: ID,
   expressions?: Record<ID, string>,
+  cameraIntent?: InteractionCameraIntent,
 ): Promise<RenderOutcome> {
   const doc = () => {
     const current = useEditorStore.getState().doc;
@@ -246,6 +263,14 @@ export async function renderInteraction(
     outfits: participantIds.map((id) => outfitOf(doc(), panelId, id)),
     view: "front",
     styleProfileId: style.profile.id,
+    // Camera joins the cache identity ONLY when a camera intent rides along —
+    // absent means the v0.2 "any/any" key, so the protected baseline is
+    // bit-for-bit stable.
+    shot: cameraIntent?.camera.shot,
+    angle: cameraIntent?.camera.angle,
+    lens: cameraIntent?.camera.lens,
+    yaw: cameraIntent?.camera.yaw,
+    perspective: cameraIntent?.perspective && cameraIntent.perspective.type !== "none" ? cameraIntent.perspective.type : undefined,
     expressions,
   });
 
@@ -360,6 +385,10 @@ export async function renderInteraction(
     ...model.outfitConstraints,
     ...fidelityLock,
     ...expressionConstraints,
+    // Appended last and ONLY when a camera intent exists: the camera describes
+    // how the whole shot is observed, so it constrains the joint picture after
+    // every identity/fidelity lock is stated. Absent → byte-stable baseline.
+    ...(cameraIntent ? cameraContextForPanel(cameraIntent.camera, cameraIntent.perspective) : []),
   ].join(" ");
 
   /**
@@ -399,6 +428,15 @@ export async function renderInteraction(
       interactionId,
       interactionPrompt: interaction.parameters?.customInstruction,
       referenceAssetIds: model.participantReferenceAssetIds,
+      // Camera provenance (Phase 4): the merged derivative knows which
+      // viewpoint drew it, so a later widening knows what frame it starts from.
+      ...(cameraIntent
+        ? {
+            cameraShot: cameraIntent.camera.shot,
+            cameraAngle: cameraIntent.camera.angle,
+            cameraLens: cameraIntent.camera.lens,
+          }
+        : {}),
     },
   });
 
@@ -457,7 +495,10 @@ export function placeInteractionRender(
  * HIDDEN, not deleted — undo and layer-visibility recovery both keep working.
  * A cache hit that is already on the page is left alone (no duplicate instance).
  */
-export async function rerenderInteraction(interactionId: ID): Promise<RenderOutcome> {
+export async function rerenderInteraction(
+  interactionId: ID,
+  cameraIntent?: InteractionCameraIntent,
+): Promise<RenderOutcome> {
   const doc = useEditorStore.getState().doc;
   const interaction = doc?.interactions[interactionId];
   if (!doc || !interaction) throw new Error("That interaction no longer exists");
@@ -467,7 +508,7 @@ export async function rerenderInteraction(interactionId: ID): Promise<RenderOutc
       .filter((render) => render.interactionId === interactionId)
       .map((render) => render.generatedAssetId),
   );
-  const outcome = await renderInteraction(interactionId);
+  const outcome = await renderInteraction(interactionId, undefined, cameraIntent);
 
   const panelItemIds = useEditorStore.getState().doc?.panels[interaction.panelId]?.itemIds ?? [];
   const items = panelItemIds

@@ -21,8 +21,7 @@ import {
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
 import { resolveCameraExecution, type CameraExecutionDecision } from "@/services/cameraResolver";
-import { redrawCharacterForCamera } from "@/services/characterCamera";
-import { redrawSceneForCamera } from "@/services/sceneCamera";
+import { applyCameraToShot } from "@/services/shotCamera";
 import { characterIdOfInstance } from "@/characters/identity";
 import type { AssetInstance, CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -292,26 +291,26 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
             {redraw.reason} Composition is updated now; the artwork itself would need regenerating to match.
           </p>
           {/*
-            Generative camera, minimal closure (Phase 2): the selected character
-            (or the panel's only character) is redrawn under this camera through
-            the SAME state runtime as pose/expression edits — never a parallel
-            pipeline. LOCAL camera work never shows this button.
+            Generative camera, shot-level (Phase 4): ONE button hands the panel
+            camera to the Shot Camera Application Service, which routes to the
+            joint interaction path, character camera or scene camera. LOCAL
+            camera work never shows this button.
           */}
           {(() => {
-            const charTarget = cast.find((entry) => entry.item.id === selection.itemId) ?? (cast.length === 1 ? cast[0] : undefined);
+            // Routing is the Shot Camera service's job (Phase 4): the UI only
+            // hands over the selection and the panel camera — never branches
+            // on character/scene/interaction itself.
+            const panelHasInteraction = Object.values(doc.interactions ?? {}).some(
+              (interaction) => interaction.panelId === panel.id && interaction.renderMode === "composite",
+            );
             const sceneItems = panel.itemIds
               .map((id) => doc.items[id])
               .filter(
                 (item): item is AssetInstance =>
                   item?.kind === "asset" && doc.assets[item.sourceAssetId]?.category === "background",
               );
-            const sceneItem = sceneItems.find((item) => item.id === selection.itemId) ?? (sceneItems.length === 1 ? sceneItems[0] : undefined);
-            const target = charTarget
-              ? { kind: "character" as const, instanceId: charTarget.item.id, name: charTarget.character.name }
-              : sceneItem
-                ? { kind: "scene" as const, instanceId: sceneItem.id, name: doc.assets[sceneItem.sourceAssetId]?.name ?? "Scene" }
-                : undefined;
-            if (!target) return null;
+            const hasTarget = Boolean(selection.itemId) || cast.length === 1 || sceneItems.length === 1 || panelHasInteraction;
+            if (!hasTarget) return null;
             return (
               <>
                 <button
@@ -321,13 +320,12 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                     setCameraBusy(true);
                     setCameraError(null);
                     try {
-                      // One button, one boundary: characters and scenes both go
-                      // through the camera services over the EXISTING runtimes.
-                      if (target.kind === "character") {
-                        await redrawCharacterForCamera({ instanceId: target.instanceId, camera });
-                      } else {
-                        await redrawSceneForCamera({ instanceId: target.instanceId, camera, perspective });
-                      }
+                      await applyCameraToShot({
+                        panelId: panel.id,
+                        instanceId: selection.itemId,
+                        camera,
+                        perspective,
+                      });
                     } catch (error) {
                       setCameraError(error instanceof Error ? error.message : "Camera redraw failed");
                     } finally {
@@ -336,7 +334,7 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                   }}
                   className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
                 >
-                  {cameraBusy ? "Generating camera view…" : `✨ Generate Camera View — ${target.name}`}
+                  {cameraBusy ? "Generating camera view…" : "✨ Generate Camera View"}
                 </button>
                 {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
               </>
