@@ -28,7 +28,7 @@
  *     come back as a DIFFERENT street. That fails loudly instead.
  */
 
-import type { ID, PanelCamera, PanelPerspective } from "@/domain/types";
+import type { ID, PanelCamera, PanelPerspective, ProjectDocument } from "@/domain/types";
 import { cameraGenerationContext, perspectiveGenerationContext, shotGenerationContext } from "@/domain/staging";
 import { panelAspectFor, resolveCameraExecution } from "@/services/cameraResolver";
 import { generateImage, registerGeneratedAsset } from "@/services/generation";
@@ -92,8 +92,12 @@ export async function redrawSceneForCamera(input: {
     throw new Error("This camera change is achievable with the existing artwork — no generation needed.");
   }
 
-  // Hard reference: the scene's own image, never a text description.
-  const referenceUrl = assetRenderUrl(scene);
+  // Hard reference: the scene's LINEAGE ROOT image, never a text description —
+  // and never the latest camera derivative. Anchoring each redraw to the
+  // previous derivative compounds drift ("street · high" → "street · high ·
+  // low" was observed in production); the root is the identity anchor.
+  const referenceAsset = sceneLineageRoot(doc, scene.id);
+  const referenceUrl = assetRenderUrl(referenceAsset);
   if (!referenceUrl) {
     throw new Error(
       `"${scene.name}" has no usable image to anchor a camera redraw; regenerating from text alone would produce a different place.`,
@@ -144,4 +148,21 @@ export async function redrawSceneForCamera(input: {
 /** Which panel currently hosts this instance, if any. */
 function findPanelOf(doc: { panels: Record<string, { itemIds: ID[] }> }, instanceId: ID): ID | undefined {
   return Object.keys(doc.panels).find((panelId) => doc.panels[panelId].itemIds.includes(instanceId));
+}
+
+/**
+ * Walk a scene asset's provenance chain (metadata.referenceAssetIds) to its
+ * original image. Camera derivatives record their source scene there; the
+ * chain is short and acyclic by construction, but the hop cap keeps a corrupt
+ * document from looping forever.
+ */
+function sceneLineageRoot(doc: ProjectDocument, assetId: ID) {
+  let current = doc.assets[assetId];
+  for (let hops = 0; current && hops < 10; hops++) {
+    const parentId = current.metadata?.referenceAssetIds?.[0];
+    const parent = parentId ? doc.assets[parentId] : undefined;
+    if (!parent || parent.category !== "background") return current;
+    current = parent;
+  }
+  return current;
 }

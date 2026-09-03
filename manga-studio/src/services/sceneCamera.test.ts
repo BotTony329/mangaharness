@@ -194,3 +194,39 @@ describe("CASE B5 — LOCAL camera never generates", () => {
     expect(generateImage).not.toHaveBeenCalled();
   });
 });
+
+describe("B2 — lineage root: a camera derivative redraw anchors the ORIGINAL scene", () => {
+  it("Original A → High derivative B → Low redraw: the reference is A, never B", async () => {
+    let doc: ProjectDocument = createProjectDocument("Lineage");
+    const original = addAsset(doc, {
+      category: "background",
+      name: "Old Street",
+      storageUrl: "https://example.com/street-original.png",
+      width: 1600,
+      height: 900,
+    });
+    doc = original.doc;
+    // B is a prior camera derivative of A (provenance chain via referenceAssetIds).
+    const derivative = addAsset(doc, {
+      category: "background",
+      name: "Old Street · high · medium",
+      storageUrl: "https://example.com/street-high.png",
+      width: 1600,
+      height: 900,
+      metadata: { referenceAssetIds: [original.assetId], cameraAngle: "high" as const, cameraShot: "medium" as const },
+    });
+    doc = derivative.doc;
+    const panelId = Object.keys(doc.panels)[0];
+    useEditorStore.setState({ doc } as never);
+    const placed = useEditorStore.getState().dispatch({ type: "add-instance", panelId, assetId: derivative.assetId });
+
+    await redrawSceneForCamera({ instanceId: placed.createdId!, camera: createPanelCamera({ angle: "low" }) });
+
+    // The second camera redraw must re-anchor on the original street — a
+    // derivative-anchored chain compounds drift generation over generation.
+    expect(generateImage.mock.calls[0][0].referenceUrls).toEqual(["https://example.com/street-original.png"]);
+    // Provenance still records the swap source as the derivative being replaced.
+    const registration = registerGeneratedAsset.mock.calls[0][0];
+    expect(registration.metadata.referenceAssetIds).toEqual([derivative.assetId]);
+  });
+});
