@@ -19,7 +19,7 @@ import {
   type CameraPatch,
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
-import { cameraChangeRequiresRedraw } from "@/domain/staging";
+import { resolveCameraExecution, type CameraExecutionDecision } from "@/services/cameraResolver";
 import { characterIdOfInstance } from "@/characters/identity";
 import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -71,9 +71,16 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
   const camera = panel.camera ?? createPanelCamera();
   const perspective = panel.perspective ?? createPanelPerspective();
   const editingGuides = guideEditPanelId === panelId;
-  const redraw = cameraChangeRequiresRedraw("angle", camera).requiresRedraw
-    ? cameraChangeRequiresRedraw("angle", camera)
-    : cameraChangeRequiresRedraw("mangaPerspective", camera);
+  // The redraw verdict comes from the ONE resolver boundary; the canonical
+  // rule lives in domain/staging and is never re-judged here.
+  const toRedraw = (decision: CameraExecutionDecision) => ({
+    requiresRedraw: decision.execution === "GENERATIVE_REDRAW",
+    reason: decision.reason,
+  });
+  const angleRedraw = toRedraw(resolveCameraExecution({ change: "angle", camera }));
+  const redraw = angleRedraw.requiresRedraw
+    ? angleRedraw
+    : toRedraw(resolveCameraExecution({ change: "mangaPerspective", camera }));
 
   // Characters placed in this panel, in stacking order.
   const cast = panel.itemIds
