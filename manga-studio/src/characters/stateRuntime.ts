@@ -2,7 +2,7 @@
 
 import { generateImage, registerGeneratedAsset, imageProviderCapabilities } from "@/services/generation";
 import { buildAssetPrompt, buildCharacterStatePrompt } from "@/ai/promptTemplates";
-import type { Character, CharacterState, ID } from "@/domain/types";
+import type { Character, CharacterState, ID, PanelCamera } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import {
   DEFAULT_CHARACTER_STATE,
@@ -40,6 +40,13 @@ export async function generateCharacterAssetForState(input: {
   changedDimensions?: (keyof CharacterStatePatch)[];
   /** Explicit reference chosen in the selector; omit to use the resolver's pick. */
   referenceOverride?: ResolveOptions["referenceOverride"];
+  /**
+   * v0.3 generative camera: provider-neutral camera sentences injected into the
+   * state prompt, plus the panel camera for provenance metadata. Absent means
+   * the request is byte-identical to the pre-camera baseline.
+   */
+  cameraContext?: string[];
+  camera?: PanelCamera;
 }): Promise<ID> {
   const doc = useEditorStore.getState().doc;
   const character = doc?.characters[input.characterId];
@@ -100,6 +107,7 @@ export async function generateCharacterAssetForState(input: {
           style: style.profile,
           supportsNativeTransparency: capabilities.nativeTransparency,
           monochrome: isMonochromeStyle(style.profile),
+          cameraContext: input.cameraContext,
         });
 
   const result = await generateImage({
@@ -133,6 +141,9 @@ export async function generateCharacterAssetForState(input: {
       stateDelta: resolution?.status === "needs-generation" ? resolution.delta : undefined,
       props: input.state.props,
       poseRig: input.state.poseRig,
+      cameraShot: input.camera?.shot,
+      cameraAngle: input.camera?.angle,
+      cameraLens: input.camera?.lens,
       ...styleMetadata(style),
     },
   });
@@ -145,6 +156,9 @@ export async function applyCharacterStateToInstance(input: {
   forceRegenerate?: boolean;
   instruction?: string;
   referenceOverride?: ResolveOptions["referenceOverride"];
+  /** v0.3 generative camera passthrough — see generateCharacterAssetForState. */
+  cameraContext?: string[];
+  camera?: PanelCamera;
   onProgress?: (progress: CharacterGenerationProgress) => void;
 }): Promise<{
   assetId: ID;
@@ -193,6 +207,8 @@ export async function applyCharacterStateToInstance(input: {
         (key) => input.patch[key] !== undefined,
       ),
       referenceOverride: input.referenceOverride,
+      cameraContext: input.cameraContext,
+      camera: input.camera,
     });
     source = "generated";
     input.onProgress?.({ stage: "saving", state: desired });

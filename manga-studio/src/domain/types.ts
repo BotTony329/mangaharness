@@ -90,6 +90,14 @@ export interface AssetGenerationMetadata {
   props?: string[];
   /** Authored pose edit baked into this render. */
   poseRig?: PoseRigState;
+  /**
+   * The panel camera this render was generated UNDER (v0.3 generative camera).
+   * Recorded so a camera redraw stays a first-class, re-editable state rather
+   * than an orphan image, and so provenance can say which viewpoint drew it.
+   */
+  cameraShot?: ShotType;
+  cameraAngle?: CameraAngle;
+  cameraLens?: CameraLens;
   /** Snapshot of the project style used for this immutable generation. */
   styleProfileId?: ID;
   styleName?: string;

@@ -443,6 +443,15 @@ export function cameraGenerationContext(camera: PanelCamera | undefined): string
     lines.push("Subtle manga foreshortening.");
   }
 
+  // Yaw only enters the prompt when it is a genuine viewpoint rotation — the
+  // same threshold cameraChangeRequiresRedraw uses, so a minor pan never
+  // reaches generation wording.
+  if (Math.abs(camera.yaw) >= 20) {
+    lines.push(
+      `Camera rotated ${Math.round(Math.abs(camera.yaw))}° around the subject, viewing them from the ${camera.yaw > 0 ? "right" : "left"}; the visible side of the subject changes accordingly.`,
+    );
+  }
+
   return lines;
 }
 

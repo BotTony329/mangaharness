@@ -120,7 +120,13 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
       ? "Preserve the exact visual language, face design, proportions, hairstyle, outfit, and line style of the supplied character reference. Change only the requested pose and expression. Do not redesign the character."
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
-    `Whole body visible head to feet. ${characterIsolationInstruction(input)}`,
+    /**
+     * Default state renders are full-body. When a camera context rides along
+     * (v0.3 generative camera) the SHOT owns the framing — a medium shot must
+     * not be contradicted by "whole body visible". The isolation (cutout)
+     * clause stays either way: the result still composites into panels.
+     */
+    input.cameraContext?.length ? characterIsolationInstruction(input) : `Whole body visible head to feet. ${characterIsolationInstruction(input)}`,
     ...(input.cameraContext ?? []),
     styleInstruction(input.style),
     aspectHint(input.aspect ?? "portrait"),

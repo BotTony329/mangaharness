@@ -11,6 +11,7 @@
  * Advanced; perspective machinery behind Perspective Guides.
  */
 
+import { useState } from "react";
 import {
   MANGA_PERSPECTIVE_LABELS,
   MAX_MANGA_PERSPECTIVE,
@@ -20,6 +21,7 @@ import {
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
 import { resolveCameraExecution, type CameraExecutionDecision } from "@/services/cameraResolver";
+import { redrawCharacterForCamera } from "@/services/characterCamera";
 import { characterIdOfInstance } from "@/characters/identity";
 import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -65,6 +67,9 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
   const commitTransient = useEditorStore((state) => state.commitTransient);
   const guideEditPanelId = useUiStore((state) => state.guideEditPanelId);
   const setGuideEditPanel = useUiStore((state) => state.setGuideEditPanel);
+  const selection = useEditorStore((state) => state.selection);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const panel = doc?.panels[panelId];
   if (!doc || !panel) return null;
 
@@ -281,9 +286,44 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
       )}
 
       {redraw.requiresRedraw && (
-        <p className="rounded border border-amber-800/60 bg-amber-950/30 p-2 text-[10px] leading-4 text-amber-300">
-          {redraw.reason} Composition is updated now; the artwork itself would need regenerating to match.
-        </p>
+        <div className="space-y-2 rounded border border-amber-800/60 bg-amber-950/30 p-2">
+          <p className="text-[10px] leading-4 text-amber-300">
+            {redraw.reason} Composition is updated now; the artwork itself would need regenerating to match.
+          </p>
+          {/*
+            Generative camera, minimal closure (Phase 2): the selected character
+            (or the panel's only character) is redrawn under this camera through
+            the SAME state runtime as pose/expression edits — never a parallel
+            pipeline. LOCAL camera work never shows this button.
+          */}
+          {(() => {
+            const target = cast.find((entry) => entry.item.id === selection.itemId) ?? (cast.length === 1 ? cast[0] : undefined);
+            if (!target) return null;
+            return (
+              <>
+                <button
+                  type="button"
+                  disabled={cameraBusy}
+                  onClick={async () => {
+                    setCameraBusy(true);
+                    setCameraError(null);
+                    try {
+                      await redrawCharacterForCamera({ instanceId: target.item.id, camera });
+                    } catch (error) {
+                      setCameraError(error instanceof Error ? error.message : "Camera redraw failed");
+                    } finally {
+                      setCameraBusy(false);
+                    }
+                  }}
+                  className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {cameraBusy ? "Generating camera view…" : `✨ Generate Camera View — ${target.character.name}`}
+                </button>
+                {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
+              </>
+            );
+          })()}
+        </div>
       )}
 
       {/* Perspective Guides — second tier */}
