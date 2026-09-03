@@ -39,6 +39,43 @@ export interface GenerationErrorDetails {
   stage?: string;
 }
 
+/**
+ * Runtime evidence ring buffer (v0.3 Patch B live-gate debugging).
+ *
+ * Contract tests prove WHAT the code would send; they cannot prove what a
+ * specific production click sent. Every provider-boundary call and every asset
+ * registration is recorded here — sanitized by construction (the client never
+ * holds credentials), capped, and exposed read-only at
+ * `window.__kumangaGenerationLog` so a live session can be dumped verbatim:
+ *
+ *   copy(JSON.stringify(window.__kumangaGenerationLog, null, 2))
+ *
+ * Observability only: records, never alters, the request/response flow.
+ */
+export interface GenerationEvidence {
+  kind: "request" | "response" | "error" | "registration" | "camera-route";
+  /** Stamped by recordGenerationEvidence; callers omit it. */
+  at?: string;
+  [key: string]: unknown;
+}
+
+const EVIDENCE_LIMIT = 20;
+const generationEvidenceLog: GenerationEvidence[] = [];
+
+export function recordGenerationEvidence(entry: GenerationEvidence): void {
+  generationEvidenceLog.push({ ...entry, at: new Date().toISOString() });
+  if (generationEvidenceLog.length > EVIDENCE_LIMIT) generationEvidenceLog.shift();
+  if (typeof window !== "undefined") {
+    (window as unknown as { __kumangaGenerationLog: readonly GenerationEvidence[] }).__kumangaGenerationLog =
+      generationEvidenceLog;
+  }
+}
+
+/** Test/debug access without going through window. */
+export function generationEvidence(): readonly GenerationEvidence[] {
+  return generationEvidenceLog;
+}
+
 export class GenerationApiError extends Error {
   readonly requestId?: string;
   readonly details?: GenerationErrorDetails;
@@ -59,6 +96,15 @@ export async function callGenerateApi(request: {
   /** Project style is monochrome: the server refuses colour-contaminated results. */
   expectMonochrome?: boolean;
 }): Promise<GenerateApiResult> {
+  recordGenerationEvidence({
+    kind: "request",
+    assetType: request.assetType,
+    size: request.size,
+    prompt: request.prompt,
+    negativePrompt: request.negativePrompt,
+    referenceUrls: request.referenceUrls ?? [],
+    expectMonochrome: request.expectMonochrome,
+  });
   const response = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -69,8 +115,31 @@ export async function callGenerateApi(request: {
     requestId?: string;
     details?: GenerationErrorDetails;
   };
-  if (!response.ok) throw new GenerationApiError(body.error ?? "Generation failed", body.requestId, body.details);
-  return body as GenerateApiResult;
+  if (!response.ok) {
+    recordGenerationEvidence({
+      kind: "error",
+      assetType: request.assetType,
+      error: body.error ?? "Generation failed",
+      requestId: body.requestId,
+      details: body.details,
+    });
+    throw new GenerationApiError(body.error ?? "Generation failed", body.requestId, body.details);
+  }
+  const result = body as GenerateApiResult;
+  recordGenerationEvidence({
+    kind: "response",
+    assetType: request.assetType,
+    provider: result.provider,
+    model: result.model,
+    hasAlpha: result.hasAlpha,
+    backgroundRemoved: result.backgroundRemoved,
+    processingStatus: result.processingStatus,
+    processingReason: result.processingReason,
+    backgroundRemovalMethod: result.backgroundRemovalMethod,
+    referenceUsed: result.referenceUsed,
+    requestId: result.requestId,
+  });
+  return result;
 }
 
 export function measureImage(url: string): Promise<{ width: number; height: number }> {
@@ -151,6 +220,16 @@ export async function storeGeneratedAsset(input: StoreGeneratedAssetInput): Prom
     },
   });
   if (!created.createdId) throw new Error("Generated asset could not be registered");
+  recordGenerationEvidence({
+    kind: "registration",
+    assetId: created.createdId,
+    category: input.category,
+    assetType: input.assetType,
+    name: input.name,
+    cameraShot: input.metadata?.cameraShot,
+    cameraAngle: input.metadata?.cameraAngle,
+    referenceAssetIds: input.metadata?.referenceAssetIds,
+  });
   return created.createdId;
 }
 

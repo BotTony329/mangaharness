@@ -26,6 +26,7 @@ export {
   CharacterTransparencyError,
   measureImage,
   recordFailedGeneration,
+  recordGenerationEvidence,
 } from "@/ai/clientGeneration";
 export type {
   GenerateApiResult,

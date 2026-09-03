@@ -24,6 +24,7 @@ vi.mock("@/services/generation", () => ({
   generateImage: (...args: unknown[]) => generateImage(...args),
   registerGeneratedAsset: (...args: unknown[]) => registerGeneratedAsset(...args),
   imageProviderCapabilities: async () => ({ referenceImage: true, nativeTransparency: false }),
+  recordGenerationEvidence: () => {},
 }));
 
 import { PanelStageControls } from "./PanelStageControls";

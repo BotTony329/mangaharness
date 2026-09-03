@@ -38,6 +38,7 @@ import { resolveCameraExecution } from "@/services/cameraResolver";
 import { redrawCharacterForCamera } from "@/services/characterCamera";
 import { redrawSceneForCamera } from "@/services/sceneCamera";
 import { rerenderInteraction } from "@/services/interaction";
+import { recordGenerationEvidence } from "@/services/generation";
 
 export type ShotCameraRoute = "interaction" | "character" | "scene";
 
@@ -114,6 +115,15 @@ export async function applyCameraToShot(input: {
   // INTERACTION > SINGLE ASSET — one unified generated shot, never overlays.
   if (interaction) {
     const outcome = await rerenderInteraction(interaction.id, { camera: input.camera, perspective: input.perspective });
+    // Runtime evidence: which route served a real click, with what result.
+    recordGenerationEvidence({
+      kind: "camera-route",
+      route: "interaction",
+      interactionId: interaction.id,
+      assetId: outcome.assetId,
+      reusedCache: outcome.reusedCache,
+      generationCalls: outcome.generationCalls,
+    });
     return {
       route: "interaction",
       targetId: interaction.id,
@@ -132,10 +142,26 @@ export async function applyCameraToShot(input: {
   const category = doc.assets[target.sourceAssetId]?.category;
   if (category === "background") {
     const result = await redrawSceneForCamera({ instanceId: target.id, camera: input.camera, perspective: input.perspective });
+    recordGenerationEvidence({
+      kind: "camera-route",
+      route: "scene",
+      instanceId: target.id,
+      previousAssetId: result.previousAssetId,
+      assetId: result.assetId,
+      generationCalls: 1,
+    });
     return { route: "scene", targetId: target.id, assetId: result.assetId, generationCalls: 1 };
   }
   if (stateFromInstance(doc, target)) {
     const result = await redrawCharacterForCamera({ instanceId: target.id, camera: input.camera });
+    recordGenerationEvidence({
+      kind: "camera-route",
+      route: "character",
+      instanceId: target.id,
+      previousAssetId: result.previousAssetId,
+      assetId: result.assetId,
+      generationCalls: 1,
+    });
     return { route: "character", targetId: target.id, assetId: result.assetId, generationCalls: 1 };
   }
   // Known limitation (v0.3): a standalone object has no single-asset camera
