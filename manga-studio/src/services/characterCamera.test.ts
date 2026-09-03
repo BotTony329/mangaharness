@@ -191,3 +191,42 @@ describe("CASE A5 — LOCAL camera never generates", () => {
     expect(generateImage).not.toHaveBeenCalled();
   });
 });
+
+describe("PATCH B — camera prompt authority (camera overrides legacy orientation)", () => {
+  it.each([
+    ["high", "High camera angle looking down at the subject."],
+    ["low", "Low camera angle looking up at the subject; eye level below the subject."],
+    ["overhead", "Overhead bird's-eye view looking straight down."],
+  ] as const)("%s: camera semantics present, legacy orientation constraints gone, fidelity locks kept", async (angle, sentence) => {
+    const s = studio();
+    const instanceId = placeMika(s.doc, s.panelId, s.refId);
+
+    await redrawCharacterForCamera({ instanceId, camera: createPanelCamera({ angle }) });
+
+    const prompt: string = generateImage.mock.calls[0][0].prompt;
+    // Camera semantics actually requested.
+    expect(prompt).toContain(sentence);
+    // The two confirmed conflicts must not fight the camera (Phase 4.1 audit).
+    expect(prompt).not.toContain("View: front.");
+    expect(prompt).not.toContain("Change only the requested pose and expression.");
+    // Identity/outfit preservation survives — as the camera-aware variant.
+    expect(prompt).toContain("Preserve the exact identity, face design, proportions, hairstyle, outfit, colors, accessories and line style");
+    expect(prompt).toContain("do not redesign the character");
+    expect(prompt).toContain("Mika's identity and outfit are locked");
+    // Pose semantics retained; only geometric projection follows the camera.
+    expect(prompt).toMatch(/Pose: standing\./i);
+  });
+
+  it("NO CAMERA: the legacy prompt keeps its orientation clauses byte-stable", async () => {
+    const s = studio();
+    useEditorStore.setState({ doc: s.doc } as never);
+    await generateCharacterAssetForState({
+      characterId: s.mikaId,
+      state: { ...DEFAULT_CHARACTER_STATE, characterId: s.mikaId, pose: "walking" },
+    });
+    const prompt: string = generateImage.mock.calls[0][0].prompt;
+    expect(prompt).toContain("View: front.");
+    expect(prompt).toContain("Change only the requested pose and expression.");
+    expect(prompt).not.toContain("camera");
+  });
+});

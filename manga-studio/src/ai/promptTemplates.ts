@@ -107,6 +107,13 @@ export function buildAssetPrompt(input: AssetPromptInput): string {
 
 /** Complete prompt for one semantic character render, always identity anchored. */
 export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetType">): string {
+  // Camera authority (v0.3 Patch B): when a camera context rides along, the
+  // CAMERA owns viewpoint — the legacy presentation orientation ("View: front")
+  // and the "change only pose and expression" preservation clause would
+  // directly contradict e.g. "High camera angle looking down at the subject",
+  // and models obey the stronger preservation wording. Absent cameraContext,
+  // every byte of the legacy prompt is preserved.
+  const cameraOwnsViewpoint = Boolean(input.cameraContext?.length);
   return [
     input.hasReference
       ? `Redraw the exact same manga character from the canonical identity reference: ${input.characterName ?? "character"}.`
@@ -115,9 +122,11 @@ export function buildCharacterStatePrompt(input: Omit<AssetPromptInput, "assetTy
     `Pose: ${input.pose ?? "standing"}.`,
     `Expression: ${input.expression ?? "neutral"}.`,
     `Outfit: ${input.outfit ?? "default outfit"}.`,
-    `View: ${input.view ?? "front"}.`,
+    cameraOwnsViewpoint ? "" : `View: ${input.view ?? "front"}.`,
     input.hasReference
-      ? "Preserve the exact visual language, face design, proportions, hairstyle, outfit, and line style of the supplied character reference. Change only the requested pose and expression. Do not redesign the character."
+      ? cameraOwnsViewpoint
+        ? "Preserve the exact identity, face design, proportions, hairstyle, outfit, colors, accessories and line style of the supplied character reference; do not redesign the character. The camera viewpoint is being reconstructed: viewpoint, foreshortening, visible surfaces, pose projection, framing and camera-driven lighting may all change to match it."
+        : "Preserve the exact visual language, face design, proportions, hairstyle, outfit, and line style of the supplied character reference. Change only the requested pose and expression. Do not redesign the character."
       : "Keep the design distinctive and internally consistent.",
     input.description ?? "",
     /**
