@@ -230,3 +230,63 @@ describe("B2 — lineage root: a camera derivative redraw anchors the ORIGINAL s
     expect(registration.metadata.referenceAssetIds).toEqual([derivative.assetId]);
   });
 });
+
+describe("B3 — aspect contract: prompt orientation matches request size", () => {
+  it("portrait panel: prompt says portrait, never landscape; size matches", async () => {
+    const s = streetScene();
+    // Narrow tall panel → portrait.
+    const doc = useEditorStore.getState().doc!;
+    useEditorStore.setState({
+      doc: {
+        ...doc,
+        panels: {
+          ...doc.panels,
+          [s.panelId]: {
+            ...doc.panels[s.panelId],
+            points: [
+              { x: 0, y: 0 },
+              { x: 600, y: 0 },
+              { x: 600, y: 1200 },
+              { x: 0, y: 1200 },
+            ],
+          },
+        },
+      },
+    } as never);
+
+    await redrawSceneForCamera({ instanceId: s.instanceId, camera: createPanelCamera({ angle: "low" }) });
+
+    const request = generateImage.mock.calls[0][0];
+    expect(request.size).toBe("portrait");
+    expect(request.prompt).toContain("Portrait orientation, 2:3 aspect ratio.");
+    expect(request.prompt).not.toContain("Landscape orientation");
+  });
+
+  it("landscape panel: prompt says landscape and size matches", async () => {
+    const s = streetScene();
+    const doc = useEditorStore.getState().doc!;
+    useEditorStore.setState({
+      doc: {
+        ...doc,
+        panels: {
+          ...doc.panels,
+          [s.panelId]: {
+            ...doc.panels[s.panelId],
+            points: [
+              { x: 0, y: 0 },
+              { x: 1600, y: 0 },
+              { x: 1600, y: 900 },
+              { x: 0, y: 900 },
+            ],
+          },
+        },
+      },
+    } as never);
+
+    await redrawSceneForCamera({ instanceId: s.instanceId, camera: createPanelCamera({ angle: "low" }) });
+
+    const request = generateImage.mock.calls[0][0];
+    expect(request.size).toBe("landscape");
+    expect(request.prompt).toContain("Landscape orientation, 3:2 aspect ratio.");
+  });
+});

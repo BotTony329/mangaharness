@@ -105,12 +105,17 @@ export async function redrawSceneForCamera(input: {
   }
 
   const style = getStyleGenerationContext(doc);
+  const aspect = panelAspectFor(panel);
   const prompt = [
     buildAssetPrompt({
       assetType: "background",
       description: `Redraw the exact same environment from the reference image, seen from the requested camera viewpoint: "${scene.name}".`,
       style: style.profile,
       monochrome: isMonochromeStyle(style.profile),
+      // The prompt's orientation sentence must match the size parameter —
+      // "Landscape orientation, 3:2" alongside size=portrait was observed in
+      // production fighting the panel's actual frame.
+      aspect,
     }),
     ...sceneCameraContext(input.camera, scene.name, input.perspective),
   ].join(" ");
@@ -119,7 +124,7 @@ export async function redrawSceneForCamera(input: {
     assetType: "background",
     prompt,
     negativePrompt: style.profile.negativePrompt,
-    size: panelAspectFor(panel),
+    size: aspect,
     expectMonochrome: isMonochromeStyle(style.profile),
     referenceUrls: [referenceUrl],
   });
