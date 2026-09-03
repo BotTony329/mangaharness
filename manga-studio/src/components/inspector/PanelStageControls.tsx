@@ -20,10 +20,10 @@ import {
   type CameraPatch,
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
-import { resolveCameraExecution, type CameraExecutionDecision } from "@/services/cameraResolver";
+import { planShotCamera } from "@/services/shotCamera";
 import { applyCameraToShot } from "@/services/shotCamera";
 import { characterIdOfInstance } from "@/characters/identity";
-import type { AssetInstance, CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
+import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
 import { useUiStore } from "@/editor/uiStore";
 
@@ -76,16 +76,13 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
   const camera = panel.camera ?? createPanelCamera();
   const perspective = panel.perspective ?? createPanelPerspective();
   const editingGuides = guideEditPanelId === panelId;
-  // The redraw verdict comes from the ONE resolver boundary; the canonical
-  // rule lives in domain/staging and is never re-judged here.
-  const toRedraw = (decision: CameraExecutionDecision) => ({
-    requiresRedraw: decision.execution === "GENERATIVE_REDRAW",
-    reason: decision.reason,
-  });
-  const angleRedraw = toRedraw(resolveCameraExecution({ change: "angle", camera }));
-  const redraw = angleRedraw.requiresRedraw
-    ? angleRedraw
-    : toRedraw(resolveCameraExecution({ change: "mangaPerspective", camera }));
+  // The button's visibility verdict is the SAME judgement the Shot Camera
+  // service gates on — covering angle, yaw, manga perspective, the perspective
+  // rig and shot widening — so the button can never hide while the service
+  // would redraw (the Phase 4.1 gap: an angle-only check hid every other
+  // generative camera change behind a silent staging preview).
+  const shotPlan = planShotCamera(doc, { panelId, instanceId: selection.itemId, camera, perspective });
+  const redraw = { requiresRedraw: shotPlan.requiresRedraw, reason: shotPlan.reason };
 
   // Characters placed in this panel, in stacking order.
   const cast = panel.itemIds
@@ -294,52 +291,37 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
             Generative camera, shot-level (Phase 4): ONE button hands the panel
             camera to the Shot Camera Application Service, which routes to the
             joint interaction path, character camera or scene camera. LOCAL
-            camera work never shows this button.
+            camera work never shows this button. Visibility and routability are
+            the service's OWN plan verdict, so the UI holds no routing branches.
           */}
-          {(() => {
-            // Routing is the Shot Camera service's job (Phase 4): the UI only
-            // hands over the selection and the panel camera — never branches
-            // on character/scene/interaction itself.
-            const panelHasInteraction = Object.values(doc.interactions ?? {}).some(
-              (interaction) => interaction.panelId === panel.id && interaction.renderMode === "composite",
-            );
-            const sceneItems = panel.itemIds
-              .map((id) => doc.items[id])
-              .filter(
-                (item): item is AssetInstance =>
-                  item?.kind === "asset" && doc.assets[item.sourceAssetId]?.category === "background",
-              );
-            const hasTarget = Boolean(selection.itemId) || cast.length === 1 || sceneItems.length === 1 || panelHasInteraction;
-            if (!hasTarget) return null;
-            return (
-              <>
-                <button
-                  type="button"
-                  disabled={cameraBusy}
-                  onClick={async () => {
-                    setCameraBusy(true);
-                    setCameraError(null);
-                    try {
-                      await applyCameraToShot({
-                        panelId: panel.id,
-                        instanceId: selection.itemId,
-                        camera,
-                        perspective,
-                      });
-                    } catch (error) {
-                      setCameraError(error instanceof Error ? error.message : "Camera redraw failed");
-                    } finally {
-                      setCameraBusy(false);
-                    }
-                  }}
-                  className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
-                >
-                  {cameraBusy ? "Generating camera view…" : "✨ Generate Camera View"}
-                </button>
-                {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
-              </>
-            );
-          })()}
+          {shotPlan.routable && (
+            <>
+              <button
+                type="button"
+                disabled={cameraBusy}
+                onClick={async () => {
+                  setCameraBusy(true);
+                  setCameraError(null);
+                  try {
+                    await applyCameraToShot({
+                      panelId: panel.id,
+                      instanceId: selection.itemId,
+                      camera,
+                      perspective,
+                    });
+                  } catch (error) {
+                    setCameraError(error instanceof Error ? error.message : "Camera redraw failed");
+                  } finally {
+                    setCameraBusy(false);
+                  }
+                }}
+                className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+              >
+                {cameraBusy ? "Generating camera view…" : "✨ Generate Camera View"}
+              </button>
+              {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
+            </>
+          )}
         </div>
       )}
 

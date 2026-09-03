@@ -50,6 +50,48 @@ export interface ShotCameraResult {
   generationCalls: number;
 }
 
+export interface ShotCameraPlan {
+  requiresRedraw: boolean;
+  reason?: string;
+  /** A redraw verdict with somewhere to go (interaction or single asset). */
+  routable: boolean;
+  route?: ShotCameraRoute;
+}
+
+/**
+ * The SYNC verdict behind both the UI's "Generate Camera View" visibility and
+ * `applyCameraToShot`'s gate — one judgement, two consumers, so the button can
+ * never disagree with the service about whether a redraw is needed.
+ */
+export function planShotCamera(
+  doc: ProjectDocument,
+  input: { panelId: ID; instanceId?: ID; camera: PanelCamera; perspective?: PanelPerspective },
+): ShotCameraPlan {
+  const interaction = findShotInteraction(doc, input.panelId, input.instanceId);
+  const target = interaction ? undefined : resolveSingleTarget(doc, input.panelId, input.instanceId);
+  const fromShot = interaction
+    ? currentInteractionShot(doc, interaction.id)
+    : currentAssetShot(doc, target?.sourceAssetId);
+
+  const decisions = [
+    resolveCameraExecution({ change: "angle", camera: input.camera }),
+    resolveCameraExecution({ change: "yaw", camera: input.camera }),
+    resolveCameraExecution({ change: "mangaPerspective", camera: input.camera }),
+    ...(input.perspective && input.perspective.type !== "none"
+      ? [resolveCameraExecution({ change: "perspective", camera: input.camera })]
+      : []),
+    resolveCameraExecution({ change: "shot", camera: input.camera, fromShot, toShot: input.camera.shot }),
+  ];
+  const verdict = decisions.find((d) => d.execution === "GENERATIVE_REDRAW");
+  if (!verdict) return { requiresRedraw: false, routable: Boolean(interaction ?? target) };
+  return {
+    requiresRedraw: true,
+    reason: verdict.reason,
+    routable: Boolean(interaction ?? target),
+    route: interaction ? "interaction" : target ? (doc.assets[target.sourceAssetId]?.category === "background" ? "scene" : "character") : undefined,
+  };
+}
+
 export async function applyCameraToShot(input: {
   panelId: ID;
   /** Explicitly selected instance, when the creator has one. */
@@ -61,26 +103,14 @@ export async function applyCameraToShot(input: {
   const panel = doc?.panels[input.panelId];
   if (!doc || !panel) throw new Error("Panel not found");
 
-  const interaction = findShotInteraction(doc, input.panelId, input.instanceId);
-  const fromShot = interaction
-    ? currentInteractionShot(doc, interaction.id)
-    : currentAssetShot(doc, resolveSingleTarget(doc, input.panelId, input.instanceId)?.sourceAssetId);
-
   // One resolver gate for the whole shot. LOCAL means the existing pixels
   // suffice — zero API calls no matter how the shot would route.
-  const decisions = [
-    resolveCameraExecution({ change: "angle", camera: input.camera }),
-    resolveCameraExecution({ change: "yaw", camera: input.camera }),
-    resolveCameraExecution({ change: "mangaPerspective", camera: input.camera }),
-    ...(input.perspective && input.perspective.type !== "none"
-      ? [resolveCameraExecution({ change: "perspective", camera: input.camera })]
-      : []),
-    resolveCameraExecution({ change: "shot", camera: input.camera, fromShot, toShot: input.camera.shot }),
-  ];
-  if (!decisions.some((d) => d.execution === "GENERATIVE_REDRAW")) {
+  const plan = planShotCamera(doc, input);
+  if (!plan.requiresRedraw) {
     throw new Error("This camera change is achievable with the existing artwork — no generation needed.");
   }
 
+  const interaction = findShotInteraction(doc, input.panelId, input.instanceId);
   // INTERACTION > SINGLE ASSET — one unified generated shot, never overlays.
   if (interaction) {
     const outcome = await rerenderInteraction(interaction.id, { camera: input.camera, perspective: input.perspective });
