@@ -317,7 +317,9 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                 }}
                 className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
               >
-                {cameraBusy ? "Generating camera view…" : "✨ Generate Camera View"}
+                {cameraBusy
+                  ? "Generating camera view…"
+                  : `✨ Generate Camera View${shotPlan.targetName ? ` — ${shotPlan.targetName}` : ""}`}
               </button>
               {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
             </>

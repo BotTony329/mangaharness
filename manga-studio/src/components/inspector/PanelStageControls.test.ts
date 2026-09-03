@@ -178,3 +178,87 @@ describe("REAL BUTTON CONTRACT — the Phase 4.1 visibility gap", () => {
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("B1 — target observability: the button names the service-resolved target", () => {
+  it("character target: button shows the character name", async () => {
+    const s = characterStudio();
+    render(React.createElement(PanelStageControls, { panelId: s.panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
+    await waitFor(() => expect(generateButton()?.textContent).toContain("— Mika"));
+  });
+
+  it("scene target: button shows the scene name", async () => {
+    let doc: ProjectDocument = createProjectDocument("B1Scene");
+    const street = addAsset(doc, {
+      category: "background",
+      name: "Tokyo Street",
+      storageUrl: "https://example.com/street.png",
+      width: 1600,
+      height: 900,
+    });
+    doc = street.doc;
+    const panelId = Object.keys(doc.panels)[0];
+    loadDoc(doc);
+    place(panelId, street.assetId);
+    render(React.createElement(PanelStageControls, { panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^Low$/ }));
+    await waitFor(() => expect(generateButton()?.textContent).toContain("— Tokyo Street"));
+  });
+
+  it("interaction target: button shows both participants", async () => {
+    let doc: ProjectDocument = createProjectDocument("B1Interaction");
+    const mika = addCharacter(doc, "Mika");
+    doc = mika.doc;
+    const ren = addCharacter(doc, "Ren");
+    doc = ren.doc;
+    for (const [name, characterId] of [["mika", mika.characterId], ["ren", ren.characterId]] as const) {
+      const ref = addAsset(doc, {
+        category: "character",
+        name: `${name} ref`,
+        storageUrl: `https://example.com/${name}.png`,
+        width: 800,
+        height: 1600,
+        metadata: { characterId, characterAssetRole: "canonical" },
+      });
+      doc = ref.doc;
+    }
+    const panelId = Object.keys(doc.panels)[0];
+    const created = createInteraction(doc, {
+      panelId,
+      participantIds: [mika.characterId, ren.characterId],
+      type: "hug",
+      source: "manual",
+      renderMode: "composite",
+    });
+    loadDoc(created.doc);
+    render(React.createElement(PanelStageControls, { panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
+    await waitFor(() => expect(generateButton()?.textContent).toContain("— Mika + Ren"));
+  });
+});
+
+describe("UI CAMERA STATE == GENERATION CAMERA STATE (no fork)", () => {
+  it("UI High → final prompt says High and never Low", async () => {
+    const s = characterStudio();
+    render(React.createElement(PanelStageControls, { panelId: s.panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
+    await waitFor(() => expect(generateButton()).toBeTruthy());
+    fireEvent.click(generateButton()!);
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
+    const prompt: string = generateImage.mock.calls[0][0].prompt;
+    expect(prompt).toContain("High camera angle looking down at the subject.");
+    expect(prompt).not.toContain("Low camera angle");
+  });
+
+  it("UI Low → final prompt says Low and never High", async () => {
+    const s = characterStudio();
+    render(React.createElement(PanelStageControls, { panelId: s.panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^Low$/ }));
+    await waitFor(() => expect(generateButton()).toBeTruthy());
+    fireEvent.click(generateButton()!);
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
+    const prompt: string = generateImage.mock.calls[0][0].prompt;
+    expect(prompt).toContain("Low camera angle looking up at the subject");
+    expect(prompt).not.toContain("High camera angle");
+  });
+});

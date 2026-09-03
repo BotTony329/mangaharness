@@ -57,6 +57,13 @@ export interface ShotCameraPlan {
   /** A redraw verdict with somewhere to go (interaction or single asset). */
   routable: boolean;
   route?: ShotCameraRoute;
+  /**
+   * Display name of the resolved target ("Yuri", "Tokyo Street",
+   * "Yuri + Ren"). The UI shows this verbatim — it must never re-derive a
+   * target of its own, or the button can promise one redraw and the service
+   * perform another (the Phase 4.1 live failure).
+   */
+  targetName?: string;
 }
 
 /**
@@ -73,6 +80,22 @@ export function planShotCamera(
   const fromShot = interaction
     ? currentInteractionShot(doc, interaction.id)
     : currentAssetShot(doc, target?.sourceAssetId);
+  const route: ShotCameraRoute | undefined = interaction
+    ? "interaction"
+    : target
+      ? doc.assets[target.sourceAssetId]?.category === "background"
+        ? "scene"
+        : "character"
+      : undefined;
+  const targetName = interaction
+    ? interactionParticipants(interaction)
+        .map((p) => (p.kind === "character" ? doc.characters[p.id]?.name : doc.assets[p.id]?.name) ?? p.id)
+        .join(" + ")
+    : target
+      ? route === "scene"
+        ? (doc.assets[target.sourceAssetId]?.name ?? "Scene")
+        : (doc.characters[stateFromInstance(doc, target)?.characterId ?? ""]?.name ?? "Character")
+      : undefined;
 
   const decisions = [
     resolveCameraExecution({ change: "angle", camera: input.camera }),
@@ -84,12 +107,13 @@ export function planShotCamera(
     resolveCameraExecution({ change: "shot", camera: input.camera, fromShot, toShot: input.camera.shot }),
   ];
   const verdict = decisions.find((d) => d.execution === "GENERATIVE_REDRAW");
-  if (!verdict) return { requiresRedraw: false, routable: Boolean(interaction ?? target) };
+  if (!verdict) return { requiresRedraw: false, routable: Boolean(interaction ?? target), route, targetName };
   return {
     requiresRedraw: true,
     reason: verdict.reason,
     routable: Boolean(interaction ?? target),
-    route: interaction ? "interaction" : target ? (doc.assets[target.sourceAssetId]?.category === "background" ? "scene" : "character") : undefined,
+    route,
+    targetName,
   };
 }
 
