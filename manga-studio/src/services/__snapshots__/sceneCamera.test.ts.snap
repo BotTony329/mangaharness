@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NO-CAMERA BASELINE — scenery generation without a camera is unchanged > buildSceneryRequest output is stable (scenery.ts untouched by Phase 3) 1`] = `
+{
+  "assetType": "background",
+  "expectMonochrome": true,
+  "negativePrompt": "photorealism, 3D render, painterly concept art, western superhero anatomy, illegible line clutter, large ornate anime eyes, complex hair strands, dense screentones, elaborate cinematic shading, over-rendered anatomy",
+  "prompt": "Sequential-art background scene: a rainy neon street at night. Detailed environment, no people, no characters, no text. Project art style — Minimal Line Manga: Japanese sequential-art illustration, deliberate ink drawing, clear panel readability, minimal black-and-white manga drawing, very few confident ink lines, simplified anatomy, restrained facial features, flat composition, iconic readable silhouette, abundant negative space. Visual properties: colorMode: black-and-white, lineStyle: few confident lines, detailLevel: minimal, shading: almost none, rendering: flat iconic. Keep this visual language consistent across the project. Landscape orientation, 3:2 aspect ratio.",
+  "referenceUrls": undefined,
+  "size": "landscape",
+}
+`;

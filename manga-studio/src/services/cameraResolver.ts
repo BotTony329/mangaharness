@@ -61,6 +61,23 @@ export interface CameraExecutionDecision {
 const LOCAL: CameraExecutionDecision = { execution: "LOCAL_TRANSFORM" };
 
 /**
+ * The generation size that matches a target panel's shape. Scene redraws
+ * inherit the panel's frame instead of a hardcoded landscape: a vertical
+ * manga panel gets a vertical scene.
+ */
+export function panelAspectFor(
+  panel: { points: { x: number; y: number }[] } | undefined,
+): "portrait" | "landscape" | "square" {
+  if (!panel || panel.points.length === 0) return "landscape";
+  const xs = panel.points.map((p) => p.x);
+  const ys = panel.points.map((p) => p.y);
+  const ratio = (Math.max(...xs) - Math.min(...xs)) / Math.max(1, Math.max(...ys) - Math.min(...ys));
+  if (ratio >= 1.2) return "landscape";
+  if (ratio <= 0.8) return "portrait";
+  return "square";
+}
+
+/**
  * Decide how a camera change is executed.
  *
  * LOCAL_TRANSFORM  — existing pixels suffice (crop, pan, tilt, lens staging).
