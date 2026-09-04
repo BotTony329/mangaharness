@@ -453,6 +453,45 @@ describe("P15 — duplicate instances of the SAME character are one participant"
   });
 });
 
+describe("P16 — same root image via different assets merges into ONE reference", () => {
+  it("placed Street A + interaction record pointing at derivative B: one scene reference, no false identity fault", async () => {
+    const s = studio();
+    const derivative = addAsset(s.doc, {
+      category: "background",
+      name: "Tokyo Street · high · wide",
+      storageUrl: "https://example.com/street-high.png",
+      width: 1600,
+      height: 900,
+      metadata: { referenceAssetIds: [s.streetId], cameraShot: "wide", cameraAngle: "high" },
+    });
+    const created = createInteraction(derivative.doc, {
+      panelId: s.panelId,
+      participantIds: [s.yuriId],
+      participants: [
+        { id: s.yuriId, kind: "character", role: "initiator" },
+        { id: derivative.assetId, kind: "scene", role: "target" },
+      ],
+      type: "walk",
+      source: "manual",
+      renderMode: "composite",
+    });
+    mount(created.doc);
+    place(s.panelId, s.yuriRefAssetId);
+    place(s.panelId, s.streetId);
+
+    const result = await applyPanelCamera({ panelId: s.panelId, camera: createPanelCamera({ angle: "low" }) });
+
+    expect(result.generationCalls).toBe(1);
+    const request = generateImage.mock.calls[0][0];
+    // Both scene mentions root to Street A — the shot sends it ONCE.
+    expect(request.referenceUrls).toHaveLength(2);
+    expect(request.referenceUrls).toEqual(
+      expect.arrayContaining(["https://example.com/yuri.png", "https://example.com/street.png"]),
+    );
+    expect(request.prompt).toContain("Tokyo Street");
+  });
+});
+
 describe("P14 — v0.2 interaction baseline untouched by the panel camera", () => {
   it("a plain interaction render (no camera intent) keeps the baseline contract", async () => {
     const s = studio();

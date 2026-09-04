@@ -354,6 +354,39 @@ export async function applyPanelCamera(input: {
   }
 
   /**
+   * Reference-level merge. Identity dedupe happens per character/asset id, but
+   * two DIFFERENT assets can legitimately anchor on the SAME image — a placed
+   * scene original plus an interaction record pointing at its derivative, or a
+   * duplicated library asset, both rooting to one picture. Sending that image
+   * twice asks the model to draw one thing twice, so the participants merge
+   * into one (names combined, interaction membership preserved).
+   *
+   * The one case that stays a hard failure: two different CHARACTERS sharing
+   * a canonical image — a real identity fault the model would blend away.
+   */
+  const merged: PanelVisualParticipant[] = [];
+  const byReference = new Map<string, PanelVisualParticipant>();
+  for (const participant of participants) {
+    const referenceKey = assetRenderUrl(doc.assets[participant.referenceAssetId]) ?? participant.referenceAssetId;
+    const existing = byReference.get(referenceKey);
+    if (!existing) {
+      byReference.set(referenceKey, participant);
+      merged.push(participant);
+      continue;
+    }
+    if (existing.kind === "character" && participant.kind === "character" && existing.id !== participant.id) {
+      throw new Error(
+        `${existing.name} and ${participant.name} resolved to the same reference image, so their identities could not be kept apart.`,
+      );
+    }
+    existing.name = `${existing.name} / ${participant.name}`;
+    existing.inInteraction = existing.inInteraction || participant.inInteraction;
+    if (!existing.instanceId && participant.instanceId) existing.instanceId = participant.instanceId;
+    existing.stateSentences = [...existing.stateSentences, ...participant.stateSentences];
+    byReference.set(referenceKey, existing);
+  }
+
+  /**
    * Reference budget: interaction participants first (their relationship is
    * the hardest to re-invent), then the focus subject, then the scene, then
    * remaining characters, then objects. Beyond the budget the shot still
@@ -367,7 +400,7 @@ export async function applyPanelCamera(input: {
     if (participant.kind === "character") return 3;
     return 4;
   };
-  const ordered = [...participants].sort((a, b) => priority(a) - priority(b));
+  const ordered = [...merged].sort((a, b) => priority(a) - priority(b));
   const included = ordered.slice(0, MAX_PANEL_REFERENCES);
   const omitted = ordered.slice(MAX_PANEL_REFERENCES);
 
@@ -375,13 +408,10 @@ export async function applyPanelCamera(input: {
   if (referenceUrls.length !== included.length) {
     throw new Error("A participant's reference image has no usable render URL.");
   }
-  if (new Set(referenceUrls).size !== referenceUrls.length) {
-    throw new Error("Two participants resolved to the same reference image, so their identities could not be kept apart.");
-  }
 
   const style = getStyleGenerationContext(doc);
   const aspect = panelAspectFor(panel);
-  const focusParticipant = participants.find((participant) => participant.instanceId === focusInstanceId);
+  const focusParticipant = merged.find((participant) => participant.instanceId === focusInstanceId);
 
   // Formal interactions contribute their SEMANTICS (never their old composite).
   const compositeInteractions = Object.values(doc.interactions ?? {}).filter(
@@ -412,7 +442,7 @@ export async function applyPanelCamera(input: {
     return `Reference image ${index + 1} is the object "${participant.name}": preserve its recognizable visual identity — shape, proportions, colors, material and distinctive details. Only its orientation, perspective and partial occlusion may change.`;
   });
 
-  const names = participants.map((participant) => String(participant.name));
+  const names = merged.map((participant) => String(participant.name));
   const description = `One manga panel containing ${names.join(", ")}. Every listed participant appears exactly once, occupying the same environment at a consistent scale.`;
   const prompt = [
     buildPanelShotPrompt({
@@ -422,7 +452,7 @@ export async function applyPanelCamera(input: {
       aspect,
     }),
     ...identityConstraints,
-    ...participants.flatMap((participant) => participant.stateSentences),
+    ...merged.flatMap((participant) => participant.stateSentences),
     ...interactionConstraints,
     ...(omitted.length > 0
       ? [`Also present in the panel, described in words only: ${omitted.map((p) => `${p.name} (${p.kind})`).join(", ")}.`]
@@ -454,7 +484,7 @@ export async function applyPanelCamera(input: {
       ...styleMetadata(style),
       panelCameraRender: true,
       panelId: input.panelId,
-      sourceInstanceIds: participants.flatMap((participant) => (participant.instanceId ? [participant.instanceId] : [])),
+      sourceInstanceIds: merged.flatMap((participant) => (participant.instanceId ? [participant.instanceId] : [])),
       referenceAssetIds: included.map((participant) => participant.referenceAssetId),
       interactionIds: compositeInteractions.map((interaction) => interaction.id),
       cameraShot: input.camera.shot,
@@ -479,8 +509,8 @@ export async function applyPanelCamera(input: {
       perspective: input.perspective && input.perspective.type !== "none" ? input.perspective.type : undefined,
     },
     focusSubject: focusParticipant ? String(focusParticipant.name) : undefined,
-    participantCount: participants.length,
-    participants: participants.map((participant) => ({
+    participantCount: merged.length,
+    participants: merged.map((participant) => ({
       type: participant.kind,
       instanceId: participant.instanceId,
       lineage: participant.lineage,
