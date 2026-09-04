@@ -1,6 +1,14 @@
 # PHASE 4.5 — Panel-Level Unified Generative Camera
 
-状态:代码完成,自动化全绿,等待人工 LIVE TEST。
+状态:**PANEL GENERATIVE CAMERA = LIVE VERIFIED**(2026-09-04 人工验收 Pass)。
+
+## Live 验收记录
+
+- 案例:Yuri + Tokyo Street,Camera Medium / High / Natural,Focus Yuri。
+- 过程中发现并修复两个 participant 解析缺陷(均已提交并带回归测试):
+  1. `d93c7d3` — 同一角色两个实例被按实例收集成两个 participant,误触 duplicate-reference guard → 按身份 `(kind, id)` 去重(P15)。
+  2. `3c085cd` — 放置的 scene 原始资产 A 与 interaction 记录引用的衍生 B 锚定同一 root 图,身份级去重遗漏 → 参与者在参考图 URL 层面合并;仅两个不同角色共享 canonical 图才保留硬报错且错误含名字(P16)。
+- 最终 live 结果:route=panel-shot,一次 generation,Yuri 与 Street 从同一 High Angle 重建,身份保持,无文字/气泡,源资产未删,验收通过。
 
 ## 架构转向
 
@@ -40,9 +48,11 @@ CameraResolver gate(LOCAL → 零 API,永远)
 
 `window.__kumangaGenerationLog` 新增 `camera-route: panel-shot` 记录:panelId、camera(shot/angle/lens/perspective)、focusSubject、participantCount、participants(type/instanceId/lineage)、referenceCount、referenceSources、omittedParticipants、assetId、generationCalls。
 
-## LIVE TEST(人工,待做)
+## LIVE TEST(人工)
 
-Panel: Yuri + Tokyo Street;Camera: Medium / High / Natural;Focus: Yuri。预期 ROUTE panel-shot、PARTICIPANTS 2、REFERENCES canonical Yuri + root Tokyo Street、GENERATION CALL 1;视觉验收 9 条(见任务书 §25)。通过后 = PANEL GENERATIVE CAMERA LIVE VERIFIED。
+Panel: Yuri + Tokyo Street;Camera: Medium / High / Natural;Focus: Yuri。预期 ROUTE panel-shot、PARTICIPANTS 2、REFERENCES canonical Yuri + root Tokyo Street、GENERATION CALL 1;视觉验收 9 条(见任务书 §25)。
+
+**结果:PASS(2026-09-04)= PANEL GENERATIVE CAMERA LIVE VERIFIED。**
 
 ## Backlog
 
