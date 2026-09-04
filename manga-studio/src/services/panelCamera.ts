@@ -120,6 +120,13 @@ export function resolvePanelVisualParticipants(doc: ProjectDocument, panelId: ID
     );
 
   const participants: PanelVisualParticipant[] = [];
+  /**
+   * One participant per character/asset, not per instance. Placing Yuri twice
+   * must not send her canonical image to the provider twice — the duplicate
+   * reference guard exists to catch two DIFFERENT identities sharing one
+   * image, and duplicate instances of the same identity are not that.
+   */
+  const seen = new Set<string>();
   for (const itemId of panel.itemIds) {
     const item = doc.items[itemId];
     if (item?.kind !== "asset") continue;
@@ -131,8 +138,10 @@ export function resolvePanelVisualParticipants(doc: ProjectDocument, panelId: ID
     const state = stateFromInstance(doc, item);
     const characterId = state?.characterId ?? (asset.metadata?.characterId as ID | undefined);
     if (characterId && doc.characters[characterId]) {
+      if (seen.has(`character:${characterId}`)) continue;
       const reference = resolveCharacterIdentityReference(doc, characterId);
       if (reference.status !== "resolved" || !reference.assetId) continue;
+      seen.add(`character:${characterId}`);
       participants.push({
         kind: "character",
         instanceId: item.id,
@@ -146,6 +155,8 @@ export function resolvePanelVisualParticipants(doc: ProjectDocument, panelId: ID
       continue;
     }
     if (asset.category === "background") {
+      if (seen.has(`scene:${asset.id}`)) continue;
+      seen.add(`scene:${asset.id}`);
       const root = lineageRootAsset(doc, asset.id);
       participants.push({
         kind: "scene",
@@ -160,6 +171,8 @@ export function resolvePanelVisualParticipants(doc: ProjectDocument, panelId: ID
       continue;
     }
     // Objects and props join the shot through their lineage root as well.
+    if (seen.has(`object:${asset.id}`)) continue;
+    seen.add(`object:${asset.id}`);
     const root = lineageRootAsset(doc, asset.id);
     participants.push({
       kind: "object",

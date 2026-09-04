@@ -435,6 +435,24 @@ describe("P13 — Aspect contract: portrait panel, portrait request", () => {
   });
 });
 
+describe("P15 — duplicate instances of the SAME character are one participant", () => {
+  it("Yuri placed twice: one canonical reference, generation succeeds", async () => {
+    const s = studio();
+    mount(s.doc);
+    place(s.panelId, s.yuriRefAssetId);
+    place(s.panelId, s.yuriRefAssetId);
+    place(s.panelId, s.streetId);
+
+    const participants = resolvePanelVisualParticipants(useEditorStore.getState().doc!, s.panelId);
+    expect(participants.filter((p) => p.kind === "character")).toHaveLength(1);
+
+    const result = await applyPanelCamera({ panelId: s.panelId, camera: createPanelCamera({ angle: "high" }) });
+    expect(result.generationCalls).toBe(1);
+    const request = generateImage.mock.calls[0][0];
+    expect(request.referenceUrls).toEqual(["https://example.com/street.png", "https://example.com/yuri.png"]);
+  });
+});
+
 describe("P14 — v0.2 interaction baseline untouched by the panel camera", () => {
   it("a plain interaction render (no camera intent) keeps the baseline contract", async () => {
     const s = studio();
