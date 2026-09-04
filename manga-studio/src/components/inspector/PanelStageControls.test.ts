@@ -78,7 +78,7 @@ beforeEach(() => {
 const generateButton = () => screen.queryByRole("button", { name: /Generate Camera View/ });
 
 describe("REAL BUTTON CONTRACT — character", () => {
-  it("Angle eye-level → high shows the button; clicking it generates exactly once and swaps the instance", async () => {
+  it("Angle eye-level → high shows the button; clicking it generates exactly once and activates a panel render", async () => {
     const s = characterStudio();
     render(React.createElement(PanelStageControls, { panelId: s.panelId }));
 
@@ -91,9 +91,12 @@ describe("REAL BUTTON CONTRACT — character", () => {
     fireEvent.click(generateButton()!);
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
 
+    // Phase 4.5: non-destructive — the source instance is NOT swapped; the
+    // panel activates a unified camera render instead.
     const after = useEditorStore.getState().doc!;
-    const swapped = after.items[s.instanceId];
-    expect(swapped.kind === "asset" && swapped.sourceAssetId).not.toBe(s.refId);
+    const kept = after.items[s.instanceId];
+    expect(kept.kind === "asset" && kept.sourceAssetId).toBe(s.refId);
+    expect(after.panels[s.panelId].activeCameraRenderAssetId).toBeTruthy();
   });
 });
 
@@ -179,34 +182,17 @@ describe("REAL BUTTON CONTRACT — the Phase 4.1 visibility gap", () => {
   });
 });
 
-describe("B1 — target observability: the button names the service-resolved target", () => {
-  it("character target: button shows the character name", async () => {
+describe("Phase 4.5 — the camera belongs to the PANEL, no target naming", () => {
+  it("the button never names a target — there is no target routing anymore", async () => {
     const s = characterStudio();
     render(React.createElement(PanelStageControls, { panelId: s.panelId }));
     fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
-    await waitFor(() => expect(generateButton()?.textContent).toContain("— Mika"));
+    await waitFor(() => expect(generateButton()).toBeTruthy());
+    expect(generateButton()!.textContent).toBe("✨ Generate Camera View");
   });
 
-  it("scene target: button shows the scene name", async () => {
-    let doc: ProjectDocument = createProjectDocument("B1Scene");
-    const street = addAsset(doc, {
-      category: "background",
-      name: "Tokyo Street",
-      storageUrl: "https://example.com/street.png",
-      width: 1600,
-      height: 900,
-    });
-    doc = street.doc;
-    const panelId = Object.keys(doc.panels)[0];
-    loadDoc(doc);
-    place(panelId, street.assetId);
-    render(React.createElement(PanelStageControls, { panelId }));
-    fireEvent.click(screen.getByRole("button", { name: /^Low$/ }));
-    await waitFor(() => expect(generateButton()?.textContent).toContain("— Tokyo Street"));
-  });
-
-  it("interaction target: button shows both participants", async () => {
-    let doc: ProjectDocument = createProjectDocument("B1Interaction");
+  it("a composite interaction's participants join the panel shot even unplaced", async () => {
+    let doc: ProjectDocument = createProjectDocument("PanelInteraction");
     const mika = addCharacter(doc, "Mika");
     doc = mika.doc;
     const ren = addCharacter(doc, "Ren");
@@ -233,7 +219,30 @@ describe("B1 — target observability: the button names the service-resolved tar
     loadDoc(created.doc);
     render(React.createElement(PanelStageControls, { panelId }));
     fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
-    await waitFor(() => expect(generateButton()?.textContent).toContain("— Mika + Ren"));
+    await waitFor(() => expect(generateButton()).toBeTruthy());
+
+    fireEvent.click(generateButton()!);
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
+    const request = generateImage.mock.calls[0][0];
+    expect(request.referenceUrls).toEqual(["https://example.com/mika.png", "https://example.com/ren.png"]);
+    expect(request.prompt).toContain("Hug: Mika and Ren.");
+    expect(request.prompt).toContain("High camera angle looking down at the subject.");
+    // One unified opaque panel picture, not a character cutout.
+    expect(request.assetType).toBe("background");
+  });
+
+  it("after generation the panel offers a way back to the source composition", async () => {
+    const s = characterStudio();
+    render(React.createElement(PanelStageControls, { panelId: s.panelId }));
+    fireEvent.click(screen.getByRole("button", { name: /^High$/ }));
+    await waitFor(() => expect(generateButton()).toBeTruthy());
+    fireEvent.click(generateButton()!);
+    await waitFor(() => expect(screen.getByText(/Camera view active/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /Show composition/ }));
+    await waitFor(() =>
+      expect(useEditorStore.getState().doc!.panels[s.panelId].activeCameraRenderAssetId).toBeUndefined(),
+    );
   });
 });
 

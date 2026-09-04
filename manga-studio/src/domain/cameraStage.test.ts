@@ -324,7 +324,7 @@ describe("camera framing is visible", () => {
     expect(focalInstance(doc, s.panelIds[0])!.id).toBe(mio.id);
   });
 
-  it("lifts the subject in frame for a low angle and lowers it for a high angle", () => {
+  it("stores a generative angle as intent WITHOUT faking the shift (Phase 4.5 §19)", () => {
     const f = framed();
     const low = applyDomainCommand(f.doc, {
       type: "set-panel-camera",
@@ -336,7 +336,13 @@ describe("camera framing is visible", () => {
       panelId: f.panelIds[0],
       patch: { shot: "medium", angle: "high" },
     }).doc;
-    expect(inst(low, f.instanceId).cy).toBeLessThan(inst(high, f.instanceId).cy);
+    // The REQUESTED camera is stored…
+    expect(low.panels[f.panelIds[0]].camera!.angle).toBe("low");
+    expect(high.panels[f.panelIds[0]].camera!.angle).toBe("high");
+    // …but the old artwork never performs a fake angle shift: both panels
+    // stage identically under the LOCAL part of each patch (the medium
+    // tightening), and the redraw is left to Generate Camera View.
+    expect(inst(low, f.instanceId).cy).toBeCloseTo(inst(high, f.instanceId).cy, 5);
   });
 
   it("moves the camera horizon when the angle changes", () => {
@@ -556,13 +562,15 @@ describe("acceptance A: directing a panel by hand", () => {
     // Yuri, who is not the focal subject, was not reframed.
     expect(inst(doc, yuri.id).height).toBeCloseTo(yuriBefore, 5);
 
-    // Angle = Low: horizon drops, pitch tips up, subject lifts in frame.
+    // Angle = Low: horizon drops, pitch tips up. The camera metadata answers
+    // immediately; the ARTWORK does not fake a low-angle shift (Phase 4.5 §19)
+    // — redrawing from the new viewpoint is Generate Camera View's job.
     const cyBefore = inst(doc, mio.id).cy;
     doc = applyDomainCommand(doc, { type: "set-panel-camera", panelId, patch: { angle: "low" } }).doc;
     const camera = doc.panels[panelId].camera!;
     expect(camera.horizonY).toBeLessThan(0.5);
     expect(camera.pitch).toBeGreaterThan(0);
-    expect(inst(doc, mio.id).cy).toBeLessThan(cyBefore);
+    expect(inst(doc, mio.id).cy).toBeCloseTo(cyBefore, 5);
 
     // Export: no guide has become a document item, so nothing can be exported.
     const exportable = doc.panels[panelId].itemIds.map((id) => doc.items[id].kind);

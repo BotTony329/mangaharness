@@ -86,6 +86,7 @@ import {
   placeOnStage,
   setPanelAutoDepthOrder,
   setPanelCamera,
+  setPanelCameraRender,
   setPanelFocalItem,
   setPanelPerspective,
 } from "./stageOps";
@@ -174,6 +175,7 @@ export type DomainCommand =
   | { type: "validate-composition"; panelIds: ID[]; requirements?: CompositionRequirements; before?: ProjectDocument }
   // ── Virtual manga stage ──
   | { type: "set-panel-camera"; panelId: ID; patch: CameraPatch }
+  | { type: "set-panel-camera-render"; panelId: ID; assetId?: ID }
   | { type: "set-panel-perspective"; panelId: ID; patch: PerspectivePatch }
   | { type: "move-vanishing-point"; panelId: ID; index: number; point: Point }
   | { type: "set-instance-stage"; instanceId: ID; patch: Partial<InstanceStage> }
@@ -423,6 +425,8 @@ function applyCommandCore(doc: ProjectDocument, command: DomainCommand): Command
     }
     case "set-panel-camera":
       return { doc: setPanelCamera(doc, command.panelId, command.patch) };
+    case "set-panel-camera-render":
+      return { doc: setPanelCameraRender(doc, command.panelId, command.assetId) };
     case "set-panel-perspective":
       return { doc: setPanelPerspective(doc, command.panelId, command.patch) };
     case "move-vanishing-point":

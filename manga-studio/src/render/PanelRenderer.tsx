@@ -1,6 +1,6 @@
 "use client";
 
-import { Group, Line } from "react-konva";
+import { Group, Image as KonvaImage, Line, Rect } from "react-konva";
 import { panelBoundsPx, panelPolygonPx } from "@/domain/coords";
 import type { ID, Panel, PanelItem, Point, ProjectDocument } from "@/domain/types";
 import { assetRenderUrl } from "@/assets/renderSource";
@@ -9,6 +9,7 @@ import { PuppetNode } from "./PuppetNode";
 import { BubbleNode } from "./BubbleNode";
 import { EffectNode } from "./EffectNode";
 import { ToneNode } from "./ToneNode";
+import { useImageElement } from "./useImageElement";
 
 export interface PanelInteraction {
   selectedItemId?: ID;
@@ -50,6 +51,17 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
     .map((id) => doc.items[id])
     .filter((item): item is PanelItem => Boolean(item) && item.visible !== false);
 
+  /**
+   * Panel camera render (v0.3 Phase 4.5): when active, the unified generated
+   * shot IS the panel's artwork and supersedes the source asset instances it
+   * was drawn from — they stay in the document untouched, so clearing the
+   * render or undoing restores the original composition. Bubbles, effects and
+   * tones are NOT part of the render and keep rendering (and editing) on top.
+   */
+  const cameraRenderAsset = panel.activeCameraRenderAssetId ? doc.assets[panel.activeCameraRenderAssetId] : undefined;
+  const cameraRenderUrl = cameraRenderAsset ? assetRenderUrl(cameraRenderAsset) : undefined;
+  const visibleItems = cameraRenderUrl ? items.filter((item) => item.kind !== "asset") : items;
+
   return (
     <>
       <Group x={bounds.x} y={bounds.y} clipFunc={(ctx) => tracePolygon(ctx, localPoints)}>
@@ -73,7 +85,8 @@ export function PanelRenderer({ doc, panel, interactive, interaction = {} }: Pan
           offsetX={bounds.width / 2}
           offsetY={bounds.height / 2}
         >
-          {items.map((item) => renderItem(doc, panel.id, item, interactive, interaction))}
+          {cameraRenderUrl && <CameraRenderNode imageUrl={cameraRenderUrl} width={bounds.width} height={bounds.height} />}
+          {visibleItems.map((item) => renderItem(doc, panel.id, item, interactive, interaction))}
         </Group>
       </Group>
       {panel.border.visible && (
@@ -96,6 +109,18 @@ function tracePolygon(ctx: { beginPath(): void; moveTo(x: number, y: number): vo
   ctx.moveTo(points[0].x, points[0].y);
   for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
   ctx.closePath();
+}
+
+/**
+ * The active panel camera render: one opaque picture filling the panel's
+ * bounding box (the polygon clip above trims it to the panel shape). It never
+ * listens for pointer events — the composition it supersedes stays owned by
+ * the source instances, and undo/clear is how the creator goes back.
+ */
+function CameraRenderNode({ imageUrl, width, height }: { imageUrl: string; width: number; height: number }) {
+  const image = useImageElement(imageUrl);
+  if (!image) return <Rect width={width} height={height} fill="#27272a" listening={false} />;
+  return <KonvaImage image={image} width={width} height={height} listening={false} />;
 }
 
 function renderItem(

@@ -98,6 +98,21 @@ export interface AssetGenerationMetadata {
   cameraShot?: ShotType;
   cameraAngle?: CameraAngle;
   cameraLens?: CameraLens;
+  /**
+   * Panel-level unified camera render (v0.3 Phase 4.5): this image is ONE
+   * whole-panel shot drawn under a camera, not an identity source. Marked so
+   * participant resolution never feeds a camera render back into generation
+   * (derivative-chain prevention) and provenance can name the panel, the
+   * source instances and the interaction records it was drawn from.
+   */
+  panelCameraRender?: boolean;
+  panelId?: ID;
+  sourceInstanceIds?: ID[];
+  interactionIds?: ID[];
+  /** Focus subject name at generation time (cinematic focus only). */
+  focusName?: string;
+  /** Participants the reference budget left to text-only mention. */
+  omittedParticipants?: string[];
   /** Snapshot of the project style used for this immutable generation. */
   styleProfileId?: ID;
   styleName?: string;
@@ -361,6 +376,14 @@ export interface Panel {
    * creator's manual layer order wins (§10).
    */
   autoDepthOrder?: boolean;
+  /**
+   * The panel-level generative camera render currently shown in place of the
+   * source composition (v0.3 Phase 4.5). The source instances are NEVER
+   * deleted — while this is set the renderer draws the unified camera shot and
+   * supersedes asset instances; clearing it (or undo) restores the original
+   * composition exactly as it was.
+   */
+  activeCameraRenderAssetId?: ID;
 }
 
 // ─── Panel camera & perspective ─────────────────────────────────────────────

@@ -190,7 +190,7 @@ describe("yaw is honest", () => {
     expect(Math.abs(yawFramingShift(9999))).toBeLessThanOrEqual(0.33);
   });
 
-  it("moves the focal subject in frame", () => {
+  it("records a large yaw as redraw intent without faking the turn (Phase 4.5 §19)", () => {
     const s = street();
     const panelId = s.panelIds[0];
     const placed = place(s.doc, panelId, s.yuriAsset, s.yuriId);
@@ -204,7 +204,30 @@ describe("yaw is honest", () => {
       panelId,
       patch: { yaw: 30, shot: "full" },
     }).doc;
-    expect(inst(panned, placed.id).cx).not.toBeCloseTo(inst(centred, placed.id).cx);
+    // The requested yaw IS stored…
+    expect(panned.panels[panelId].camera!.yaw).toBe(30);
+    // …but a 30° turn shows another SIDE of the subject, which the old artwork
+    // does not contain — so the pixels stay put until Generate Camera View.
+    expect(inst(panned, placed.id).cx).toBeCloseTo(inst(centred, placed.id).cx, 5);
+  });
+
+  it("still pans the framing for a small yaw (LOCAL)", () => {
+    const s = street();
+    const panelId = s.panelIds[0];
+    const placed = place(s.doc, panelId, s.yuriAsset, s.yuriId);
+    const straight = applyDomainCommand(placed.doc, {
+      type: "set-panel-camera",
+      panelId,
+      patch: { shot: "medium" },
+    }).doc;
+    const panned = applyDomainCommand(straight, {
+      type: "set-panel-camera",
+      panelId,
+      patch: { yaw: 10, shot: "close-up" },
+    }).doc;
+    // Below the redraw threshold a yaw is an honest horizontal pan, executed
+    // alongside the local tightening.
+    expect(inst(panned, placed.id).cx).not.toBeCloseTo(inst(straight, placed.id).cx);
   });
 
   it("admits a large yaw needs a redraw but a small one does not", () => {

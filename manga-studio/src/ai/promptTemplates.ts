@@ -183,6 +183,37 @@ export function buildJointInteractionPrompt(input: {
     .join(" ");
 }
 
+/**
+ * The unified panel-level camera shot (v0.3 Phase 4.5).
+ *
+ * ONE opaque picture for the WHOLE panel under the requested camera — every
+ * visual participant, one viewpoint, one horizon. It reuses the joint
+ * pipeline's style/aspect machinery rather than growing a second vocabulary.
+ * Text is categorically excluded: speech bubbles, captions and lettering are
+ * panel items layered on top afterwards, never pixels baked into the artwork.
+ */
+export function buildPanelShotPrompt(input: {
+  /** Who and what the panel contains, in creator language. */
+  description: string;
+  style?: AssetPromptInput["style"];
+  monochrome?: boolean;
+  aspect?: "portrait" | "landscape" | "square";
+}): string {
+  const language = input.monochrome
+    ? "Draw in clean monochrome black-and-white manga line art."
+    : "";
+  return [
+    `Sequential-art manga panel illustration: ${input.description}`,
+    language,
+    "One continuous scene: every participant and the environment share the same lighting, perspective and art style, and the scene fills the entire frame.",
+    "No speech bubbles, dialogue, captions, lettering, sound-effect text or panel borders in the image.",
+    styleInstruction(input.style),
+    aspectHint(input.aspect ?? "portrait"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function styleInstruction(style: AssetPromptInput["style"]): string {
   if (!style) return LEGACY_STYLE;
   const properties = style.visualProperties

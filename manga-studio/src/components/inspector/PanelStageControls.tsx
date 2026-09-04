@@ -20,8 +20,7 @@ import {
   type CameraPatch,
 } from "@/domain/camera";
 import { PERSPECTIVE_TYPES, createPanelPerspective } from "@/domain/perspective";
-import { planShotCamera } from "@/services/shotCamera";
-import { applyCameraToShot } from "@/services/shotCamera";
+import { planPanelCamera, applyPanelCamera } from "@/services/panelCamera";
 import { characterIdOfInstance } from "@/characters/identity";
 import type { CameraAngle, CameraLens, ID, PerspectiveType, ShotType } from "@/domain/types";
 import { useEditorStore } from "@/editor/store";
@@ -67,7 +66,6 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
   const commitTransient = useEditorStore((state) => state.commitTransient);
   const guideEditPanelId = useUiStore((state) => state.guideEditPanelId);
   const setGuideEditPanel = useUiStore((state) => state.setGuideEditPanel);
-  const selection = useEditorStore((state) => state.selection);
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const panel = doc?.panels[panelId];
@@ -76,12 +74,15 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
   const camera = panel.camera ?? createPanelCamera();
   const perspective = panel.perspective ?? createPanelPerspective();
   const editingGuides = guideEditPanelId === panelId;
-  // The button's visibility verdict is the SAME judgement the Shot Camera
+  // The button's visibility verdict is the SAME judgement the Panel Camera
   // service gates on — covering angle, yaw, manga perspective, the perspective
   // rig and shot widening — so the button can never hide while the service
   // would redraw (the Phase 4.1 gap: an angle-only check hid every other
   // generative camera change behind a silent staging preview).
-  const shotPlan = planShotCamera(doc, { panelId, instanceId: selection.itemId, camera, perspective });
+  //
+  // Phase 4.5: the camera belongs to the PANEL. No selection, no target
+  // routing — a generative camera redraws the whole panel as ONE picture.
+  const shotPlan = planPanelCamera(doc, { panelId, camera, perspective });
   const redraw = { requiresRedraw: shotPlan.requiresRedraw, reason: shotPlan.reason };
 
   // Characters placed in this panel, in stacking order.
@@ -285,14 +286,15 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
       {redraw.requiresRedraw && (
         <div className="space-y-2 rounded border border-amber-800/60 bg-amber-950/30 p-2">
           <p className="text-[10px] leading-4 text-amber-300">
-            {redraw.reason} Composition is updated now; the artwork itself would need regenerating to match.
+            {redraw.reason} The camera is recorded; the panel artwork itself needs regenerating to match.
           </p>
           {/*
-            Generative camera, shot-level (Phase 4): ONE button hands the panel
-            camera to the Shot Camera Application Service, which routes to the
-            joint interaction path, character camera or scene camera. LOCAL
-            camera work never shows this button. Visibility and routability are
-            the service's OWN plan verdict, so the UI holds no routing branches.
+            Generative camera, panel-level (Phase 4.5): ONE button hands the
+            panel camera to the Panel Camera service, which redraws the WHOLE
+            panel — every character, scene, object and interaction participant
+            — as a single unified picture. LOCAL camera work never shows this
+            button. Visibility is the service's OWN plan verdict, so the UI
+            holds no routing branches.
           */}
           {shotPlan.routable && (
             <>
@@ -303,9 +305,8 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                   setCameraBusy(true);
                   setCameraError(null);
                   try {
-                    await applyCameraToShot({
+                    await applyPanelCamera({
                       panelId: panel.id,
-                      instanceId: selection.itemId,
                       camera,
                       perspective,
                     });
@@ -317,13 +318,26 @@ export function PanelStageControls({ panelId }: { panelId: ID }) {
                 }}
                 className="w-full rounded bg-amber-500/90 px-2 py-1.5 text-[10px] font-medium text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
               >
-                {cameraBusy
-                  ? "Generating camera view…"
-                  : `✨ Generate Camera View${shotPlan.targetName ? ` — ${shotPlan.targetName}` : ""}`}
+                {cameraBusy ? "Generating camera view…" : "✨ Generate Camera View"}
               </button>
               {cameraError && <p className="text-[10px] leading-4 text-red-400">{cameraError}</p>}
             </>
           )}
+        </div>
+      )}
+
+      {/* Active camera render: the panel shows the unified shot; the source
+          composition is one click (or undo) away, never deleted. */}
+      {panel.activeCameraRenderAssetId && (
+        <div className="flex items-center justify-between gap-2 rounded border border-violet-800/60 bg-violet-950/30 px-2 py-1.5">
+          <span className="text-[10px] leading-4 text-violet-300">Camera view active — sources kept</span>
+          <button
+            type="button"
+            className="rounded border border-violet-700 px-2 py-0.5 text-[10px] text-violet-200 hover:bg-violet-900/40"
+            onClick={() => dispatch({ type: "set-panel-camera-render", panelId, assetId: undefined })}
+          >
+            Show composition
+          </button>
         </div>
       )}
 

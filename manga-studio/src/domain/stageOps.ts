@@ -6,12 +6,12 @@
  * one command layer and inherits undo/redo without a second history system.
  */
 
-import { applyCameraPatch, createPanelCamera, type CameraPatch } from "./camera";
+import { applyCameraPatch, createPanelCamera, shotCoverage, type CameraPatch } from "./camera";
 import { cloneDoc, panelPxRect, touch } from "./docHelpers";
 import { normalizeEffectParams, updateEffectParams } from "./effects";
 import { applyPerspectivePatch, createPanelPerspective, moveVanishingPoint, type PerspectivePatch } from "./perspective";
 import { createStage, DEFAULT_STAGE, depthSortKey } from "./stage";
-import { depthFromGroundPoint, frameSubject, inferBaseHeight, isAirborne, projectInstance } from "./staging";
+import { cameraChangeRequiresRedraw, depthFromGroundPoint, frameSubject, inferBaseHeight, isAirborne, projectInstance } from "./staging";
 import type {
   AssetInstance,
   CharacterState,
@@ -40,28 +40,66 @@ export function setPanelCamera(doc: ProjectDocument, panelId: ID, patch: CameraP
   const panel = next.panels[panelId];
   if (!panel) throw new Error(`Unknown panel: ${panelId}`);
   const before = panel.camera ?? createPanelCamera();
-  panel.camera = applyCameraPatch(before, patch);
+  const after = applyCameraPatch(before, patch);
+  panel.camera = after;
+
+  /**
+   * Generative camera dimensions stage NOTHING (v0.3 Phase 4.5, §19).
+   *
+   * A high angle, a far yaw, dramatic foreshortening or a widening shot are
+   * redraws, not transforms: sliding the old artwork down the frame would fake
+   * a viewpoint it does not contain. Those dimensions record the REQUESTED
+   * camera on the panel and wait for the panel-level Generate Camera View;
+   * the staging below runs under `stagingCamera`, where every generative
+   * dimension is reverted to its previous value. Local dimensions in a mixed
+   * patch still execute — no total skip.
+   */
+  const stagingCamera: PanelCamera = { ...after };
+  let generative = false;
+  if (patch.shot !== undefined && patch.shot !== before.shot && shotCoverage(patch.shot) < shotCoverage(before.shot)) {
+    stagingCamera.shot = before.shot;
+    generative = true;
+  }
+  if (patch.angle !== undefined && patch.angle !== before.angle && cameraChangeRequiresRedraw("angle", after).requiresRedraw) {
+    stagingCamera.angle = before.angle;
+    generative = true;
+  }
+  if (patch.yaw !== undefined && patch.yaw !== before.yaw && cameraChangeRequiresRedraw("yaw", after).requiresRedraw) {
+    stagingCamera.yaw = before.yaw;
+    generative = true;
+  }
+  if (
+    patch.mangaPerspectiveStrength !== undefined &&
+    patch.mangaPerspectiveStrength !== before.mangaPerspectiveStrength &&
+    cameraChangeRequiresRedraw("mangaPerspective", after).requiresRedraw
+  ) {
+    stagingCamera.mangaPerspectiveStrength = before.mangaPerspectiveStrength;
+    generative = true;
+  }
+  if (generative) {
+    // A stored camera render shows the PREVIOUS request's viewpoint; keeping it
+    // on screen after a new generative request would display a stale camera as
+    // if it were current. The source composition returns until regeneration.
+    delete panel.activeCameraRenderAssetId;
+  }
 
   // Angle shifts where the subject sits in frame, so it reframes as well as
   // re-projects. Base heights are captured under the OLD camera first: inferring
   // them under the new one would cancel the very change being applied.
   const baseHeights = captureBaseHeights(next, panelId, before);
-  if (
-    (patch.shot !== undefined && patch.shot !== before.shot) ||
-    (patch.angle !== undefined && patch.angle !== before.angle)
-  ) {
-    applyShotFraming(next, panelId);
+  if (stagingCamera.shot !== before.shot || stagingCamera.angle !== before.angle) {
+    applyShotFraming(next, panelId, stagingCamera);
   }
-  restagePanel(next, panelId, baseHeights);
+  restagePanel(next, panelId, baseHeights, stagingCamera);
   touch(next);
   return next;
 }
 
-/** Reframe the focal subject for the panel's current shot type. */
-function applyShotFraming(doc: ProjectDocument, panelId: ID): void {
+/** Reframe the focal subject for a staging camera (defaults to the panel's). */
+function applyShotFraming(doc: ProjectDocument, panelId: ID, cameraOverride?: PanelCamera): void {
   const panel = doc.panels[panelId];
-  const camera = panel.camera;
-  if (!camera) return;
+  const camera = cameraOverride ?? panel?.camera;
+  if (!panel || !camera) return;
   const focal = focalInstance(doc, panelId);
   if (!focal) return;
   const rect = panelPxRect(doc, panelId);
@@ -100,6 +138,25 @@ export function focalInstance(doc: ProjectDocument, panelId: ID): AssetInstance 
     .filter((item): item is AssetInstance => item?.kind === "asset")
     .filter((item) => Boolean(item.characterState ?? doc.assets[item.sourceAssetId]?.metadata?.characterId));
   return characters[characters.length - 1];
+}
+
+/**
+ * Activate (or clear, with undefined) a panel-level camera render.
+ *
+ * The render is a library asset produced by the unified panel camera; setting
+ * it here is the ONLY thing that changes what the panel shows. Source
+ * instances are untouched, so undo and clearing both restore the original
+ * composition (v0.3 Phase 4.5 non-destructive contract).
+ */
+export function setPanelCameraRender(doc: ProjectDocument, panelId: ID, assetId: ID | undefined): ProjectDocument {
+  const next = cloneDoc(doc);
+  const panel = next.panels[panelId];
+  if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+  if (assetId && !next.assets[assetId]) throw new Error(`Unknown asset: ${assetId}`);
+  if (assetId) panel.activeCameraRenderAssetId = assetId;
+  else delete panel.activeCameraRenderAssetId;
+  touch(next);
+  return next;
 }
 
 export function setPanelFocalItem(doc: ProjectDocument, panelId: ID, itemId: ID | undefined): ProjectDocument {
@@ -154,11 +211,11 @@ export function captureBaseHeights(
  * so a shared stage stays coherent instead of each character drifting to
  * whatever geometry it last happened to have.
  */
-export function restagePanel(doc: ProjectDocument, panelId: ID, baseHeights?: Map<ID, number>): void {
+export function restagePanel(doc: ProjectDocument, panelId: ID, baseHeights?: Map<ID, number>, cameraOverride?: PanelCamera): void {
   const panel = doc.panels[panelId];
   if (!panel) return;
   const rect = panelPxRect(doc, panelId);
-  const camera = panel.camera;
+  const camera = cameraOverride ?? panel.camera;
   for (const itemId of panel.itemIds) {
     const item = doc.items[itemId];
     if (item?.kind !== "asset" || !item.stage) continue;
