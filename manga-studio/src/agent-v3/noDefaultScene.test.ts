@@ -126,7 +126,7 @@ describe("no default scene assumption", () => {
       participants: [],
       summary: "make panel 1 low angle",
       beats: [],
-      cameraIntent: { angle: "low", requiresRedraw: true },
+      cameraIntent: { angle: "low" },
     });
     expect(backgroundSteps(plan)).toEqual([]);
     expect(plan.steps.some((s) => s.tool === "set_camera")).toBe(true);

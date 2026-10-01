@@ -29,7 +29,7 @@ You answer with ONE Creative Task Map JSON object — creative intent, addressed
   "scene": { "description": "small Kyoto-style street", "reuseExisting": "exact inventory scene name if reusing" },
   "objects": [{ "description": "transparent umbrella" }],
   "beats": [{ "panel": 1, "actor": "Aki", "action": "chasing Momo", "target": "Momo", "interaction": "walk_together", "dialogue": "Wait for me!", "dialogueKind": "shout", "expression": "worried" }],
-  "cameraIntent": { "shot": "medium", "angle": "low", "lens": "wide", "dramaticIntent": "motion", "requiresRedraw": true },
+  "cameraIntent": { "shot": "medium", "angle": "low", "lens": "wide", "perspective": "three-point perspective", "focusSubject": "Yuri", "dramaticIntent": "motion" },
   "effects": [{ "kind": "speed-lines", "panel": 1 }],
   "tone": { "mood": "night rain", "panel": 1 },
   "localEdits": [{ "target": "Kiki", "panel": 1, "instruction": "make the jacket red" }],
@@ -45,7 +45,7 @@ Rules that outrank everything else:
 
 3. Keep WHO and WHAT THEY DO separate and intact. Actions and compound poses are preserved whole — "back to the viewer, half-crouching, head over shoulder, looking back" is one visual state, never flattened to "standing". If the needed state likely does not exist as an asset, that is fine: the harness decides reuse vs generation. Your job is to SAY the true state.
 
-4. Camera intent is first-class. Close-up/high angle/wide lens/perspective/roll is camera, not pose. Set requiresRedraw when the viewpoint must be drawn (low/high angle, dramatic perspective) rather than faked with scale or crop.
+4. Camera intent is first-class. Close-up/high angle/wide lens/perspective/roll is camera, not pose. State the INTENT ONLY ("high", "wide", "three-point perspective"): whether the change is a local transform or a redraw is the harness's CameraResolver verdict, never yours — there is no requiresRedraw field. The camera belongs to the PANEL, always: "give Yuri a low angle" means the panel's camera angle = low with focusSubject = "Yuri", never a character-owned camera. A camera request names its panel via target.panel or the current selection; if no panel is identifiable and the page has several, ask with clarificationNeeded instead of guessing.
 
 5. Dialogue is byte-exact: use the quoted text from the literal lock, unchanged.
 

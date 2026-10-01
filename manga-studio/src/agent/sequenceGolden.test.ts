@@ -23,6 +23,20 @@ import { executePlan } from "@/agent-v2";
 import { validatePlan } from "./tools/schemas";
 import { validateGroundedPlan } from "./planValidation";
 
+/**
+ * Phase 5: a generative camera verdict routes through the Panel Camera
+ * application service, which is the ONLY place generation may come from. The
+ * provider seam is mocked so tests assert routing and call counts, not pixels.
+ */
+const generateImage = vi.fn();
+const registerGeneratedAsset = vi.fn();
+vi.mock("@/services/generation", () => ({
+  generateImage: (...args: unknown[]) => generateImage(...args),
+  registerGeneratedAsset: (...args: unknown[]) => registerGeneratedAsset(...args),
+  imageProviderCapabilities: async () => ({ referenceImage: true, nativeTransparency: false }),
+  recordGenerationEvidence: () => {},
+}));
+
 interface Fixture {
   yuri: ID;
   mori: ID;
@@ -124,6 +138,30 @@ async function run(prompt: string, selectedItemId?: ID) {
   return { ...built, summary, after: useEditorStore.getState().doc! };
 }
 
+/**
+ * Generation is possible ONLY through the Panel Camera service now. Mock the
+ * provider seam (registering for real, so the render becomes a library asset)
+ * and let each case assert whether the Resolver allowed a call at all.
+ */
+function stubGeneration() {
+  generateImage.mockReset();
+  registerGeneratedAsset.mockReset();
+  generateImage.mockResolvedValue({ url: "https://example.com/out.png" });
+  registerGeneratedAsset.mockImplementation(async (input: { category: "character" | "background"; name: string; metadata?: object }) => {
+    const current = useEditorStore.getState().doc!;
+    const added = addAsset(current, {
+      category: input.category,
+      name: input.name,
+      storageUrl: `https://example.com/generated-${registerGeneratedAsset.mock.calls.length}.png`,
+      width: 1600,
+      height: 900,
+      metadata: input.metadata,
+    });
+    useEditorStore.setState({ doc: added.doc } as never);
+    return added.assetId;
+  });
+}
+
 function panelOf(doc: ProjectDocument, pageId: ID, number: number) {
   return doc.panels[doc.pages[pageId].panelIds[number - 1]];
 }
@@ -200,8 +238,9 @@ describe("camera intent reaches the document", () => {
   let f: Fixture;
   beforeEach(() => {
     f = seed();
+    stubGeneration();
     vi.stubGlobal("fetch", vi.fn(async () => {
-      throw new Error("Camera work must never generate");
+      throw new Error("No direct provider fetch is allowed in these cases");
     }));
   });
 
@@ -235,16 +274,25 @@ describe("camera intent reaches the document", () => {
 
     expect(panelOf(result.after, f.pageId, 1)!.camera?.shot).toBe("close-up");
     expect(result.summary.rolledBack).toBe(false);
-    // A close-up re-frames existing artwork.
+    // A close-up re-frames existing artwork: LOCAL_TRANSFORM, zero API.
+    expect(generateImage).not.toHaveBeenCalled();
     expect(result.after.generationHistory).toHaveLength(0);
   });
 
-  it("CASE D — 低机位广角拍Yuri sets angle and lens, and generates nothing", async () => {
+  it("CASE D — 低机位广角拍Yuri records the intent and redraws the WHOLE panel once", async () => {
     const result = await run("低机位广角拍Yuri");
-    const camera = panelOf(result.after, f.pageId, 1)!.camera;
-    expect(camera?.angle).toBe("low");
-    expect(camera?.lens).toBe("wide");
-    expect(result.after.generationHistory).toHaveLength(0);
+    expect(result.summary.rolledBack).toBe(false);
+    const panel = panelOf(result.after, f.pageId, 1)!;
+    // The requested camera is recorded on the PANEL — Yuri owns no camera.
+    expect(panel.camera?.angle).toBe("low");
+    expect(panel.camera?.lens).toBe("wide");
+    // CameraResolver judged the low angle GENERATIVE; the Phase 4.5 unified
+    // panel path ran exactly once — never a pose-only hint.
+    expect(generateImage).toHaveBeenCalledTimes(1);
+    const request = generateImage.mock.calls[0][0] as { prompt: string; referenceUrls: string[] };
+    expect(request.prompt).toContain("redraw the whole panel");
+    expect(request.referenceUrls.some((url) => url.includes("Yuri"))).toBe(true);
+    expect(panel.activeCameraRenderAssetId).toBeDefined();
   });
 
   it("camera work is not blocked by whatever happens to be selected", async () => {
@@ -280,8 +328,9 @@ describe("the combined Chinese acceptance case", () => {
   let f: Fixture;
   beforeEach(() => {
     f = seed();
+    stubGeneration();
     vi.stubGlobal("fetch", vi.fn(async () => {
-      throw new Error("This case must not generate");
+      throw new Error("No direct provider fetch is allowed in these cases");
     }));
   });
 

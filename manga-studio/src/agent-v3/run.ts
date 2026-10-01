@@ -18,6 +18,7 @@ import { literalLock } from "./contract/literalLock";
 import type { CreativeTaskMap } from "./contract/creativeTaskMap";
 import { projectInventory } from "./context/projectInventory";
 import { resolveTaskMap, type Resolution } from "./resolution/entityResolver";
+import { resolveCameraTargetPanel } from "./resolution/cameraTarget";
 import { compileTaskMap, creationAuthorization } from "./routing/capabilityRouter";
 import {
   panelScopeFingerprints,
@@ -47,7 +48,9 @@ export interface RunV3Result {
 function contextLine(state: { currentPageId: string | null; selection: { panelId?: string } }, doc: ProjectDocument): string {
   const page = state.currentPageId ? doc.pages[state.currentPageId] : undefined;
   const panelCount = page?.panelIds.length ?? 0;
-  return `Current page: ${page?.name ?? "none"} with ${panelCount} panel(s). Selection: ${state.selection.panelId ? "a panel is selected" : "none"}.`;
+  const selectedIndex = page && state.selection.panelId ? page.panelIds.indexOf(state.selection.panelId) : -1;
+  const selection = selectedIndex >= 0 ? `panel ${selectedIndex + 1} is selected` : "none";
+  return `Current page: ${page?.name ?? "none"} with ${panelCount} panel(s). Selection: ${selection}.`;
 }
 
 export async function runCreativeDirection(
@@ -81,21 +84,36 @@ export async function runCreativeDirection(
 
   if (map.clarificationNeeded) return { kind: "clarify", question: map.clarificationNeeded };
 
+  /**
+   * Camera target resolution (Phase 5): one panel, never a guess. Explicit
+   * target → selected panel → single-panel page; otherwise the run clarifies
+   * instead of aiming the camera at an arbitrary panel.
+   */
+  const cameraTarget = resolveCameraTargetPanel(map, doc, {
+    currentPageId: state.currentPageId,
+    selection: state.selection,
+  });
+  if (cameraTarget.kind === "ambiguous") return { kind: "clarify", question: cameraTarget.question };
+  const resolvedMap: CreativeTaskMap =
+    cameraTarget.kind === "resolved" && map.target.panel === undefined
+      ? { ...map, target: { ...map.target, panel: cameraTarget.panel } }
+      : map;
+
   sink.activity?.("Preparing characters");
-  const resolution = resolveTaskMap(map, doc);
+  const resolution = resolveTaskMap(resolvedMap, doc);
   if (resolution.unresolved.length > 0) {
     return { kind: "blocked", reason: `Could not place: ${resolution.unresolved.join(", ")}` };
   }
 
-  const { plan, warnings } = compileTaskMap(map, resolution);
+  const { plan, warnings } = compileTaskMap(resolvedMap, resolution);
   sink.plan?.(plan);
   for (const warning of warnings) sink.status?.(warning);
   const names = creationAuthorization(resolution);
   const guards: RunGuards = { creationAuthorized: names.length > 0, authorizedCreationNames: names };
   const generationCount = plan.steps.filter((s) => s.tool.startsWith("generate_")).length;
 
-  if (generationCount >= 3) return { kind: "confirm", plan, guards, generationCount, map, resolution };
-  return { kind: "ready", plan, guards, map, resolution };
+  if (generationCount >= 3) return { kind: "confirm", plan, guards, generationCount, map: resolvedMap, resolution };
+  return { kind: "ready", plan, guards, map: resolvedMap, resolution };
 }
 
 /** Execute a prepared V3 run and verify the result against the Task Map. */

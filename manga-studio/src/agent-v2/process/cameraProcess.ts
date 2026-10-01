@@ -7,19 +7,34 @@ import { isPuppetInstance } from "@/domain/puppetOps";
 import type { PuppetJoint } from "@/puppet/model";
 import { focalInstance } from "@/domain/stageOps";
 import { framingMatchesShot, subjectCoverage } from "@/domain/staging";
+import { applyPanelCamera, planPanelCamera } from "@/services/panelCamera";
 import type { RunContext } from "../types";
 
 // ─── Virtual manga stage (§18) ──────────────────────────────────────────────
 // The model states intent; these handlers convert it into panel geometry. The
 // LLM never computes coordinates.
 
-export function doSetCamera(ctx: RunContext, args: {
+/**
+ * Phase 5: the Agent is a CLIENT of the Panel Camera application service,
+ * exactly like the Inspector's camera controls.
+ *
+ *   intent args → ONE set-panel-camera command (undo boundary)
+ *   → planPanelCamera (the SAME CameraResolver verdict the UI button reads)
+ *   → LOCAL_TRANSFORM: deterministic staging already ran inside the command;
+ *     verify it, zero API calls.
+ *   → GENERATIVE_REDRAW: applyPanelCamera — the Phase 4.5 unified whole-panel
+ *     generation path. Never a pose-only hint, never fake staging first.
+ *
+ * The Agent never decides LOCAL vs GENERATIVE itself, never routes to a
+ * character/scene target, and never touches a provider.
+ */
+export async function doSetCamera(ctx: RunContext, args: {
   panel: number;
   shot?: ShotType;
   angle?: CameraAngle;
   lens?: CameraLens;
   mangaPerspective?: number;
-}): void {
+}): Promise<void> {
   const panelId = ctx.panelIdByNumber(args.panel);
   const result = ctx.dispatch({
     type: "set-panel-camera",
@@ -32,9 +47,26 @@ export function doSetCamera(ctx: RunContext, args: {
     },
   });
 
-  // Verify the geometry, not the metadata (§11). A camera step that stored a
-  // value but left the panel unchanged must not report success.
-  const camera = result.doc.panels[panelId].camera!;
+  const panel = result.doc.panels[panelId];
+  const camera = panel.camera!;
+  const plan = planPanelCamera(result.doc, { panelId, camera, perspective: panel.perspective });
+
+  if (plan.requiresRedraw) {
+    if (!plan.routable) {
+      throw new Error(
+        "This camera change needs the panel redrawn, but the panel has no visual participants to redraw — place a character, scene or object first.",
+      );
+    }
+    // ONE unified panel generation; requested-vs-applied state and the
+    // non-destructive render are the service's contract, not the Agent's.
+    const applied = await applyPanelCamera({ panelId, camera, perspective: panel.perspective });
+    if (!applied.assetId) throw new Error("Camera redraw produced no render");
+    return;
+  }
+
+  // LOCAL_TRANSFORM: the command restaged the panel deterministically. Verify
+  // the geometry, not the metadata (§11) — a camera step that stored a value
+  // but left the panel unchanged must not report success.
   if (args.shot) {
     const focal = focalInstance(result.doc, panelId);
     if (focal) {

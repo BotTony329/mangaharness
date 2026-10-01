@@ -5,34 +5,39 @@
  * the Creative Director's photographic language and the Editor's camera enums.
  *
  * The director says "dramatic", "intimate", "compressed"; the editor only
- * understands ShotType / CameraAngle / CameraLens. This module is the only
- * place that translation may happen — never the prompt, the schema, the UI,
- * or the executor.
+ * understands ShotType / CameraAngle / CameraLens / PerspectiveType. This
+ * module is the only place that translation may happen — never the prompt,
+ * the schema, the UI, or the executor.
  *
  * SOFT NORMALIZATION rule: an unknown creative word can never kill a run.
  * Camera style is not identity integrity — unmappable intent falls back to a
  * safe value and records a warning.
+ *
+ * Phase 5 boundary: this module is an INTENT COMPILER, nothing more. It never
+ * decides LOCAL_TRANSFORM vs GENERATIVE_REDRAW and never produces generation
+ * hints — that judgement belongs to the CameraResolver behind the Panel
+ * Camera application service, the same verdict the UI button reads.
  */
 
 export type EditorShot = "extreme-wide" | "wide" | "full" | "medium" | "close-up" | "extreme-close-up";
 export type EditorAngle = "eye-level" | "high" | "low" | "overhead" | "dutch";
 export type EditorLens = "wide" | "normal" | "telephoto";
+export type EditorPerspective = "one-point" | "two-point" | "three-point";
 
 export interface CreativeCameraInput {
   shot?: string;
   angle?: string;
   lens?: string;
+  /** Creative perspective words ("three-point perspective"). */
+  perspective?: string;
   dramaticIntent?: string;
-  requiresRedraw?: boolean;
 }
 
 export interface NormalizedCamera {
   shot?: EditorShot;
   angle?: EditorAngle;
   lens?: EditorLens;
-  /** Camera words the image model should hear, unchanged from the director. */
-  generationHint?: string;
-  requiresRedraw: boolean;
+  perspective?: EditorPerspective;
   warnings: string[];
 }
 
@@ -97,6 +102,15 @@ const LENS_MAP: Record<string, EditorLens> = {
   long: "telephoto",
 };
 
+const PERSPECTIVE_MAP: Record<string, EditorPerspective> = {
+  "one-point": "one-point",
+  "one-point perspective": "one-point",
+  "two-point": "two-point",
+  "two-point perspective": "two-point",
+  "three-point": "three-point",
+  "three-point perspective": "three-point",
+};
+
 function lookup<T extends string>(table: Record<string, T>, value: string | undefined): T | undefined {
   if (!value) return undefined;
   return table[value.trim().toLowerCase()];
@@ -121,14 +135,12 @@ export function resolveCameraIntent(input: CreativeCameraInput | undefined): Nor
     warnings.push(`Unsupported creative lens intent "${input.lens}"; using normal.`);
     lens = "normal";
   }
+  let perspective = lookup(PERSPECTIVE_MAP, input.perspective);
+  if (input.perspective && !perspective) {
+    warnings.push(`Unsupported creative perspective intent "${input.perspective}"; ignored.`);
+    perspective = undefined;
+  }
 
-  // The image model hears the director's own words, not editor jargon.
-  const generationHint = [input.angle, input.shot, input.dramaticIntent].filter(Boolean).join(", ") || undefined;
-
-  // Redraw when the viewpoint must be DRAWN — decided on normalized values so
-  // "heroic" redraws exactly like "low".
-  const requiresRedraw = Boolean(input.requiresRedraw) || angle === "low" || angle === "high" || angle === "overhead";
-
-  if (!shot && !angle && !lens && !generationHint) return undefined;
-  return { shot, angle, lens, generationHint, requiresRedraw, warnings };
+  if (!shot && !angle && !lens && !perspective) return undefined;
+  return { shot, angle, lens, perspective, warnings };
 }

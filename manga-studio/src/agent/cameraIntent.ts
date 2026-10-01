@@ -80,7 +80,7 @@ const ANGLES: [RegExp, CameraAngle][] = [
   [/\boverhead\b|\bbird'?s[- ]eye\b|\btop[- ]down\b|俯瞰|鸟瞰|顶视/i, "overhead"],
   [/\bdutch\b|\btilted camera\b|斜角|荷兰角|倾斜镜头/i, "dutch"],
   [/\blow[- ]angle\b|\bfrom below\b|\blow camera\b|低机位|仰角|仰拍|低角度/i, "low"],
-  [/\bhigh[- ]angle\b|\bfrom above\b|高机位|俯角|俯拍|高角度/i, "high"],
+  [/\bhigh[- ]angle\b|\bfrom above\b|高机位|俯角|俯拍|高角度|从上面看|从上往下/i, "high"],
   [/\beye[- ]level\b|平视|水平机位/i, "eye-level"],
 ];
 

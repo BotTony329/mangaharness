@@ -222,18 +222,23 @@ describe("golden V3: Creative Task Map → deterministic harness", () => {
     expect(JSON.stringify(interaction!.args)).not.toMatch(/char_|_placeholder/i);
   });
 
-  it("CASE 5: a redrawn camera reaches GENERATION upstream — never a post-hoc enlarge", async () => {
+  it("CASE 5: a redrawn viewpoint compiles to the panel camera step — the Resolver, not the plan, owns redraw", async () => {
     const { plan } = await runMap({
       ...MOMO_SCENE,
       scene: undefined,
-      cameraIntent: { shot: "full", angle: "low", dramaticIntent: "heroic tension", requiresRedraw: true },
+      cameraIntent: { shot: "full", angle: "low", dramaticIntent: "heroic tension" },
     });
+    // Phase 5: no camera words are dyed into pose generation. The intent is
+    // ONE canonical set_camera step; at execution the Panel Camera service
+    // redraws the WHOLE panel if the Resolver says GENERATIVE.
+    const cameraSteps = plan.steps.filter((s) => s.tool === "set_camera");
+    expect(cameraSteps).toHaveLength(1);
+    expect(cameraSteps[0].args.angle).toBe("low");
+    expect(cameraSteps[0].args.shot).toBe("full");
     const poseGeneration = plan.steps.find(
       (s) => s.tool === "generate_character_asset" && s.args.kind === "pose",
     );
-    expect(String(poseGeneration?.args.instruction)).toContain("low");
-    expect(String(poseGeneration?.args.instruction)).toContain("heroic tension");
-    expect(plan.steps.some((s) => s.tool === "set_camera")).toBe(true);
+    expect(String(poseGeneration?.args.instruction ?? "")).not.toContain("low");
   });
 
   it("CASE 6: no new state needed → no generation step is emitted for the actor", async () => {

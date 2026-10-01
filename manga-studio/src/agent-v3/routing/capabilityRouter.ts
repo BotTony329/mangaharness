@@ -16,17 +16,11 @@
 import type { AgentPlan } from "@/agent/tools/schemas";
 import type { CreativeTaskMap } from "../contract/creativeTaskMap";
 import type { Resolution } from "../resolution/entityResolver";
-import { resolveCameraIntent, type NormalizedCamera } from "./cameraSemantics";
+import { resolveCameraIntent } from "./cameraSemantics";
 import { resolveInteraction } from "./interactionSemantics";
 import { resolveDialogueDelivery } from "./dialogueSemantics";
 
 type Step = AgentPlan["steps"][number];
-
-/** Camera words that must reach GENERATION when the viewpoint is redrawn. */
-function cameraForGeneration(camera: NormalizedCamera | undefined): string | undefined {
-  if (!camera?.requiresRedraw) return undefined;
-  return camera.generationHint;
-}
 
 export interface CompiledPlan {
   plan: AgentPlan;
@@ -34,8 +28,8 @@ export interface CompiledPlan {
   warnings: string[];
 }
 
-function stateInstruction(action: string | undefined, poseDetails: string[], camera?: string): string | undefined {
-  const parts = [action, ...poseDetails, camera].filter(Boolean);
+function stateInstruction(action: string | undefined, poseDetails: string[]): string | undefined {
+  const parts = [action, ...poseDetails].filter(Boolean);
   return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
@@ -44,7 +38,6 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
   const defaultPanel = map.target.panel;
   const camera = resolveCameraIntent(map.cameraIntent);
   const warnings = [...(camera?.warnings ?? [])];
-  const cameraHint = cameraForGeneration(camera);
 
   // ── EnsureCharacter: create only what the director said is new ──
   for (const binding of resolution.participants.values()) {
@@ -85,8 +78,6 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
     const binding = resolution.participants.get(beat.actor);
     const actorId = binding?.status === "existing" ? binding.characterId : undefined;
 
-    // Camera-sensitive states are generated WITH the viewpoint, upstream of
-    // any composition — never a standing asset enlarged afterwards.
     if (beat.action || beat.poseDetails.length > 0) {
       steps.push({
         tool: "generate_character_asset",
@@ -94,7 +85,7 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
           characterName: beat.actor,
           ...(actorId ? { characterId: actorId } : {}),
           kind: "pose",
-          instruction: stateInstruction(beat.action, beat.poseDetails, cameraHint),
+          instruction: stateInstruction(beat.action, beat.poseDetails),
         },
         reason: "The state this beat actually needs",
       });
@@ -192,12 +183,34 @@ export function compileTaskMap(map: CreativeTaskMap, resolution: Resolution): Co
     });
   }
 
-  // ── SetCameraIntent (staging; redraw already happened upstream) ──
+  // ── SetCameraIntent ──
+  /**
+   * Phase 5: ONE camera intent = ONE patch = ONE service execution. Focus and
+   * perspective are part of the same intent; the focal step lands first so
+   * staging and any panel redraw both see it. The Agent never decides
+   * LOCAL/GENERATIVE here — `doSetCamera` hands the patch to the Panel Camera
+   * application service, whose CameraResolver verdict is the only judgement.
+   */
+  const cameraPanel = map.target.panel ?? map.beats[0]?.panel ?? 1;
+  if (map.cameraIntent?.focusSubject) {
+    steps.push({
+      tool: "set_focal_character",
+      args: { panel: cameraPanel, characterName: map.cameraIntent.focusSubject },
+      reason: "Camera focus subject",
+    });
+  }
+  if (camera?.perspective) {
+    steps.push({
+      tool: "set_perspective",
+      args: { panel: cameraPanel, type: camera.perspective },
+      reason: "Camera perspective intent",
+    });
+  }
   if (camera && (camera.shot || camera.angle || camera.lens)) {
     steps.push({
       tool: "set_camera",
       args: {
-        panel: map.target.panel ?? map.beats[0]?.panel ?? 1,
+        panel: cameraPanel,
         shot: camera.shot,
         angle: camera.angle,
         lens: camera.lens,

@@ -127,15 +127,20 @@ describe("camera semantic contract", () => {
     expect(Object.values(after.characters).some((c) => c.name === "Kiki")).toBe(true);
   });
 
-  it("CASE 7: dramatic low-angle intent still reaches GENERATION upstream", () => {
+  it("CASE 7: dramatic low-angle intent compiles to ONE panel camera step — never a pose-only hint", () => {
     const { plan } = compileRaw({
       ...KIKI_MAP,
       cameraIntent: { angle: "low", shot: "close emotional", dramaticIntent: "tension" },
     });
+    // Phase 5: the Agent no longer dyes pose generation with camera words.
+    // The intent lands as ONE canonical set_camera step; the CameraResolver
+    // behind the Panel Camera service decides LOCAL vs GENERATIVE at execution.
+    const camera = plan.steps.filter((s) => s.tool === "set_camera");
+    expect(camera).toHaveLength(1);
+    expect(camera[0].args.angle).toBe("low");
     const generation = plan.steps.find((s) => s.tool === "generate_character_asset" && s.args.kind === "pose");
-    // The image model hears the director's words — not a post-hoc scale/crop.
-    expect(String(generation?.args.instruction)).toContain("low");
-    expect(String(generation?.args.instruction)).toContain("tension");
+    expect(String(generation?.args.instruction ?? "")).not.toContain("low");
+    expect(String(generation?.args.instruction ?? "")).not.toContain("tension");
   });
 
   it("CASE 8: HARD failures stay hard — a null participant name still kills the map", () => {
@@ -148,7 +153,7 @@ describe("camera semantic contract", () => {
   });
 
   it("normalization boundary is pure: no camera word ever throws", () => {
-    const weird: CreativeTaskMap["cameraIntent"] = { shot: "🎆", angle: "sideways-ish", lens: "dreamy", requiresRedraw: false };
+    const weird: CreativeTaskMap["cameraIntent"] = { shot: "🎆", angle: "sideways-ish", lens: "dreamy" };
     const resolved = resolveCameraIntent(weird ?? undefined);
     expect(resolved?.warnings.length).toBe(3);
     expect(resolved?.lens).toBe("normal");

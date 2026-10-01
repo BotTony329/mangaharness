@@ -66,14 +66,22 @@ export const cameraIntentSchema = z.object({
   shot: z.string().max(40).optional(),
   angle: z.string().max(40).optional(),
   lens: z.string().max(40).optional(),
+  /** Creative perspective words ("three-point perspective"); normalized in routing/cameraSemantics. */
+  perspective: z.string().max(40).optional(),
+  /**
+   * "重点看 Yuri" / "focus on Yuri" — the PANEL's focal subject, by name.
+   * Focus is never a generation target: the camera still belongs to the
+   * panel and a redraw still generates the whole panel.
+   */
+  focusSubject: name.optional(),
   /** Free-text dramatic intent ("motion", "tension") — never compiled away. */
   dramaticIntent: z.string().max(120).optional(),
   /**
-   * True when the camera implies a redrawn viewpoint (low/high angle, extreme
-   * perspective): generation must receive the camera BEFORE composition, not
-   * a scale/crop afterwards.
+   * Phase 5: the director states INTENT ONLY. Whether the change is a local
+   * transform or a generative redraw is the CameraResolver's verdict behind
+   * the Panel Camera application service — never the model's guess. Any
+   * `requiresRedraw` a model still emits is stripped as an unknown key.
    */
-  requiresRedraw: z.boolean().default(false),
 });
 
 export const creativeTaskMapSchema = z.object({
