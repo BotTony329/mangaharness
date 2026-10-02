@@ -252,17 +252,24 @@ export function compileSequencePlan(plan: SequencePlan, doc: ProjectDocument): S
   for (const beat of plan.beats) {
     const panel = beat.panelNumber;
 
-    // 2. Camera before placement: framing re-stages the panel.
+    /**
+     * Camera steps are emitted AFTER placement and focus (see below): a
+     * generative camera redraws the whole panel from its participants, so the
+     * participants and the focal subject must already exist when the camera
+     * intent executes (v0.3 Phase 5/6). Staging still re-frames on the camera
+     * command, so LOCAL intents keep their original behaviour.
+     */
+    const cameraSteps: Step[] = [];
     if (beat.camera) {
       const { shot, angle, lens, roll } = beat.camera;
       if (shot || angle || lens || roll !== undefined) {
-        steps.push({
+        cameraSteps.push({
           tool: "set_camera",
           args: { panel, ...(shot ? { shot } : {}), ...(angle ? { angle } : {}), ...(lens ? { lens } : {}) },
         });
       }
       if (beat.camera.perspective) {
-        steps.push({ tool: "set_perspective", args: { panel, type: beat.camera.perspective } });
+        cameraSteps.push({ tool: "set_perspective", args: { panel, type: beat.camera.perspective } });
       }
     }
 
@@ -344,7 +351,10 @@ export function compileSequencePlan(plan: SequencePlan, doc: ProjectDocument): S
       });
     }
 
-    // 7. Dialogue last, so the bubble sits over a finished panel.
+    // 7. Camera last among visual steps: the unified render needs the cast.
+    steps.push(...cameraSteps);
+
+    // 8. Dialogue last, so the bubble sits over a finished panel.
     if (beat.dialogue) {
       steps.push({
         tool: "attach_bubble",

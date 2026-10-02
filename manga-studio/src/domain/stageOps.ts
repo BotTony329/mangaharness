@@ -81,6 +81,22 @@ export function setPanelCamera(doc: ProjectDocument, panelId: ID, patch: CameraP
     // on screen after a new generative request would display a stale camera as
     // if it were current. The source composition returns until regeneration.
     delete panel.activeCameraRenderAssetId;
+  } else if (
+    panel.activeCameraRenderAssetId &&
+    (stagingCamera.shot !== before.shot ||
+      stagingCamera.angle !== before.angle ||
+      after.lens !== before.lens ||
+      after.yaw !== before.yaw ||
+      after.mangaPerspectiveStrength !== before.mangaPerspectiveStrength)
+  ) {
+    /**
+     * LOCAL change with an active render (Phase 6 §10): the flat render was
+     * drawn under the previous camera and cannot be locally restaged, so it
+     * stops being current the moment any framing value moves. Roll is the one
+     * exception — the renderer rotates the live render node, so a Dutch tilt
+     * applies to the render itself and stays valid.
+     */
+    delete panel.activeCameraRenderAssetId;
   }
 
   // Angle shifts where the subject sits in frame, so it reframes as well as

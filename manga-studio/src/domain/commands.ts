@@ -31,6 +31,7 @@ import {
   type NewLanguageAssetInput,
 } from "./languageOps";
 import { cloneDoc, panelPxRect, touch } from "./docHelpers";
+import { cameraRenderInvalidationPanels, invalidateCameraRenders } from "./cameraRender";
 import { reshapePanel } from "./panelOps";
 import { addSceneRelationship, setSceneCharacterSemantics, setSceneContinuity } from "./sceneOps";
 import { addCustomStyle, setProjectStyle } from "./styleOps";
@@ -227,12 +228,19 @@ const ATTACHMENT_AFFECTING = new Set<DomainCommand["type"]>([
 
 export function applyDomainCommand(doc: ProjectDocument, command: DomainCommand): CommandResult {
   const result = applyCommandCore(doc, command);
-  if (!ATTACHMENT_AFFECTING.has(command.type)) return result;
-  // The pre-command document is consulted too, because a deletion removes the
-  // very item whose panel we need — and a deleted subject is exactly when
-  // stale attachments must be released.
-  const panelId = affectedPanelId(result.doc, command) ?? affectedPanelId(doc, command);
-  return panelId ? { ...result, doc: applyAttachments(result.doc, panelId) } : result;
+  let next = result.doc;
+  if (ATTACHMENT_AFFECTING.has(command.type)) {
+    // The pre-command document is consulted too, because a deletion removes the
+    // very item whose panel we need — and a deleted subject is exactly when
+    // stale attachments must be released.
+    const panelId = affectedPanelId(next, command) ?? affectedPanelId(doc, command);
+    if (panelId) next = applyAttachments(next, panelId);
+  }
+  // Camera Render lifecycle (Phase 6): a visual source mutation retires the
+  // panel's derived render; editorial overlay edits never reach this set.
+  const stalePanels = cameraRenderInvalidationPanels(doc, command);
+  if (stalePanels.length > 0) next = invalidateCameraRenders(next, stalePanels);
+  return next === result.doc ? result : { ...result, doc: next };
 }
 
 function affectedPanelId(doc: ProjectDocument, command: DomainCommand): ID | undefined {
