@@ -129,5 +129,4 @@ undo 恢复 camera 与 composition(A8)。与 UI 操作同一 history 语义。
 
 ## Live Verification
 
-UNVERIFIED — 待人工按任务书 §24 执行(选中 Yuri+Tokyo Street panel,输入
-"改成高机位中景,以 Yuri 为主体",核验 12 项)。
+LIVE VERIFIED(2026-10-02 人工验收通过,见 Phase 6 任务书 §0:AGENT CAMERA INTEGRATION = LIVE VERIFIED)。
